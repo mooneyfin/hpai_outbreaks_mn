@@ -12,6 +12,7 @@ data/*
 data/objects/*
 !data/objects/case_crossover_df.RDS
 !data/objects/timeseries_clean.RDS
+!data/objects/casecrossover_model.RDS
 
 # Global ignore
 .DS_Store

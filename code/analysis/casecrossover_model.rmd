@@ -84,7 +84,7 @@ cb_relative_humidity <- crossbasis(
   x = as.matrix(case_crossover_df[, paste0("relative_humidity_Lag", 0:4)]),
   lag = c(0, 4),
   argvar = list(fun = "lin"),
-  arglag = list(fun = "ns", degree = 2)
+  arglag = list(fun = "ns", df = 2)
 )
 
 # Runoff: linear, poly(degree = 2)
@@ -92,7 +92,7 @@ cb_runoff <- crossbasis(
   x = as.matrix(case_crossover_df[, paste0("runoff_Lag", 0:4)]),
   lag = c(0, 4),
   argvar = list(fun = "lin"),
-  arglag = list(fun = "ns", degree = 2)
+  arglag = list(fun = "ns", df = 2)
 )
 
 # Shortwave Radiation: linear, poly(degree = 4)
@@ -141,24 +141,24 @@ cb_wind_speed <- crossbasis(
   x = as.matrix(case_crossover_df[, paste0("wind_speed_Lag", 0:4)]),
   lag = c(0, 4),
   argvar = list(fun = "lin"),
-  arglag = list(fun = "poly", df = 2)
+  arglag = list(fun = "ns", df = 2)
 )
 
-# # Anseriformes:
- cb_anseri <- crossbasis(
-   x = as.matrix(case_crossover_df[, paste0("anseriformes_Lag", 0:8)]),
-   lag = c(0, 8),
-   argvar = list(fun = "lin"),
-   arglag = list(fun = "poly", degree = 2)
- )
- 
-# # Predator:
- cb_predators <- crossbasis(
-   x = as.matrix(case_crossover_df[, paste0("predators_Lag", 0:8)]),
-   lag = c(0, 8),
-   argvar = list(fun = "lin"),
-   arglag = list(fun = "poly", degree = 2)
- )
+# # # Anseriformes:
+#  cb_anseri <- crossbasis(
+#    x = as.matrix(case_crossover_df[, paste0("anseriformes_Lag", 0:8)]),
+#    lag = c(0, 8),
+#    argvar = list(fun = "lin"),
+#    arglag = list(fun = "poly", degree = 2)
+#  )
+#  
+# # # Predator:
+#  cb_predators <- crossbasis(
+#    x = as.matrix(case_crossover_df[, paste0("predators_Lag", 0:8)]),
+#    lag = c(0, 8),
+#    argvar = list(fun = "lin"),
+#    arglag = list(fun = "poly", degree = 2)
+#  )
 
 
 
@@ -260,21 +260,21 @@ cb_flex_wind_speed <- crossbasis(
   arglag = list(fun = "poly", degree = 4)
 )
 
-# Anseriformes:
-cb_flex_anseri <- crossbasis(
-  x = as.matrix(case_crossover_df[, paste0("anseriformes_Lag", 0:8)]),
-   lag = c(0, 8),
-   argvar = list(fun = "lin"),
-   arglag = list(fun = "poly", degree = 2)
- )
- 
-# Predator: 
- cb_flex_predators <- crossbasis(
-   x = as.matrix(case_crossover_df[, paste0("predators_Lag", 0:8)]),
-   lag = c(0, 8),
-   argvar = list(fun = "lin"),
-   arglag = list(fun = "poly", degree = 2)
- )
+# # Anseriformes:
+# cb_flex_anseri <- crossbasis(
+#   x = as.matrix(case_crossover_df[, paste0("anseriformes_Lag", 0:8)]),
+#    lag = c(0, 8),
+#    argvar = list(fun = "lin"),
+#    arglag = list(fun = "poly", degree = 2)
+#  )
+#  
+# # Predator: 
+#  cb_flex_predators <- crossbasis(
+#    x = as.matrix(case_crossover_df[, paste0("predators_Lag", 0:8)]),
+#    lag = c(0, 8),
+#    argvar = list(fun = "lin"),
+#    arglag = list(fun = "poly", degree = 2)
+#  )
 
 ```
 
