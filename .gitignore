@@ -14,3 +14,4 @@ data/objects/*
 !data/objects/timeseries_clean.RDS
 
 # Global ignore
+.DS_Store
