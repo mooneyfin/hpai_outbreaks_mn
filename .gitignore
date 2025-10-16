@@ -1,0 +1,16 @@
+# R / RStudio
+.Rproj.user/
+.Rhistory
+.RData
+.Ruserdata
+
+# Ignore all data except key objects
+data/*
+!data/.keep
+!data/objects/
+!data/objects/.keep
+data/objects/*
+!data/objects/case_crossover_df.RDS
+!data/objects/timeseries_clean.RDS
+
+# Global ignore

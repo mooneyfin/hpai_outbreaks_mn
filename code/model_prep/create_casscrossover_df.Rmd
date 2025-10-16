@@ -1,0 +1,351 @@
+---
+title: "create_casecrossover"
+author: "Fintan Mooney"
+date: "2025-10-15"
+output: html_document
+---
+
+# This R markdown file creates the casecrossover dataframe for the projet on the association between meterological conditons, climate, and wild bird abundance, on risk of highly pathogenic avian influenza (HPAI) outbreaks in Minnesota farms during 2022
+
+```{r setup, include=FALSE}
+ 
+knitr::opts_chunk$set(echo = TRUE)
+ 
+# ---- Package setup ----
+packages <- c(
+  "MatchIt", "readr", "sf", "survival", "dlnm", "gtsummary", "kableExtra",
+  "tidyr", "tibble", "mgcv", "ggplot2", "car", "patchwork", "corrplot",
+  "purrr", "ggspatial", "gt", "flextable", "officer", "conflicted",
+  "dplyr", "data.table", "here"
+)
+
+installed <- packages %in% rownames(installed.packages())
+if (any(!installed)) install.packages(packages[!installed])
+
+invisible(lapply(packages, library, character.only = TRUE))
+
+# Resolve conflicts
+conflict_prefer("select", "dplyr")
+conflict_prefer("filter", "dplyr")
+
+# Project folders (e.g., where the .Rproj file is)
+base_folder <- here()
+data_folder <- here("data")
+env_folder <- here("data", "EarthEngine_MN")
+objects_folder <-here("data", "objects")
+```
+
+
+## Read in the timeseries dataset
+
+```{r, read in timeseries dataset}
+
+# Timeseries
+fishnet_timeseries_clean <- readRDS(file.path(objects_folder, "fishnet_timeseries.RDS"))
+
+fishnet_timeseries_clean <- fishnet_timeseries_clean %>%
+  arrange(zone_id, week) %>%
+  # 1. Drop all columns that end with ".x"
+  select(-ends_with(".x")) %>%
+  # 2. Rename columns ending with ".y" to remove the suffix
+  rename_with(~ str_remove(.x, "\\.y$"), ends_with(".y"))
+
+# Spatial GPKG
+gpkg_path <- file.path(data_folder, "Fishnet_Timeseries_10km.gpkg")
+fishnet_weeks <- st_read(gpkg_path)
+
+## Simplify
+fishnet_weeks <- fishnet_weeks %>%
+  dplyr::select(week, shape_length, shape_area, zone_id, geom)
+
+```
+
+## Map Cases in Casecrossover Model
+
+```{r, casecrossover map}
+
+
+# Map 
+# Identify case zones
+case_zone_ids <- fishnet_timeseries_clean %>%
+  filter(any_outbreak == 1) %>%
+  distinct(zone_id)
+
+# Subset spatial features
+case_zones_sf <- fishnet_weeks %>% filter(zone_id %in% case_zone_ids$zone_id)
+control_zones_sf <- fishnet_weeks %>% filter(!(zone_id %in% case_zone_ids$zone_id))
+
+# Define output paths
+case_gpkg_out    <- file.path(data_folder, "Case_Zones.gpkg")
+control_gpkg_out <- file.path(data_folder, "Control_Zones.gpkg")
+
+# Export as GPKG
+st_write(case_zones_sf, case_gpkg_out,    delete_layer = TRUE)
+st_write(control_zones_sf, control_gpkg_out, delete_layer = TRUE)
+
+# Reproject to EPSG:3857 (Web Mercator) for basemap compatibility
+case_zones_sf_proj <- st_transform(case_zones_sf, 3857)
+control_zones_sf_proj <- st_transform(control_zones_sf, 3857)
+
+# Plot with basemap
+ggplot() +
+  # Add simple basemap
+  annotation_map_tile(type = "cartolight", zoomin = 0) +
+
+  # Control zones: outlines
+  geom_sf(data = control_zones_sf_proj, fill = NA, color = "lightblue", linewidth = 0.05) +
+
+  # Case zones: bold fill
+  geom_sf(data = case_zones_sf_proj, fill = "#d73027", color = "red", linewidth = 0.1, alpha = 0.9) +
+
+  # Scale bar
+  annotation_scale(location = "bl", width_hint = 0.3, text_cex = 0.75, line_width = 0.5, style = "ticks") +
+
+  # Theme and layout
+  theme_void(base_size = 12) +
+  theme(
+    plot.title = element_text(size = 12, face = "bold", hjust = 0.5),
+    plot.caption = element_text(size = 10, hjust = 0.5, face = "italic"),
+    plot.background = element_rect(fill = "white", color = NA)
+  ) +
+  coord_sf(expand = FALSE) +
+  labs(
+    title = "HPAI Outbreak Case Zones in Minnesota (2022)"
+  )
+```
+
+## Define Controls and Create Case-Crossover Dataset
+```{r, define controls}
+
+# Match
+case_zones <- fishnet_timeseries_clean %>%
+  filter(any_outbreak == 1) 
+
+# Get binary cases: one row per zone_id and week with outbreak
+cases <- case_zones %>%
+  filter(outbreak_count > 0) %>%
+  distinct(zone_id, case_week = week)  # one case per outbreak week
+
+# Deduplicate case_zones to avoid many-to-many join issues
+case_zones_unique <- case_zones %>%
+  distinct(zone_id, week, .keep_all = TRUE)
+
+# Create full lag grid (1 to 4 weeks before each case)
+case_lags <- cases %>%
+  crossing(lag = 1:4) %>%
+  mutate(control_week = case_week - lag) %>%
+  filter(control_week >= 1)
+
+# Controls (week-lagged, outbreak_binary = 0)
+controls <- case_lags %>%
+  left_join(case_zones_unique, by = c("zone_id", "control_week" = "week")) %>%
+  mutate(
+    case_control = "control",
+    outbreak_binary = 0,
+    stratum_id = paste(zone_id, case_week, sep = "_"),
+    week = control_week
+  ) %>%
+  dplyr::select(-outbreak_count)
+
+# Cases (outbreak_binary = 1)
+case_data <- cases %>%
+  left_join(case_zones_unique, by = c("zone_id", "case_week" = "week")) %>%
+  mutate(
+    case_control = "case",
+    outbreak_binary = 1,
+    stratum_id = paste(zone_id, case_week, sep = "_"),
+    week = case_week,
+    control_week = NA
+  ) %>%
+  dplyr::select(-outbreak_count)
+
+# Combine cases and controls
+case_crossover_df <- bind_rows(case_data, controls)
+
+# Summary check
+table(case_crossover_df$case_control)
+sum(case_crossover_df$outbreak_binary)
+
+colnames(case_crossover_df)
+
+```
+
+
+# Check distribution of casecrossover variables
+
+```{r, distribution caseccrossover}
+
+# Move from m to mm
+
+case_crossover_df <- case_crossover_df %>%
+  mutate(
+    runoff = runoff * 1000,
+    precipitation = precipitation * 1000
+  )
+
+
+# Variables to inspect
+vars_to_check <- c(
+  "total_bird_abundance",   
+  "leaf_area_index", "longwave_radiation", "runoff", "shortwave_radiation",
+  "snow_density", "soil_moisture", "temperature",
+  "evapotranspiration", "precipitation", "wind_speed", "relative_humidity", "anseriformes", "predators"
+)
+
+# Create histograms
+plots <- lapply(vars_to_check, function(var) {
+  ggplot(case_crossover_df, aes_string(x = var)) +
+    geom_histogram(bins = 50, fill = "steelblue", color = "white") +
+    labs(title = var) +
+    theme_minimal()
+})
+
+# Display plots in a grid (adjust number of columns if needed)
+wrap_plots(plots, ncol = )
+
+library(e1071)
+# Subset to variables
+numeric_vars <- case_crossover_df %>%
+  select(all_of(vars_to_check))
+
+# Initialize result storage
+shapiro_results <- lapply(names(numeric_vars), function(var) {
+  x <- numeric_vars[[var]]
+  x <- na.omit(x)
+  
+  # Only apply Shapiro if <= 5000 non-NA values
+  shapiro_p <- if (length(x) <= 5000) {
+    shapiro.test(x)$p.value
+  } else {
+    NA
+  }
+  
+  data.frame(
+    variable = var,
+    skewness = skewness(x),
+    shapiro_p = shapiro_p,
+    n = length(x)
+  )
+})
+
+# Combine into summary table
+shapiro_df <- bind_rows(shapiro_results)
+
+# Flag non-normality
+shapiro_df <- shapiro_df %>%
+  mutate(non_normal = ifelse(!is.na(shapiro_p) & shapiro_p < 0.05, TRUE, FALSE)) %>%
+  arrange(desc(abs(skewness)))
+
+# View top
+print(shapiro_df)
+
+### Need to transform runoff, total_bird_abundance, specific humidity, and precipitation, anseriformes and predators
+
+
+```
+
+## Create lagged variables
+
+```{r, lag variables}
+
+# Drop duplicates from original_df to ensure safe left_joins
+case_zones_unique <- case_zones %>%
+  distinct(zone_id, week, .keep_all = TRUE)
+
+
+add_lagged_predictors <- function(df, original_df, vars, id_col = "zone_id", time_col = "week", max_lag = 4) {
+  for (varname in vars) {
+    for (lag in 0:max_lag) {
+      lagged_col <- paste0(varname, "_Lag", lag)
+      df <- df %>%
+        left_join(
+          original_df %>%
+            dplyr::select(!!sym(id_col), !!sym(time_col), !!sym(varname)) %>%
+            rename(!!lagged_col := !!sym(varname)) %>%
+            mutate(!!time_col := !!sym(time_col) + lag),
+          by = c(id_col, time_col)
+        )
+    }
+  }
+  return(df)
+}
+
+
+vars_to_lag <- c( "total_bird_abundance",
+                 "leaf_area_index",
+                 "longwave_radiation",
+                 "runoff",
+                 "shortwave_radiation",
+                 "snow_density",
+                 "soil_moisture",
+                 "temperature",
+                 "evapotranspiration",
+                 "precipitation",
+                 "wind_speed", 
+                 "relative_humidity",
+                 "anseriformes", "predators"
+                 )
+
+case_crossover_df <- add_lagged_predictors(
+  df = case_crossover_df,
+  original_df = case_zones_unique,
+  vars = vars_to_lag,
+  max_lag = 4
+)
+
+
+
+
+```
+
+
+## Transform and Scale Variables
+```{r, transform variables}
+
+# Apply log1p only to skewed ones before scaling
+for (var in c("total_bird_abundance", "runoff", "precipitation",  "anseriformes", "predators")) {
+  for (lag in 0:4) {
+    col <- paste0(var, "_Lag", lag)
+    if (col %in% names(case_crossover_df)) {
+      case_crossover_df[[col]] <- log1p(case_crossover_df[[col]])
+    }
+  }
+}
+
+```
+
+```{r, scale}
+
+# Filter to 2022 lag variables
+
+vars_to_lag <- c("total_bird_abundance",
+                 "leaf_area_index",
+                 "longwave_radiation",
+                 "runoff",
+                 "shortwave_radiation",
+                 "snow_density",
+                 "soil_moisture",
+                 "temperature",
+                 "evapotranspiration",
+                 "precipitation",
+                 "wind_speed", 
+                 "relative_humidity",
+                 "anseriformes", "predators")
+
+# Scale all lags (Lag0 to Lag4 for each variable)
+for (var in vars_to_lag) {
+  for (lag in 0:4) {
+    lagged_col <- paste0(var, "_Lag", lag)
+    case_crossover_df[[lagged_col]] <- scale(case_crossover_df[[lagged_col]])
+  }
+}
+```
+
+### Export casecrossover df
+
+```{r, export casecrossover df}
+
+saveRDS(case_crossover_df, file.path(objects_folder,"case_crossover_df.RDS"))
+
+
+```

@@ -1,0 +1,534 @@
+---
+title: "create_timeseries_df"
+author: "Fintan Mooney"
+date: "2025-10-15"
+output: html_document
+---
+
+# This R markdown file creates the timeseries dataframe for the projet on the association between meterological conditons, climate, and wild bird abundance, on risk of highly pathogenic avian influenza (HPAI) outbreaks in Minnesota farms during 2022
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+ 
+# ---- Package setup ----
+packages <- c(
+  "MatchIt", "readr", "sf", "survival", "dlnm", "gtsummary", "kableExtra",
+  "tidyr", "tibble", "mgcv", "ggplot2", "car", "patchwork", "corrplot",
+  "purrr", "ggspatial", "gt", "flextable", "officer", "conflicted",
+  "dplyr", "data.table", "here"
+)
+
+installed <- packages %in% rownames(installed.packages())
+if (any(!installed)) install.packages(packages[!installed])
+
+invisible(lapply(packages, library, character.only = TRUE))
+
+# Resolve conflicts
+conflict_prefer("select", "dplyr")
+conflict_prefer("filter", "dplyr")
+
+# Project folders (e.g., where the .Rproj file is)
+base_folder <- here()
+data_folder <- here("data")
+env_folder <- here("data", "EarthEngine_MN")
+objects_folder <-here("data", "objects")
+
+```
+
+## Bring in fishnet
+
+```{r, bring in fisnet}
+gpkg_path <- file.path(data_folder, "Fishnet_Timeseries_10km.gpkg")
+
+# Read 
+fishnet_weeks <- st_read(gpkg_path)
+
+colnames(fishnet_weeks)
+
+```
+
+
+### Simplify fishnet timeseries 
+
+```{r, simplify fishnet weeks}
+fishnet_weeks <- fishnet_weeks %>%
+  dplyr::select(week, shape_length, shape_area, zone_id, geom)
+```
+
+## Read in climate data
+
+```{r, read in climate data}
+
+data2022 <- read.csv(file.path(data_folder, "mn_weekly_era5land_2022.csv"))
+
+data2022$week_start <- as.Date(as.character(data2022$week_start), format = "%Y%m%d")
+
+# Create week index relative to 2022-01-01
+data2022$week <- as.integer(floor(difftime(data2022$week_start, as.Date("2022-01-01"), units = "weeks")) + 1)
+range(data2022$week)
+
+colnames(data2022)
+```
+
+## Create 5-year climate periods
+
+```{r, create baselines}
+
+# Set folder and file list
+all_years <- 1997:2022
+files <- file.path(env_folder, paste0("mn_weekly_era5land_", all_years, ".csv"))
+
+# Read all data with year column
+all_data <- map2_dfr(files, all_years, ~ read_csv(.x) %>% mutate(year = .y))
+
+# Convert week_start to Date
+all_data <- all_data %>%
+  mutate(week_start = as.Date(as.character(week_start), format = "%Y%m%d"))
+
+data2022 <- all_data %>% dplyr::filter(year == 2022)
+data2022$week <- as.integer(floor(difftime(data2022$week_start, as.Date("2022-01-01"), units = "weeks")) + 1)
+range(data2022$week)
+
+baseline_10yr <- all_data %>% filter(year %in% 2012:2021)  # 10-year: 2012–2021
+baseline_15yr <- all_data %>% filter(year %in% 2007:2021)  # 15-year: 2007–2021
+baseline_20yr <- all_data %>% filter(year %in% 2002:2021)  # 20-year: 2002–2021
+baseline_25yr <- all_data %>% filter(year %in% 1997:2021)  # 25-year: 1997–2021
+
+
+```
+
+## Summarize climatology
+
+```{r, summarize climatology}
+vars <- c("leaf_area_index", "longwave_radiation", "runoff_sum", "shortwave_radiation",
+          "snow_density", "soil_moisture", "relative_humidity", "temperature",
+          "evapotranspiration", "precipitation", "wind_speed", "surface_pressure" )
+
+baseline_10yr <- baseline_10yr %>%
+  mutate(week = lubridate::isoweek(week_start)) %>%
+  filter(week <= 52)
+
+baseline_15yr <- baseline_15yr %>%
+  mutate(week = lubridate::isoweek(week_start)) %>%
+  filter(week <= 52)
+
+baseline_20yr <- baseline_20yr %>%
+  mutate(week = lubridate::isoweek(week_start)) %>%
+  filter(week <= 52)
+
+baseline_25yr <- baseline_25yr %>%
+  mutate(week = lubridate::isoweek(week_start)) %>%
+  filter(week <= 52)
+
+# Function to summarize climatology
+summarize_climatology <- function(df) {
+  df %>%
+    group_by(zone_id, week) %>%
+    summarise(across(all_of(vars), list(mean = mean, sd = sd), .names = "{.col}_{.fn}"), .groups = "drop")
+}
+
+clim_10yr <- summarize_climatology(baseline_10yr)
+clim_15yr <- summarize_climatology(baseline_15yr)
+clim_20yr <- summarize_climatology(baseline_20yr)
+clim_25yr <- summarize_climatology(baseline_25yr)
+```
+
+### Calculate z scores comparing 2022 to the 10yr, 15yr, 20yr, and 25yr means
+
+```{r, join and calcualte z scores}
+
+data2022_z <- data2022 %>%
+  left_join(clim_10yr, by = c("zone_id", "week")) %>%
+  left_join(clim_15yr, by = c("zone_id", "week"), suffix = c("_10yr", "_15yr")) %>%
+  left_join(clim_20yr, by = c("zone_id", "week"), suffix = c("_15yr", "_20yr")) %>%
+  left_join(clim_25yr, by = c("zone_id", "week"), suffix = c("_20yr", "_25yr"))
+
+# Compute z-scores
+for (v in vars) {
+  for (yr in c(10, 15, 20, 25)) {
+    m <- paste0(v, "_mean_", yr, "yr")
+    s <- paste0(v, "_sd_", yr, "yr")
+    z <- paste0(v, "_z_", yr, "yr")
+
+    data2022_z[[z]] <- (data2022_z[[v]] - data2022_z[[m]]) / data2022_z[[s]]
+  }
+}
+
+
+
+```
+
+#### Look at distribution of z-scores
+
+```{r, z-score distribution}
+
+# Gather z-score columns into long format
+z_cols <- grep("_z_(10yr|15yr|20yr|25yr)$", names(data2022_z), value = TRUE)
+
+z_long <- data2022_z %>%
+  select(all_of(z_cols)) %>%
+  pivot_longer(cols = everything(), names_to = "variable", values_to = "z_score")
+
+# Plot density by variable
+ggplot(z_long, aes(x = z_score)) +
+  geom_density(fill = "steelblue", alpha = 0.6) +
+  facet_wrap(~ variable, scales = "free") +
+  theme_minimal() +
+  labs(title = "Distribution of Climate Z-Scores (2022 vs 10yr and 25yr)",
+       x = "Z-score", y = "Density")
+
+z_summary <- z_long %>%
+  group_by(variable) %>%
+  summarise(
+    min = min(z_score, na.rm = TRUE),
+    p01 = quantile(z_score, 0.01, na.rm = TRUE),
+    p99 = quantile(z_score, 0.99, na.rm = TRUE),
+    max = max(z_score, na.rm = TRUE),
+    outlier_prop = mean(abs(z_score) > 4, na.rm = TRUE)
+  )
+
+print(z_summary)
+
+```
+
+#### There are outliers, so we opt to winsorize 
+
+```{r, winsorize z-scores }
+
+# Custom winsorization function with summary
+winsorize_with_summary <- function(x, varname, limit = 4) {
+  before_outliers <- sum(x < -limit | x > limit, na.rm = TRUE)
+  x_winsorized <- pmin(pmax(x, -limit), limit)
+  message(sprintf("%s: %d values winsorized (limit ±%s)", varname, before_outliers, limit))
+  return(x_winsorized)
+}
+
+# Apply to all z-score columns with summary
+for (v in z_cols) {
+  data2022_z[[v]] <- winsorize_with_summary(data2022_z[[v]], v, limit = 4)
+}
+
+
+```
+
+## Read in feedlot data (contains info on outbreaks)
+```{r, add feedlot data}
+
+fishnet_weeks <- data2022_z
+
+# Define paths
+first_path  <- file.path(data_folder, "feedlots_timeseries_10km_simple_first.shp")
+second_path <- file.path(data_folder, "feedlots_timeseries_10km_simple_second.shp")
+
+# Read shapefiles
+feedlot_first  <- st_read(first_path)
+feedlot_second <- st_read(second_path)
+
+# Combine into one spatial object
+feedlot_merged <- rbind(feedlot_first, feedlot_second)
+
+nrow(feedlot_merged)      # Total rows
+st_geometry_type(feedlot_merged)  # Geometry type
+unique(feedlot_merged$week)       # Confirm week coverage
+
+colnames(fishnet_weeks)
+colnames(feedlot_merged)
+
+feedlot_meged <- st_drop_geometry(feedlot_merged)
+
+# Make sure week is lowercase and integer
+feedlot_merged <- feedlot_merged %>%
+  rename(
+    outbreak_id     = outbreak_i,
+    outbreak_dist   = Outbreak_D,
+    outbreak_week   = Outbreak_W,
+    outbreak_count  = Outbreak_C,
+    close_outbreak  = Close_Outb,
+    week            = Week  # standardize to lowercase
+  ) %>%
+  mutate(week = as.integer(week))
+
+feedlot_zone_week <- feedlot_merged %>%
+  group_by(zone_id, week) %>%
+  summarise(
+    outbreak_binary     = as.integer(any(outbreak_id == 1, na.rm = TRUE)),
+    outbreak_dist   = min(outbreak_dist, na.rm = TRUE),
+    outbreak_week   = min(outbreak_week, na.rm = TRUE),
+    outbreak_count  = sum(outbreak_count, na.rm = TRUE),
+    close_outbreak  = min(close_outbreak, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+fishnet_weeks <- st_drop_geometry(fishnet_weeks)
+
+fishnet_weeks <- fishnet_weeks %>%
+  mutate(week = as.integer(week)) %>%
+  left_join(feedlot_zone_week, by = c("zone_id", "week")) 
+
+fishnet_weeks %>%
+  summarise(
+    total_outbreaks = sum(outbreak_count, na.rm = TRUE),
+    mean_outbreak_binary = sum(outbreak_binary, na.rm = TRUE),
+    mean_outbreak_dist = mean(outbreak_dist, na.rm = TRUE),
+    total_close_outbreaks = mean(close_outbreak, na.rm = TRUE)
+  )
+
+fishnet_weeks <- fishnet_weeks %>%
+  select(-outbreak_binary) %>%  # Remove if exists
+  mutate(outbreak_binary = if_else(!is.na(outbreak_count) & outbreak_count > 0, 1L, 0L))
+
+fishnet_timeseries <- fishnet_weeks
+```
+
+
+
+```{r, read in full bird data}
+
+# Load the data
+csv_path <- file.path(data_folder, "all-mn-feedlot-species-abundance-070125.csv")
+bird_abundance <- fread(csv_path)
+
+# Quick check
+bird_abundance[, .N]
+head(bird_abundance)
+str(bird_abundance)
+unique(bird_abundance$species)
+
+
+
+# Define species groups
+anseriformes <- c(
+  "mallar3", "cangoo", "wooduc", "rinduc", "comgol", "norsho",
+  "buffle", "lessca", "rebmer", "gnwtea", "gadwal", "ambduc",
+  "rudduc", "rethaw", "truswa", "commer"
+)
+
+predators <- c(
+  "buwtea", "grhowl", "amwpel", "baleag", "brdowl"
+)
+
+# Melt from wide to long: assume all columns except first few are weeks
+week_cols <- setdiff(names(bird_abundance), c("zone_id", "species"))
+bird_long <- melt(
+  bird_abundance,
+  id.vars = c("zone_id", "species"),
+  measure.vars = week_cols,
+  variable.name = "week",
+  value.name = "abundance"
+)
+
+# Add group labels
+bird_long[, group := fifelse(species %in% anseriformes, "anseriformes", "predators")]
+bird_long[, week := as.integer(gsub("week_", "", week))]
+
+# Summarize: mean percent abundance per group per zone_id-week
+bird_grouped <- bird_long[
+  , .(
+    group_sum = sum(abundance, na.rm = TRUE),
+    species_n = uniqueN(species)
+  ),
+  by = .(zone_id, week, group)
+]
+
+bird_grouped[, group_avg := group_sum / species_n]
+
+# Pivot to wide: one column per group
+bird_wide <- dcast(
+  bird_grouped,
+  zone_id + week ~ group,
+  value.var = "group_avg",
+  fill = 0
+)
+
+# Compute total average abundance across all birds
+bird_wide[, total_bird_abundance := anseriformes + predators]
+
+
+# Convert to data.table (dropping geometry)
+zone_week_grid <- unique(
+  as.data.table(st_drop_geometry(fishnet_timeseries))[, .(zone_id, week)]
+)
+setkey(bird_wide, zone_id, week)
+setkey(zone_week_grid, zone_id, week)
+
+bird_wide_full <- merge(
+  zone_week_grid,
+  bird_wide,
+  by = c("zone_id", "week"),
+  all.x = TRUE
+)
+
+# Fill missing with 0
+#bird_wide_full[is.na(anseriformes), anseriformes := 0]
+#bird_wide_full[is.na(predators), predators := 0]
+#bird_wide_full[is.na(total_bird_abundance), total_bird_abundance := 0]
+
+# Ensure both are data.tables
+setDT(fishnet_timeseries)
+setDT(bird_wide_full)
+
+# Set keys
+setkey(fishnet_timeseries, zone_id, week)
+setkey(bird_wide_full, zone_id, week)
+
+# Join: add bird abundance to fishnet
+fishnet_with_birds <- merge(
+  fishnet_timeseries,
+  bird_wide_full,
+  by = c("zone_id", "week"),
+  all.x = TRUE
+)
+
+fishnet_with_birds <- fishnet_with_birds[!is.na(fishnet_with_birds$total_bird_abundance), ]
+
+fishnet_timeseries <- fishnet_with_birds
+
+# Summarize total bird abundance by zone_id
+zone_zero_summary <- fishnet_with_birds[
+  , .(total_abundance = sum(total_bird_abundance, na.rm = TRUE)), 
+  by = zone_id
+]
+
+# Filter to zone_ids with all zero bird abundance
+zone_ids_all_zero <- zone_zero_summary[total_abundance == 0, zone_id]
+
+# Subset spatial layer to zones with all-zero birds
+zones_all_zero_sf <- fishnet_timeseries[zone_id %in% zone_ids_all_zero]
+
+
+# Tag all-zero zones in the fishnet data
+fishnet_timeseries[, bird_zero := ifelse(zone_id %in% zone_ids_all_zero, "No Birds", "Has Birds")]
+
+# # If not already an sf object, convert it
+# fishnet_sf <- st_as_sf(fishnet_timeseries)
+# 
+# # Reproject to WGS 84 (for plotting or basemaps)
+# fishnet_sf <- st_transform(fishnet_sf, 4326)
+# 
+# 
+# ggplot(fishnet_sf) +
+#   geom_sf(aes(fill = bird_zero), color = NA, alpha = 0.9) +
+#   scale_fill_manual(
+#     values = c("No Birds" = "red", "Has Birds" = "lightgray"),
+#     name = "Bird Presence"
+#   ) +
+#   labs(
+#     title = "Zones with No Bird Abundance (All Weeks = 0)"
+#   ) +
+#   theme_minimal()
+
+
+```
+
+
+# Create any extra variables
+
+```{r, create extra variables}
+fishnet_timeseries <- fishnet_timeseries %>%
+  group_by(zone_id) %>%
+  mutate(any_outbreak = as.integer(any(outbreak_binary > 0))) %>%
+  ungroup()
+
+
+fishnet_timeseries <- fishnet_timeseries %>%
+  mutate(
+    # Convert week index to month 
+    month = lubridate::month(lubridate::ymd("2022-01-01") + lubridate::weeks(week - 1)),
+    
+    month_factor = as.factor(month),
+
+    # Create warm season dummy: May (5) to September (9)
+    warm_season = ifelse(month %in% 5:9, 1, 0),
+
+    # Create spring dummy: March (3), April (4), May (5)
+    spring = ifelse(month %in% 3:5, 1, 0),
+
+    # Create spring/fall dummy: March-May or September-November
+    spring_fall = ifelse(month %in% c(3:5, 9:11), 1, 0),
+    
+
+    # Create season factor
+    season = case_when(
+      month %in% c(12, 1, 2) ~ "Winter",
+      month %in% 3:5         ~ "Spring",
+      month %in% 6:8         ~ "Summer",
+      month %in% 9:11        ~ "Fall"
+    ),
+    season = factor(season, levels = c("Winter", "Spring", "Summer", "Fall"))
+
+  )
+
+
+
+# Constants
+p <- 1013.25  # pressure in hPa (standard sea-level pressure)
+
+fishnet_timeseries <- fishnet_timeseries %>%
+  mutate(
+    # Convert temperature to Kelvin
+    temp_k = temperature + 273.15,
+
+  )
+
+seasonal_outbreaks <- fishnet_timeseries %>%
+  group_by(season) %>%
+  summarise(outbreaks = sum(outbreak_count, na.rm = TRUE)) %>%
+  arrange(match(season, c("Winter", "Spring", "Summer", "Fall")))
+
+```
+
+## Join in landcover
+
+```{r, join landcover}
+
+land_cover_path <- file.path(data_folder, "fishnet_landcover.gpkg")
+land_cover <- st_read(land_cover_path)
+
+land_cover_var <- c("zone_id", "land_cover_mode", "land_cover_label", "lat", "lon")
+
+# Select only the needed columns from the land cover layer
+land_cover_clean <- land_cover %>%
+  select(all_of(land_cover_var))
+
+# Perform the left join by zone_id
+fishnet_timeseries <- fishnet_timeseries %>%
+  left_join(land_cover_clean, by = "zone_id")
+
+fishnet_timeseries <- fishnet_timeseries %>%
+  arrange(zone_id, week)
+
+unique(fishnet_timeseries$land_cover_label)
+fishnet_timeseries$land_cover_label <- relevel(
+  factor(fishnet_timeseries$land_cover_label),
+  ref = "Developed, Medium Intensity"
+)
+
+fishnet_timeseries$farm_possible <- ifelse(
+  fishnet_timeseries$land_cover_label %in% c(
+    "Cultivated Crops",
+    "Pasture/Hay",
+    "Emergent Herbaceous Wetlands"
+  ),
+  1, 0
+)
+```
+
+# Change any variable names 
+
+```{r, change variable names}
+ 
+fishnet_timeseries <- fishnet_timeseries %>%
+  rename_with(~ gsub("runoff_sum", "runoff", .x), .cols = everything())
+
+fishnet_weeks <- fishnet_weeks %>%
+  rename_with(~ gsub("runoff_sum", "runoff", .x), .cols = everything())
+
+```
+
+
+## Export RDS
+
+```{r, export rds}
+
+saveRDS(fishnet_timeseries, file.path(objects_folder, "fishnet_timeseries.RDS"))
+```
