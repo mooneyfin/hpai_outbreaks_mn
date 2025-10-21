@@ -1,5 +1,5 @@
 ---
-title: "climate_anomaly_models"
+title: "climate_anomaly_model_tests"
 author: "Fintan Mooney"
 date: "2025-10-16"
 output: html_document
@@ -15,8 +15,9 @@ packages <- c(
   "MatchIt", "readr", "sf", "survival", "dlnm", "gtsummary", "kableExtra",
   "tidyr", "tibble", "mgcv", "ggplot2", "car", "patchwork", "corrplot",
   "purrr", "ggspatial", "gt", "flextable", "officer", "conflicted",
-  "dplyr", "data.table", "here"
+  "dplyr", "data.table", "here", "viridis", "ggeffects", "broom", "gratia"
 )
+
 
 installed <- packages %in% rownames(installed.packages())
 if (any(!installed)) install.packages(packages[!installed])
@@ -46,216 +47,163 @@ tables_folder <-here("output", "tables")
 fishnet_timeseries_clean <- readRDS(file.path(objects_folder, "fishnet_timeseries.RDS"))
 ```
 
+```{r, arrange df}
 
-## 25-yr Anomalies Timeseries
-
-
-```{r, final model 25yr timeseries}
 timeseries_clean <- fishnet_timeseries_clean %>%
   arrange(zone_id, week)
 
-final_model_25yr <-  bam(outbreak_binary ~
-                   precipitation_z_25yr +
-                    snow_density_z_25yr +
-                   runoff_z_25yr +
-                   soil_moisture_z_25yr +
-                   wind_speed_z_25yr +
-                   temperature_z_25yr +
-                     season + 
-                     s(lat, lon, bs ="ds", k =100),
-                    family = nb(),
-                    data = timeseries_clean,
-                    method = "fREML",
-                    discrete = TRUE)
-
-
 ```
 
-## Summarize Results of 25-yr Anomalies Timeseries
+## Log and Scale Bird Abundance
 
-```{r, summarize 25yr timeseries}
-
-pred_vars <- c("precipitation_z_25yr",
-               "snow_density_z_25yr",
-               "runoff_z_25yr",
-               "soil_moisture_z_25yr",
-               "wind_speed_z_25yr",
-               "temperature_z_25yr")
-
-# Generate data for each predictor, holding others at 0 (mean anomaly)
-make_effect_plot <- function(var) {
-  # Build newdata with all anomalies at 0, vary only var
-  newdat <- timeseries_clean %>%
-    summarise(across(all_of(pred_vars), \(x) 0)) %>%
-    slice(rep(1, 100)) %>%
-    mutate(!!var := seq(-3, 3, length.out = 100),
-           week = median(timeseries_clean$week, na.rm = TRUE),
-           lat  = median(timeseries_clean$lat,  na.rm = TRUE),
-           lon  = median(timeseries_clean$lon,  na.rm = TRUE))
-
-  preds <- predict(final_model_25yr, newdata = newdat, type = "link", se.fit = TRUE)
-
-  # compute baseline at anomaly = 0
-  base <- preds$fit[which.min(abs(newdat[[var]]))]
-  base_se <- preds$se.fit[which.min(abs(newdat[[var]]))]
-
-  newdat <- newdat %>%
-    mutate(
-      fit = exp(preds$fit - base),
-      lower = exp(preds$fit - base - 2 * preds$se.fit),
-      upper = exp(preds$fit - base + 2 * preds$se.fit)
-    )
-
-  ggplot(newdat, aes(x = !!sym(var), y = fit)) +
-    geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.25) +
-    geom_line(size = 1) +
-    geom_hline(yintercept = 1, linetype = "dashed") +
-    labs(
-      title = gsub("_z_25yr", "", var),
-      x = "Anomaly (z-score)",
-      y = "Relative risk (vs baseline = 1)"
-    ) +
-    theme_bw(base_size = 12) +
-    theme(
-      panel.grid = element_blank(),
-      plot.title = element_text(face = "bold"),
-      axis.title = element_text(size = 10)
-    )
-}
-
-smooth_plots <- lapply(pred_vars, make_effect_plot)
-
-panel_anomalies <- wrap_plots(smooth_plots, ncol = 3) +
-  plot_annotation(
-    title = "Relative risk of HPAI outbreaks vs. 25-year climate anomalies (2022)",
-    theme = theme(plot.title = element_text(size = 14, face = "bold"))
-  )
-
-# # --- Temporal smooth ---
-# eff_week <- smooth_estimates(final_model_25yr, select = "s(week)")
-# 
-# df_week <- eff_week %>%
-#   mutate(
-#     fitted = exp(.estimate),
-#     lower = exp(.estimate - 2 * .se),
-#     upper = exp(.estimate + 2 * .se)
-#   )
-# 
-# p_week <- ggplot(df_week, aes(x = week, y = fitted)) +
-#   geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.25) +
-#   geom_line(size = 1) +
-#   geom_hline(yintercept = 1, linetype = "dashed") +
-#   labs(
-#     title = "Seasonal relative risk of HPAI outbreaks (2022)",
-#     x = "Week of year",
-#     y = "Relative risk"
-#   ) +
-#   theme_bw(base_size = 12) +
-#   theme(
-#     panel.grid = element_blank(),
-#     plot.title = element_text(face = "bold"),
-#     axis.title = element_text(size = 10)
-#   )
-
-
-# --- Spatial smooth ---
-eff_spatial <- smooth_estimates(final_model_25yr, select = "s(lat,lon)")
-
-df_spatial <- eff_spatial %>%
-  mutate(rr = exp(.estimate))
-
-p_spatial <- ggplot(df_spatial, aes(x = lon, y = lat, fill = rr)) +
-  geom_raster(interpolate = TRUE) +
-  scale_fill_gradient2(
-    low = "purple4",
-    mid = "white",
-    high = "darkgreen",
-    midpoint = 1,
-    name = "Relative risk"
-  ) +
-  coord_fixed() +
-  labs(
-    title = "Spatial smooth: baseline relative risk of HPAI (2022)",
-    x = "Longitude",
-    y = "Latitude"
-  ) +
-  theme_bw(base_size = 12) +
-  theme(
-    panel.grid = element_blank(),
-    plot.title = element_text(face = "bold"),
-    axis.title = element_text(size = 10)
-  )
-
-final_panel <- (panel_anomalies / (p_week | p_spatial)) +
-  plot_annotation(
-    caption = "Model: Negative-binomial GAM (fREML, k=20 temporal, k=100 spatial). 
-Displayed on relative-risk scale (exp of partial log effects)."
-  )
-
-ggsave("HPAI_2022_anomaly_model_RR_panel.png",
-       final_panel, width = 12, height = 10, dpi = 300)
-
-
-library(ggeffects)
-eff_bird <- ggpredict(final_model_25yr_ns_log, terms = "log_bird_abundance")
-ggplot(eff_bird, aes(x, exp(predicted))) +
-  geom_line(size=1) +
-  geom_ribbon(aes(ymin=exp(conf.low), ymax=exp(conf.high)), alpha=0.2) +
-  geom_hline(yintercept=1, linetype="dashed") +
-  labs(x="log(Bird abundance + 1)", y="Relative risk", 
-       title="Effect of bird abundance on HPAI outbreak risk") +
-  theme_bw()
-
-
-```
-
-## NON-LINEAR
-
-```{r, non linear}
-# ============================================================
-# 📘 HPAI Outbreak Risk Model — Nonlinear Anomalies + Season + Spatial
-# ============================================================
+```{r, log and scale bird abundance}
 
 timeseries_clean <- timeseries_clean %>%
-  mutate(log_bird_abundance = log1p(total_bird_abundance))
+  mutate(log_bird_abundance = scale(log1p(total_bird_abundance)))
 
 
-# ------------------------------------------------------------
-# 1. Fit model
-# ------------------------------------------------------------
-final_model_25yr_ns <- bam(
+```
+
+## Run Models
+
+```{r, run models}
+
+# Climate Anomalies Relative to 25yr Mean
+
+model_25yr <- bam(
   outbreak_binary ~
     season +
-    log_bird_abundance +
-    s(precipitation_z_25yr, k = 9) +    # tiny bump
-    s(snow_density_z_25yr, k = 14) +
-    s(runoff_z_25yr, k = 16) +          # small bump for safety
-    s(soil_moisture_z_25yr, k = 6) +
-    s(wind_speed_z_25yr, k = 5) +       # bump slightly
-    s(temperature_z_25yr, k = 9) +
-    s(lat, lon, bs = "ds", k = 150),
+   # log_bird_abundance +
+    s(precipitation_z_25yr, k = 12) +
+    s(snow_density_z_25yr, k = 20) +   
+    s(runoff_z_25yr, k = 25) +         
+    s(soil_moisture_z_25yr, k = 8) +
+    s(wind_speed_z_25yr, k = 5) +
+    s(temperature_z_25yr, k = 25) +    
+    s(lat, lon, bs = "ds", k = 200),   
   family   = nb(),
   data     = timeseries_clean,
   method   = "fREML",
   discrete = TRUE
 )
+gam.check(model_25yr)
+summary(model_25yr)$s.table
 
-summary(final_model_25yr_ns)
-gam.check(final_model_25yr_ns)
 
-# ------------------------------------------------------------
-# 2. Define publication theme
-# ------------------------------------------------------------
-theme_pub <- theme_bw(base_size = 12) +
-  theme(
-    panel.grid = element_blank(),
-    plot.title = element_text(face = "bold"),
-    axis.title = element_text(size = 10)
+
+# Climate Anomalies Relative to 10yr Mean
+
+
+model_10yr <- bam(
+  outbreak_binary ~
+    season +
+   # log_bird_abundance +
+    s(precipitation_z_10yr, k = 12) +
+    s(snow_density_z_10yr, k = 20) +   
+    s(runoff_z_10yr, k = 25) +         
+    s(soil_moisture_z_10yr, k = 8) +
+    s(wind_speed_z_10yr, k = 5) +
+    s(temperature_z_10yr, k = 25) +    
+    s(lat, lon, bs = "ds", k = 200),  
+  family   = nb(),
+  data     = timeseries_clean,
+  method   = "fREML",
+  discrete = TRUE
+)
+gam.check(model_10yr)
+summary(model_10yr)$s.table
+
+```
+
+## Plot partial effects of temperature anomalies on HPAI outbreak risk
+
+```{r, draw temp partial effects}
+
+## 25-yr Temperature Anomaly
+draw(model_25yr, select = "s(temperature_z_25yr)", residuals = TRUE)
+
+## 10-yr Temperature Anomaly
+draw(model_10yr, select = "s(temperature_z_10yr)", residuals = TRUE)
+
+# Professional Plot
+
+# Build smooth draws
+p_temp25 <- gratia::draw(model_25yr, select = "s(temperature_z_25yr)", residuals = TRUE) +
+  ggplot2::coord_cartesian(ylim = c(-2, 6)) +
+  ggplot2::labs(
+    title = "25-Year Baseline (1997–2021)",
+    x = "Temperature Anomaly (z-score)",
+    y = "Partial effect"
+  ) +
+  ggplot2::theme_bw(base_size = 12) +
+  ggplot2::theme(
+    panel.grid = ggplot2::element_blank(),
+    panel.border = ggplot2::element_rect(color = "black", fill = NA),
+    plot.title  = ggplot2::element_text(face = "bold", size = 12),
+    axis.title  = ggplot2::element_text(size = 10)
   )
 
-# ------------------------------------------------------------
-# 3. Plot nonlinear smooth effects (anomalies)
-# ------------------------------------------------------------
+p_temp10 <- gratia::draw(model_10yr, select = "s(temperature_z_10yr)", residuals = TRUE) +
+  ggplot2::coord_cartesian(ylim = c(-2, 6)) +
+  ggplot2::labs(
+    title = "10-Year Baseline (2012–2021)",
+    x = "Temperature Anomaly (z-score)",
+    y = "Partial effect"
+  ) +
+  ggplot2::theme_bw(base_size = 12) +
+  ggplot2::theme(
+    panel.grid = ggplot2::element_blank(),
+    panel.border = ggplot2::element_rect(color = "black", fill = NA),
+    plot.title  = ggplot2::element_text(face = "bold", size = 12),
+    axis.title  = ggplot2::element_text(size = 10)
+  )
+
+# Combine with annotation
+fig_temp_compare <- patchwork::wrap_plots(p_temp25, p_temp10, ncol = 2) +
+  patchwork::plot_annotation(
+    title = "Temperature Anomalies and Relative Outbreak Risk Under Different Baseline Windows",
+    theme = ggplot2::theme(
+      plot.title   = ggplot2::element_text(size = 14, face = "bold"),
+      plot.caption = ggplot2::element_text(size = 9, hjust = 0)
+    )
+  )
+
+# Export to your figures folder
+ggplot2::ggsave(
+  filename = file.path(figures_folder, "figure_temperature_anomaly_25yr10yr_comparision.png"),
+  plot     = fig_temp_compare,
+  width    = 9,
+  height   = 4.5,
+  dpi      = 600
+)
+```
+
+## Plot All Effects from 25yr Model
+
+```{r, 25yr plot}
+# ============================================================
+# HPAI Outbreak Risk Model —  Nonlinear Anomalies + Season + Spatial
+# ============================================================
+
+# Confirm model object
+
+summary(model_25yr)
+gam.check(model_25yr)
+
+# Publication theme
+
+theme_pub <- ggplot2::theme_bw(base_size = 12) +
+  ggplot2::theme(
+    panel.grid    = ggplot2::element_blank(),
+    panel.border  = ggplot2::element_rect(color = "black", fill = NA, linewidth = 0.4),
+    plot.title    = ggplot2::element_text(face = "bold", size = 12),
+    axis.title    = ggplot2::element_text(size = 10),
+    strip.text    = ggplot2::element_text(face = "bold"),
+    plot.caption  = ggplot2::element_text(size = 9, hjust = 0)
+  )
+
+# Nonlinear anomaly smooths
+
 pred_vars <- c(
   "s(precipitation_z_25yr)",
   "s(snow_density_z_25yr)",
@@ -265,161 +213,355 @@ pred_vars <- c(
   "s(temperature_z_25yr)"
 )
 
-smooth_plots <- lapply(pred_vars, function(v) {
-  eff <- smooth_estimates(final_model_25yr_ns, select = v) %>%
-    mutate(
-      fitted = exp(.estimate),
-      lower = exp(.estimate - 2 * .se),
-      upper = exp(.estimate + 2 * .se)
+pretty_titles <- c(
+  "Precipitation","Snow Density","Runoff",
+  "Soil Moisture","Wind Speed","Temperature"
+)
+
+smooth_plots <- lapply(seq_along(pred_vars), function(i) {
+  v <- pred_vars[i]
+  eff <- gratia::smooth_estimates(model_25yr, select = v) |>
+    dplyr::mutate(
+      fitted = exp(.data$.estimate),
+      lower  = exp(.data$.estimate - 2 * .data$.se),
+      upper  = exp(.data$.estimate + 2 * .data$.se)
     )
 
-  x_col <- setdiff(names(eff),
-                   c(".smooth", ".type", ".by", ".estimate", ".se",
-                     "fitted", "lower", "upper"))
+  x_col <- setdiff(
+    names(eff),
+    c(".smooth",".type",".by",".estimate",".se","fitted","lower","upper")
+  )[1]
 
-  ggplot(eff, aes(x = .data[[x_col]], y = fitted)) +
-    geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.15) +
-    geom_line(size = 1) +
-    geom_hline(yintercept = 1, linetype = "dashed") +
-    labs(
-      title = gsub("s\\(|_z_25yr\\)|\\)", "", v),
-      x = "Anomaly (z-score)",
-      y = "Relative risk (× baseline)"
+  ggplot2::ggplot(eff, ggplot2::aes(x = .data[[x_col]], y = fitted)) +
+    ggplot2::geom_ribbon(ggplot2::aes(ymin = lower, ymax = upper),
+                         fill = "grey70", alpha = 0.3) +
+    ggplot2::geom_line(linewidth = 0.8, color = "black") +
+    ggplot2::geom_hline(yintercept = 1, linetype = "dashed") +
+    ggplot2::coord_cartesian(xlim = c(-2, 2), ylim = c(-5, 15)) +
+    ggplot2::scale_y_continuous(
+      breaks = seq(-5, 15, by = 5),
+      labels = function(x) ifelse(x %% 1 == 0, as.character(as.integer(x)), as.character(x))
     ) +
-    theme_pub
+    ggplot2::labs(
+      title = pretty_titles[i],
+      x = "Anomaly (z-score)",
+      y = "Relative risk"
+    ) +
+    theme_pub +
+    ggplot2::theme(
+      axis.text.y = ggplot2::element_text(size = 8)
+    )
 })
 
-panel_anomalies_ns <- wrap_plots(smooth_plots, ncol = 3) +
-  plot_annotation(
-    title = "Non-linear relative risk of HPAI outbreaks vs. 25-year anomalies (2022)",
-    theme = theme(plot.title = element_text(size = 14, face = "bold"))
+panel_anomalies <- patchwork::wrap_plots(smooth_plots, ncol = 3) +
+  patchwork::plot_annotation(
+    title = "Nonlinear Relative Risk of HPAI Outbreaks vs Environmental Anomalies",
+    theme = ggplot2::theme(plot.title = ggplot2::element_text(size = 12, face = "bold"))
   )
 
-# ------------------------------------------------------------
-# 4. Plot spatial smooth
-# ------------------------------------------------------------
-eff_spatial <- smooth_estimates(final_model_25yr_ns, select = "s(lat,lon)") %>%
-  mutate(rr = exp(.estimate))
 
-p_spatial <- ggplot(eff_spatial, aes(x = lon, y = lat, fill = rr)) +
-  geom_raster(interpolate = TRUE) +
-  scale_fill_viridis(name = "Relative risk", option = "E") +
-  coord_equal() +
-  labs(
-    title = "Spatial smooth: baseline relative risk of HPAI (2022)",
+# Spatial smooth with contour + fishnet overlay
+
+eff_spatial <- gratia::smooth_estimates(model_25yr, select = "s(lat,lon)") |>
+  dplyr::mutate(rr = exp(.data$.estimate))
+
+fishnet_path <- file.path(data_folder, "HPAIfishnet_zone_dissolved_10km.shp")
+fishnet_sf   <- sf::st_read(fishnet_path, quiet = TRUE) |>
+  sf::st_transform(4326)
+
+p_spatial <- ggplot2::ggplot() +
+  ggplot2::geom_raster(
+    data = eff_spatial,
+    ggplot2::aes(x = lon, y = lat, fill = rr),
+    interpolate = TRUE
+  ) +
+  ggplot2::geom_contour(
+    data = eff_spatial,
+    ggplot2::aes(x = lon, y = lat, z = rr),
+    color = "white", linewidth = 0.2, alpha = 0.6, bins = 10
+  ) +
+  ggplot2::geom_sf(
+    data = fishnet_sf,
+    fill = NA,
+    color = "grey85",
+    linewidth = 0.15
+  ) +
+  ggplot2::scale_fill_viridis_c(name = "Relative risk", option = "E") +
+  ggplot2::coord_sf(expand = FALSE) +
+  ggplot2::labs(
+    title = "Spatial Smooth: Baseline Relative Risk of HPAI Outbreaks",
     x = "Longitude", y = "Latitude"
   ) +
   theme_pub
 
-# ------------------------------------------------------------
-# 5. Plot seasonal fixed effects
-# ------------------------------------------------------------
-season_effects <- broom::tidy(final_model_25yr_ns, parametric = TRUE) %>%
-  filter(grepl("season", term)) %>%
-  mutate(
-    RR    = exp(estimate),
-    lower = exp(estimate - 2 * std.error),
-    upper = exp(estimate + 2 * std.error),
-    term  = gsub("season", "", term)
+# Seasonal fixed effects
+
+season_effects <- broom::tidy(model_25yr, parametric = TRUE) |>
+  dplyr::filter(grepl("^season", .data$term)) |>
+  dplyr::mutate(
+    RR    = exp(.data$estimate),
+    lower = exp(.data$estimate - 2 * .data$std.error),
+    upper = exp(.data$estimate + 2 * .data$std.error),
+    Season = gsub("^season", "", .data$term)
+  ) |>
+  dplyr::mutate(
+    Season = factor(Season, levels = c("Fall","Spring","Summer"))
   )
 
-p_season <- ggplot(season_effects, aes(x = term, y = RR)) +
-  geom_col(fill = "steelblue") +
-  geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.2) +
-  geom_hline(yintercept = 1, linetype = "dashed") +
-  labs(
-    y = "Relative risk vs. Winter",
+p_season <- ggplot2::ggplot(season_effects, ggplot2::aes(x = Season, y = RR)) +
+  ggplot2::geom_col(fill = "steelblue") +
+  ggplot2::geom_errorbar(ggplot2::aes(ymin = lower, ymax = upper), width = 0.2) +
+  ggplot2::geom_hline(yintercept = 1, linetype = "dashed") +
+  ggplot2::coord_cartesian(ylim = c(0, 30)) +
+  ggplot2::scale_y_continuous(
+    breaks = seq(0, 30, by = 5),
+    labels = function(x) ifelse(x %% 1 == 0, as.character(as.integer(x)), as.character(x))
+  ) +
+  ggplot2::labs(
+    title = "Seasonal Baseline Effects on HPAI Outbreak Risk",
     x = "Season",
-    title = "Seasonal baseline effects on HPAI outbreak risk (2022)"
+    y = "Relative risk vs Winter"
+  ) +
+  theme_pub +
+  ggplot2::theme(
+    axis.text.y = ggplot2::element_text(size = 8)
+  )
+
+
+# Final multi-panel figure
+
+final_panel_25yr <-
+  (panel_anomalies /
+   (p_spatial | p_season)) +
+  patchwork::plot_annotation(
+    caption = "Negative-binomial GAM: The association between climate anomalies in 2022 (compared to 25yr mean) on HPAI outbreak risk in commercial and backyard farms.",
+    theme = ggplot2::theme(plot.caption = ggplot2::element_text(size = 9, hjust = 0))
+  )
+
+final_panel_25yr
+
+
+```
+
+
+
+## 10-yr Anomalies Timeseries
+
+```{r, 10yr model}
+
+model_10yr <- bam(
+  outbreak_binary ~
+    season +
+   # log_bird_abundance +
+    s(precipitation_z_10yr, k = 12) +
+    s(snow_density_z_10yr, k = 20) +   # keep 20
+    s(runoff_z_10yr, k = 25) +         # small bump
+    s(soil_moisture_z_10yr, k = 8) +
+    s(wind_speed_z_10yr, k = 5) +
+    s(temperature_z_10yr, k = 25) +    # small bump
+    s(lat, lon, bs = "ds", k = 200),   # optional bump for smoothness
+  family   = nb(),
+  data     = timeseries_clean,
+  method   = "fREML",
+  discrete = TRUE
+)
+
+summary(model_10yr)
+gam.check(model_10yr)
+```
+## Plot All Effects from 10yr Model
+
+
+```{r, 10yr plot}
+# ============================================================
+# HPAI Outbreak Risk Model —  Nonlinear Anomalies + Season + Spatial
+# ============================================================
+
+# Publication theme
+
+theme_pub <- ggplot2::theme_bw(base_size = 12) +
+  ggplot2::theme(
+    panel.grid    = ggplot2::element_blank(),
+    panel.border  = ggplot2::element_rect(color = "black", fill = NA, linewidth = 0.4),
+    plot.title    = ggplot2::element_text(face = "bold", size = 12),
+    axis.title    = ggplot2::element_text(size = 10),
+    strip.text    = ggplot2::element_text(face = "bold"),
+    plot.caption  = ggplot2::element_text(size = 9, hjust = 0)
+  )
+
+# Nonlinear anomaly smooths
+
+pred_vars <- c(
+  "s(precipitation_z_10yr)",
+  "s(snow_density_z_10yr)",
+  "s(runoff_z_10yr)",
+  "s(soil_moisture_z_10yr)",
+  "s(wind_speed_z_10yr)",
+  "s(temperature_z_10yr)"
+)
+
+pretty_titles <- c(
+  "Precipitation","Snow Density","Runoff",
+  "Soil Moisture","Wind Speed","Temperature"
+)
+
+smooth_plots <- lapply(seq_along(pred_vars), function(i) {
+  v <- pred_vars[i]
+  eff <- gratia::smooth_estimates(model_10yr, select = v) |>
+    dplyr::mutate(
+      fitted = exp(.data$.estimate),
+      lower  = exp(.data$.estimate - 2 * .data$.se),
+      upper  = exp(.data$.estimate + 2 * .data$.se)
+    )
+
+  x_col <- setdiff(
+    names(eff),
+    c(".smooth",".type",".by",".estimate",".se","fitted","lower","upper")
+  )[1]
+
+  ggplot2::ggplot(eff, ggplot2::aes(x = .data[[x_col]], y = fitted)) +
+    ggplot2::geom_ribbon(ggplot2::aes(ymin = lower, ymax = upper),
+                         fill = "grey70", alpha = 0.3) +
+    ggplot2::geom_line(linewidth = 0.8, color = "black") +
+    ggplot2::geom_hline(yintercept = 1, linetype = "dashed") +
+    ggplot2::coord_cartesian(xlim = c(-2, 2), ylim = c(-5, 15)) +
+    ggplot2::scale_y_continuous(
+      breaks = seq(-5, 15, by = 5),
+      labels = function(x) ifelse(x %% 1 == 0, as.character(as.integer(x)), as.character(x))
+    ) +
+    ggplot2::labs(
+      title = pretty_titles[i],
+      x = "Anomaly (z-score)",
+      y = "Relative risk"
+    ) +
+    theme_pub +
+    ggplot2::theme(
+      axis.text.y = ggplot2::element_text(size = 8)
+    )
+})
+
+panel_anomalies <- patchwork::wrap_plots(smooth_plots, ncol = 3) +
+  patchwork::plot_annotation(
+    title = "Nonlinear Relative Risk of HPAI Outbreaks vs Environmental Anomalies",
+    theme = ggplot2::theme(plot.title = ggplot2::element_text(size = 12, face = "bold"))
+  )
+
+
+# Spatial smooth with contour + fishnet overlay
+
+eff_spatial <- gratia::smooth_estimates(model_10yr, select = "s(lat,lon)") |>
+  dplyr::mutate(rr = exp(.data$.estimate))
+
+fishnet_path <- file.path(data_folder, "HPAIfishnet_zone_dissolved_10km.shp")
+fishnet_sf   <- sf::st_read(fishnet_path, quiet = TRUE) |>
+  sf::st_transform(4326)
+
+p_spatial <- ggplot2::ggplot() +
+  ggplot2::geom_raster(
+    data = eff_spatial,
+    ggplot2::aes(x = lon, y = lat, fill = rr),
+    interpolate = TRUE
+  ) +
+  ggplot2::geom_contour(
+    data = eff_spatial,
+    ggplot2::aes(x = lon, y = lat, z = rr),
+    color = "white", linewidth = 0.2, alpha = 0.6, bins = 10
+  ) +
+  ggplot2::geom_sf(
+    data = fishnet_sf,
+    fill = NA,
+    color = "grey85",
+    linewidth = 0.15
+  ) +
+  ggplot2::scale_fill_viridis_c(name = "Relative risk", option = "E") +
+  ggplot2::coord_sf(expand = FALSE) +
+  ggplot2::labs(
+    title = "Spatial Smooth: Baseline Relative Risk of HPAI Outbreaks",
+    x = "Longitude", y = "Latitude"
   ) +
   theme_pub
 
-# ------------------------------------------------------------
-# 6. Combine all panels
-# ------------------------------------------------------------
-final_panel <- (panel_anomalies_ns / (p_spatial | p_season)) +
-  plot_annotation(
-    caption = "Model: Negative-binomial GAM (fREML, k=5 per anomaly, k=100 spatial). Displayed on relative-risk scale (exp of partial log effects).",
-    theme = theme(plot.caption = element_text(size = 9, hjust = 0))
+# Seasonal fixed effects
+
+season_effects <- broom::tidy(model_10yr, parametric = TRUE) |>
+  dplyr::filter(grepl("^season", .data$term)) |>
+  dplyr::mutate(
+    RR    = exp(.data$estimate),
+    lower = exp(.data$estimate - 2 * .data$std.error),
+    upper = exp(.data$estimate + 2 * .data$std.error),
+    Season = gsub("^season", "", .data$term)
+  ) |>
+  dplyr::mutate(
+    Season = factor(Season, levels = c("Fall","Spring","Summer"))
   )
 
-final_panel
+p_season <- ggplot2::ggplot(season_effects, ggplot2::aes(x = Season, y = RR)) +
+  ggplot2::geom_col(fill = "steelblue") +
+  ggplot2::geom_errorbar(ggplot2::aes(ymin = lower, ymax = upper), width = 0.2) +
+  ggplot2::geom_hline(yintercept = 1, linetype = "dashed") +
+  ggplot2::coord_cartesian(ylim = c(0, 30)) +
+  ggplot2::scale_y_continuous(
+    breaks = seq(0, 30, by = 5),
+    labels = function(x) ifelse(x %% 1 == 0, as.character(as.integer(x)), as.character(x))
+  ) +
+  ggplot2::labs(
+    title = "Seasonal Baseline Effects on HPAI Outbreak Risk",
+    x = "Season",
+    y = "Relative risk vs Winter"
+  ) +
+  theme_pub +
+  ggplot2::theme(
+    axis.text.y = ggplot2::element_text(size = 8)
+  )
 
-library(ggeffects)
-eff_bird <- ggpredict(final_model_25yr_ns_log, terms = "log_bird_abundance")
-ggplot(eff_bird, aes(x, exp(predicted))) +
-  geom_line(size=1) +
-  geom_ribbon(aes(ymin=exp(conf.low), ymax=exp(conf.high)), alpha=0.2) +
-  geom_hline(yintercept=1, linetype="dashed") +
-  labs(x="log(Bird abundance + 1)", y="Relative risk", 
-       title="Effect of bird abundance on HPAI outbreak risk") +
-  theme_bw()
+
+# Final multi-panel figure
+
+final_panel_10yr <-
+  (panel_anomalies /
+   (p_spatial | p_season)) +
+  patchwork::plot_annotation(
+    caption = "Negative-binomial GAM: The association between climate anomalies in 2022 (compared to 10yr mean) on HPAI outbreak risk in commercial and backyard farms.",
+    theme = ggplot2::theme(plot.caption = ggplot2::element_text(size = 9, hjust = 0))
+  )
+
+final_panel_10yr
+
 
 ```
 
-```{r, k checks}
 
+## Export Panels
 
-final_model_25yr_ns_kadj <- bam(
-  outbreak_binary ~
-    season +
-    total_bird_abundance +
-    s(precipitation_z_25yr, k = 10) +
-    s(snow_density_z_25yr, k = 10) +
-    s(runoff_z_25yr, k = 12) +
-    s(soil_moisture_z_25yr, k = 8) +
-    s(wind_speed_z_25yr, k = 5) +
-    s(temperature_z_25yr, k = 8) +
-    s(lat, lon, bs = "ds", k = 150),
-  family   = nb(),
-  data     = timeseries_clean,
-  method   = "fREML",
-  discrete = TRUE
+```{r, export panels}
+
+# ---- 25-year baseline figure ----
+ggplot2::ggsave(
+  filename = file.path(figures_folder, "figure_25yr_climate_anomaly_model.png"),
+  plot     = final_panel_25yr,
+  width    = 11,     # inches
+  height   = 8,      # inches
+  dpi      = 600
 )
 
-gam.check(final_model_25yr_ns_kadj)
-summary(final_model_25yr_ns_kadj)$s.table
-
-final_model_25yr_ns_kadj2 <- bam(
-  outbreak_binary ~
-    season +
-    total_bird_abundance +
-    s(precipitation_z_25yr, k = 12) +
-    s(snow_density_z_25yr, k = 15) +   # increase from 9 → 15
-    s(runoff_z_25yr, k = 15) +         # increase from 11 → 15
-    s(soil_moisture_z_25yr, k = 7) +
-    s(wind_speed_z_25yr, k = 4) +
-    s(temperature_z_25yr, k = 10) +    # slight bump
-    s(lat, lon, bs = "ds", k = 150),
-  family = nb(),
-  data = timeseries_clean,
-  method = "fREML",
-  discrete = TRUE
+# ---- 10-year baseline figure ----
+ggplot2::ggsave(
+  filename = file.path(figures_folder, "figure_10yr_climate_anomaly_model.png"),
+  plot     = final_panel_10yr,
+  width    = 11,
+  height   = 8,
+  dpi      = 600
 )
 
-gam.check(final_model_25yr_ns_kadj2)
-summary(final_model_25yr_ns_kadj2)$s.table
 
-
-
-final_model_25yr_ns_kadj3 <- bam(
-  outbreak_binary ~
-    season +
-    total_bird_abundance +
-    s(precipitation_z_25yr, k = 9) +    # tiny bump
-    s(snow_density_z_25yr, k = 14) +
-    s(runoff_z_25yr, k = 16) +          # small bump for safety
-    s(soil_moisture_z_25yr, k = 6) +
-    s(wind_speed_z_25yr, k = 5) +       # bump slightly
-    s(temperature_z_25yr, k = 9) +
-    s(lat, lon, bs = "ds", k = 150),
-  family   = nb(),
-  data     = timeseries_clean,
-  method   = "fREML",
-  discrete = TRUE
-)
-gam.check(final_model_25yr_ns_kadj3)
+message("Figures successfully exported to: ", figures_folder)
 
 
 
 ```
+
+
+
+
+
+

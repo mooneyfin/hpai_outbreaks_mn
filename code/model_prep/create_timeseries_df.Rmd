@@ -274,7 +274,7 @@ fishnet_weeks %>%
   )
 
 fishnet_weeks <- fishnet_weeks %>%
-  select(-outbreak_binary) %>%  # Remove if exists
+  select(-outbreak_binary, -lat, -lon) %>%  # Remove if exists and remove columns leftover
   mutate(outbreak_binary = if_else(!is.na(outbreak_count) & outbreak_count > 0, 1L, 0L))
 
 fishnet_timeseries <- fishnet_weeks
@@ -359,9 +359,9 @@ bird_wide_full <- merge(
 )
 
 # Fill missing with 0
-#bird_wide_full[is.na(anseriformes), anseriformes := 0]
-#bird_wide_full[is.na(predators), predators := 0]
-#bird_wide_full[is.na(total_bird_abundance), total_bird_abundance := 0]
+bird_wide_full[is.na(anseriformes), anseriformes := 0]
+bird_wide_full[is.na(predators), predators := 0]
+bird_wide_full[is.na(total_bird_abundance), total_bird_abundance := 0]
 
 # Ensure both are data.tables
 setDT(fishnet_timeseries)
@@ -399,6 +399,7 @@ zones_all_zero_sf <- fishnet_timeseries[zone_id %in% zone_ids_all_zero]
 # Tag all-zero zones in the fishnet data
 fishnet_timeseries[, bird_zero := ifelse(zone_id %in% zone_ids_all_zero, "No Birds", "Has Birds")]
 
+## Map if desired
 # # If not already an sf object, convert it
 # fishnet_sf <- st_as_sf(fishnet_timeseries)
 # 
