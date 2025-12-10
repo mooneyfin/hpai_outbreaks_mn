@@ -1,0 +1,389 @@
+---
+title: "hpai-mn-outbreak-mixture-analysis"
+author: "Rishi Kowalski, ScM"
+date: "2025-12-08"
+---
+
+-> Code for HPAI Outbreaks in MN analysis, bird mixture analysis.
+-> 05/13/2025, rishi.kowalski@mssm.edu
+
+-> Approach:
+  - Assess cumulative impact of various bird mixtures on outbreak case/control cells at various lags via WQS
+  - Geography: case and control cells 
+  
+
+```{r setup}
+library(terra)
+library(ebirdst)
+library(dplyr)
+library(sf)
+library(gWQS)
+library(lwqs)
+library(tidyr)
+library(ggplot2)
+library(geosphere)
+library(RColorBrewer)
+library(cowplot)
+library(parallel)
+library(MMWRweek)
+```
+
+
+
+```{r read-in-bird-raster}
+# Bird Top 15 Anseriforms in MN
+# Initialize list of rasters - 15 anseriformes and 10 non-anseriform HPAI detections
+# Top 15 Anseriforms identified in MN via iNaturalist List: https://www.inaturalist.org/guides/14807?taxon=6888
+
+mn_anseri_15 <- c("mallar3", "cangoo", "wooduc", "buwtea", "commer", "rinduc", "comgol", "norsho", "buffle", "lessca", "rebmer", "gnwtea", "gadwal", "ambduc", "rudduc")
+
+
+##### Abundance #####
+#Anseriforms, n = 15
+mallar3_abd_3km <- load_raster("mallar3" , product = "abundance", resolution = "3km")
+cangoo_abd_3km <- load_raster("cangoo", product = "abundance", resolution = "3km")
+wooduc_abd_3km <- load_raster("wooduc", product = "abundance", resolution = "3km")
+buwtea_abd_3km <- load_raster("buwtea", product = "abundance", resolution = "3km")
+commer_abd_3km <- load_raster("commer", product = "abundance", resolution = "3km")
+rinduc_abd_3km <- load_raster("rinduc", product = "abundance", resolution = "3km")
+comgol_abd_3km <- load_raster("comgol", product = "abundance", resolution = "3km")
+norsho_abd_3km <- load_raster("norsho", product = "abundance", resolution = "3km")
+buffle_abd_3km <- load_raster("buffle", product = "abundance", resolution = "3km")
+lessca_abd_3km <- load_raster("lessca", product = "abundance", resolution = "3km")
+rebmer_abd_3km <- load_raster("rebmer", product = "abundance", resolution = "3km")
+gnwtea_abd_3km <- load_raster("gnwtea", product = "abundance", resolution = "3km")
+gadwal_abd_3km <- load_raster("gadwal", product = "abundance", resolution = "3km")
+ambduc_abd_3km <- load_raster("ambduc", product = "abundance", resolution = "3km")
+rudduc_abd_3km <- load_raster("rudduc", product = "abundance", resolution = "3km")
+
+#Non-Anseriform HPAI Detections, n = 6
+rethaw_abd_3km <- load_raster("rethaw", product = "abundance", resolution = "3km")
+truswa_abd_3km <- load_raster("truswa", product = "abundance", resolution = "3km")
+grhowl_abd_3km <- load_raster("grhowl", product = "abundance", resolution = "3km")
+amwpel_abd_3km <- load_raster("amwpel", product = "abundance", resolution = "3km")
+baleag_abd_3km <- load_raster("baleag", product = "abundance", resolution = "3km")
+brdowl_abd_3km <- load_raster("brdowl", product = "abundance", resolution = "3km")
+
+spec_rast_list <- list(mallar3_abd_3km, cangoo_abd_3km, wooduc_abd_3km, buwtea_abd_3km, commer_abd_3km, rinduc_abd_3km, comgol_abd_3km, norsho_abd_3km, buffle_abd_3km, lessca_abd_3km, rebmer_abd_3km, gnwtea_abd_3km, gadwal_abd_3km, ambduc_abd_3km, rudduc_abd_3km, rethaw_abd_3km, truswa_abd_3km, grhowl_abd_3km, amwpel_abd_3km, baleag_abd_3km, brdowl_abd_3km)
+names(spec_rast_list) <- c("mallar3", "cangoo", "wooduc", "buwtea", "commer", "rinduc", "comgol", "norsho", "buffle", "lessca", "rebmer", "gnwtea", "gadwal", "ambduc", "rudduc", "rethaw", "truswa", "grhowl", "amwpel", "baleag", "brdowl")
+```
+
+-> Data standardization
+    - iterate over fishnet geometries, get abundance values for species of interest at point of farm location and aggregated (mean, max) for all cells w/in fishnet geometry.
+    - Run once, dataset of feelots, outbreak status, and lag-specific bird abundance saved as: mn-case-ctl-cell-abd-farm-agg-121025.csv
+
+```{r read-in-data}
+#Read in Data
+fishnet_weeks <- st_read("/Users/kowalr03/Library/CloudStorage/OneDrive-TheMountSinaiHospital/HPAI_data/hpai-data-sharing/Case_Crossover_Study_Design/casecontrol_sf.shp")
+
+case_control_df <- read.csv("/Users/kowalr03/Library/CloudStorage/OneDrive-TheMountSinaiHospital/HPAI_data/hpai-data-sharing/Case_Crossover_Study_Design/casecontrol_df.csv", 
+                            stringsAsFactors = F)
+
+spec_name_com <- read.csv("//Users/kowalr03/Data/hpai/mn-ebird-names-lookup-050225.csv")
+```
+
+
+```{r data-standardization}
+#Helper Function
+# updated with farm point abd value, mean/max across grid for geometry, 12/10/25
+# coimmented code has previous techniques -> random assignment, thresholding by areal weight, weighting values
+extrHelper <- function(bird_rast, geo_cell, week_num, farm_pt) {
+  #Extract data from raster, at entire geometry surrounding feedlot (multi cell), and cell of feedlot location
+  extr_df_geo <- terra::extract(bird_rast, geo_cell, snap = "out", touches = T, weights = T, cells = T)
+  extr_df_pt <- terra::extract(bird_rast, farm_pt, touches = T, weights = T, cells = T)
+  
+  #extr_df <- extr_df[extr_df$weight > .15, ] # previous
+  #row_get <- sample(nrow(extr_df), 1)
+  
+  extr_df_geo_vals <- extr_df_geo[, -c(1, 54)] #remove id, weights for values only
+  extr_df_pt <- extr_df_pt[, -1]
+  
+  wk_seq <- seq(week_num - 3, week_num) # define sequence
+  wk_seq <- wk_seq[wk_seq > 0]
+  
+  vals_abd_geo <- extr_df_geo_vals[, wk_seq]
+  vals_abd_pt <- extr_df_pt[, wk_seq]
+  
+  #vals_wei <- extr_df_geo_vals[, wk_seq] #* extr_df_geo$weight[wk_seq]
+  if(length(wk_seq) == 1) {# adjust if only taking one
+    #vals_wei <- matrix(vals_wei)
+    vals_abd_geo  <- matrix(vals_abd_geo)
+  }
+  val_mean <- apply(vals_abd_geo, 2, mean, na.rm = T) # get mean/median
+  val_max <- apply(vals_abd_geo, 2, max, na.rm = T)
+  lag_mean <- c(rep(NA, 4 - length(val_mean)), val_mean) # structure lags if falling outside of 2022
+  lag_max <- c(rep(NA, 4 - length(val_max)), val_max)
+  lag_abd <- c(rep(NA, 4 - length(vals_abd_pt)), as.numeric(vals_abd_pt))
+  
+  spec_lag_df <- data.frame(lag = -3:0,  lag_abd_pt = lag_abd, lag_mean_grd = lag_mean, lag_max_grd = lag_max)
+  return(spec_lag_df)
+}
+
+# Main Function
+getCellBirdData <- function(case_cont_ind) {
+  # Spatial wrangling - get total geometry and point of farm location
+  #project to eBird CRS
+  vct_geo <- vect(fishnet_weeks$geometry[case_cont_ind])
+  vct_geo_prj <- project(vct_geo, spec_rast_list[[1]])
+  
+  vct_pt_df <- data.frame(longitude = fishnet_weeks$longitd[case_cont_ind], latitude = fishnet_weeks$latitud[case_cont_ind])
+  vct_pt <- vect(vct_pt_df, geom = c("longitude", "latitude"), crs = crs(vct_geo))
+  vct_pt_prj <- project(vct_pt, spec_rast_list[[1]])  # assigning in place didn't work for point but did for geom, weird
+  
+  #subset by week+lag
+  ob_wk <- fishnet_weeks$Week[case_cont_ind]
+  
+  #structure lag data by species
+  spec_lag_df <- do.call("rbind", lapply(spec_rast_list, extrHelper, geo_cell = vct_geo_prj, week_num = ob_wk, farm_pt = vct_pt_prj))
+  spec_lag_df$species <- rep(names(spec_rast_list), each = 4)
+  spec_lag_df$zone_id <- fishnet_weeks$Zone_ID[case_cont_ind]
+  spec_lag_df$week <- fishnet_weeks$Week[case_cont_ind]
+  spec_lag_df$n_outbreak <- fishnet_weeks$Cnt_Otb[case_cont_ind]
+  row.names(spec_lag_df) <- NULL
+  return(spec_lag_df[, c("zone_id", "week", "n_outbreak", "species", "lag", "lag_abd_pt", "lag_mean_grd", "lag_max_grd")])
+}
+
+# Implement
+#set.seed(1)
+case_ctl_cell_bird_lag <- do.call("rbind", parallel::mclapply(seq_len(nrow(case_control_df)), getCellBirdData, mc.cores = 6))
+```
+
+-> Analysis
+   - WQS to assess bird mixture effect on outbreak, for various cumulative lags, for various combinations of birds of interest. 
+   - American Black Duck, Red-Breasted Merganser removed from quantiling portion due to high missingness
+   - Plotting examples included, but not all for brevity
+
+```{r bird-wqs-analysis}
+case_ctl_cell_bird_lag <- read.csv("mn-case-ctl-cell-abd-farm-agg-121025.csv")
+
+#Add common names
+case_ctl_cell_bird_lag <- case_ctl_cell_bird_lag %>%
+                            mutate(common_name = spec_name_com$common_name[match(species, spec_name_com$species_code)])
+
+
+# Structure data - cumulative lags for both spatial constructions 
+# Pivot to wide format for each lag-sum
+# 0-quantiling as suggested by CJ
+zeroQuantVar <- function(bird_col) {
+  bird_qt <- ifelse(bird_col <= 0, NA, bird_col)
+  qtile <- quantile(bird_qt, na.rm = T)
+  col_qtile <- cut(bird_qt, breaks = qtile, include.lowest = T)
+  col_qtile <- ifelse(is.na(col_qtile), 0, col_qtile)  
+  return(col_qtile)
+}
+
+##### Data Structuring - Farm Point Location #####
+# include week of outbreak
+abd_pt_lags_zero <- purrr::map(
+                         0:-3, 
+                          \(x) 
+                            case_ctl_cell_bird_lag %>%
+                            filter(lag >= x) %>%
+                            select(-species) %>%
+                            pivot_wider(., 
+                                        id_cols = c("zone_id", "week", "n_outbreak"), 
+                                        names_from = common_name, values_from = lag_abd_pt, values_fn = \(x) sum(x, na.rm = T)) %>%
+                            mutate(any_outbreak = ifelse(n_outbreak >= 1, 1, 0)) %>%
+                            select(-n_outbreak) %>%
+                            relocate(zone_id, week, any_outbreak))
+
+
+# don't include week of outbreak
+abd_pt_lags_non_zero <- purrr::map(
+                         -1:-3, 
+                          \(x) 
+                            case_ctl_cell_bird_lag %>%
+                            filter(lag >= x & lag < 0) %>%
+                            select(-species) %>%
+                            pivot_wider(., 
+                                        id_cols = c("zone_id", "week", "n_outbreak"), 
+                                        names_from = common_name, values_from = lag_abd_pt, values_fn = \(x) sum(x, na.rm = T)) %>%
+                            mutate(any_outbreak = ifelse(n_outbreak >= 1, 1, 0)) %>%
+                            select(-n_outbreak) %>%
+                            relocate(zone_id, week, any_outbreak))
+
+# Zero-quantiling 
+abd_pt_lags_zero_tile <- purrr::map(
+                          abd_pt_lags_zero, 
+                          \(x) x %>% select(-c(`Red-breasted Merganser`, `American Black Duck`)) %>% mutate(across(-c("zone_id", "week", "any_outbreak"), zeroQuantVar)))
+
+abd_pt_lags_non_zero_tile <- purrr::map(
+                          abd_pt_lags_non_zero, 
+                          \(x) x %>% select(-c(`Red-breasted Merganser`, `American Black Duck`)) %>% mutate(across(-c("zone_id", "week", "any_outbreak"), zeroQuantVar)))
+
+##### Data Structuring - Farm 3x3 Grid Cell Max #####
+abd_max_lags_zero <- purrr::map(
+                      0:-3, 
+                      \(x) 
+                        case_ctl_cell_bird_lag %>%
+                        filter(lag >= x) %>%
+                        select(-species) %>%
+                        pivot_wider(., 
+                                    id_cols = c("zone_id", "week", "n_outbreak"), 
+                                    names_from = common_name, values_from = lag_max_grd, values_fn = \(x) sum(x, na.rm = T)) %>%
+                        mutate(any_outbreak = ifelse(n_outbreak >= 1, 1, 0)) %>%
+                        select(-n_outbreak) %>%
+                        relocate(zone_id, week, any_outbreak))
+
+abd_max_lags_non_zero <- purrr::map(
+                         -1:-3, 
+                          \(x) 
+                            case_ctl_cell_bird_lag %>%
+                            filter(lag >= x & lag < 0) %>%
+                            select(-species) %>%
+                            pivot_wider(., 
+                                        id_cols = c("zone_id", "week", "n_outbreak"), 
+                                        names_from = common_name, values_from = lag_max_grd, values_fn = \(x) sum(x, na.rm = T)) %>%
+                            mutate(any_outbreak = ifelse(n_outbreak >= 1, 1, 0)) %>%
+                            select(-n_outbreak) %>%
+                            relocate(zone_id, week, any_outbreak))
+
+# zero-quantile
+abd_max_lags_zero_tile <- purrr::map(
+                                abd_max_lags_zero,
+                                \(x) x %>% select(-c(`American Black Duck`)) %>% mutate(across(-c("zone_id", "week", "any_outbreak"), zeroQuantVar)))
+
+
+abd_max_lags_non_zero_tile <- purrr::map(
+                                    abd_max_lags_non_zero,
+                                    \(x) x %>% select(-c(`American Black Duck`)) %>% mutate(across(-c("zone_id", "week", "any_outbreak"), zeroQuantVar)))
+
+##### Data Structuring - Farm 3x3 Grid Cell Mean #####
+abd_mean_lags_zero <- purrr::map(
+                      0:-3, 
+                      \(x) 
+                        case_ctl_cell_bird_lag %>%
+                        filter(lag >= x) %>%
+                        select(-species) %>%
+                        pivot_wider(., 
+                                    id_cols = c("zone_id", "week", "n_outbreak"), 
+                                    names_from = common_name, values_from = lag_mean_grd, values_fn = \(x) sum(x, na.rm = T)) %>%
+                        mutate(any_outbreak = ifelse(n_outbreak >= 1, 1, 0)) %>%
+                        select(-n_outbreak) %>%
+                        relocate(zone_id, week, any_outbreak))
+
+abd_mean_lags_non_zero <- purrr::map(
+                         -1:-3, 
+                          \(x) 
+                            case_ctl_cell_bird_lag %>%
+                            filter(lag >= x & lag < 0) %>%
+                            select(-species) %>%
+                            pivot_wider(., 
+                                        id_cols = c("zone_id", "week", "n_outbreak"), 
+                                        names_from = common_name, values_from = lag_mean_grd, values_fn = \(x) sum(x, na.rm = T)) %>%
+                            mutate(any_outbreak = ifelse(n_outbreak >= 1, 1, 0)) %>%
+                            select(-n_outbreak) %>%
+                            relocate(zone_id, week, any_outbreak))
+
+# zero-quantile
+abd_mean_lags_zero <- purrr::map(
+                                abd_mean_lags_zero,
+                                \(x) x %>% select(-c(`American Black Duck`)) %>% mutate(across(-c("zone_id", "week", "any_outbreak"), zeroQuantVar)))
+
+
+abd_mean_lags_non_zero <- purrr::map(
+                                    abd_max_lags_non_zero,
+                                    \(x) x %>% select(-c(`American Black Duck`)) %>% mutate(across(-c("zone_id", "week", "any_outbreak"), zeroQuantVar)))
+
+
+##### WQS Implementation #####
+#WQS - lag 0 inclusive, farm point location
+spec_mix_mod1 <- names(abd_pt_lags_zero_tile[[1]])[-c(1:3)]
+
+wqs_pt_abd_inc_lag0 <- gwqs(any_outbreak ~ wqs, mix_name = spec_mix_mod1, data = abd_pt_lags_zero_tile[[1]], 
+                        q = NULL, validation = 0.6, b = 50, b1_pos = TRUE, rh = 100, family = "binomial", seed = 1)
+wqs_pt_abd_inc_lag1 <- gwqs(any_outbreak ~ wqs, mix_name = spec_mix_mod1, data = abd_pt_lags_zero_tile[[2]], 
+                        q = NULL, validation = 0.6, b = 50, b1_pos = TRUE, rh = 100, family = "binomial", seed = 1)
+wqs_pt_abd_inc_lag2 <- gwqs(any_outbreak ~ wqs, mix_name = spec_mix_mod1, data = abd_pt_lags_zero_tile[[3]], 
+                        q = NULL, validation = 0.6, b = 50, b1_pos = TRUE, rh = 100, family = "binomial", seed = 1)
+wqs_pt_abd_inc_lag3 <- gwqs(any_outbreak ~ wqs, mix_name = spec_mix_mod1, data = abd_pt_lags_zero_tile[[4]], 
+                        q = NULL, validation = 0.6, b = 50, b1_pos = TRUE, rh = 100, family = "binomial", seed = 1)
+
+#WQS - lag 1, farm point location
+spec_mix_mod2 <- names(abd_pt_lags_non_zero[[1]])[-c(1:3)]
+
+wqs_pt_abd_lag1 <- gwqs(any_outbreak ~ wqs, mix_name = spec_mix_mod2, data = abd_pt_lags_non_zero[[1]], 
+                        q = NULL, validation = 0.6, b = 50, b1_pos = TRUE, rh = 100, family = "binomial", seed = 1)
+wqs_pt_abd_lag2 <- gwqs(any_outbreak ~ wqs, mix_name = spec_mix_mod2, data = abd_pt_lags_non_zero[[2]], 
+                        q = NULL, validation = 0.6, b = 50, b1_pos = TRUE, rh = 100, family = "binomial", seed = 1)
+wqs_pt_abd_lag3 <- gwqs(any_outbreak ~ wqs, mix_name = spec_mix_mod2, data = abd_pt_lags_non_zero[[3]], 
+                        q = NULL, validation = 0.6, b = 50, b1_pos = TRUE, rh = 100, family = "binomial", seed = 1)
+
+#WQS - lag 0 inclusive, grid max
+spec_mix_mod3 <- names(abd_max_lags_zero[[1]])[-c(1:3)]
+
+wqs_grd_max_inc_lag0 <- gwqs(any_outbreak ~ wqs, mix_name = spec_mix_mod3, data = abd_max_lags_zero[[1]], 
+                  q = NULL, validation = 0.6, b = 50, b1_pos = TRUE, rh = 100, family = "binomial", seed = 1)
+wqs_grd_max_inc_lag1 <- gwqs(any_outbreak ~ wqs, mix_name = spec_mix_mod3, data = abd_max_lags_zero[[2]], 
+                  q = NULL, validation = 0.6, b = 50, b1_pos = TRUE, rh = 100, family = "binomial", seed = 1)
+wqs_grd_max_inc_lag2 <- gwqs(any_outbreak ~ wqs, mix_name = spec_mix_mod3, data = abd_max_lags_zero[[3]], 
+                  q = NULL, validation = 0.6, b = 50, b1_pos = TRUE, rh = 100, family = "binomial", seed = 1)
+wqs_grd_max_inc_lag3 <- gwqs(any_outbreak ~ wqs, mix_name = spec_mix_mod3, data = abd_max_lags_zero[[4]], 
+                        q = NULL, validation = 0.6, b = 50, b1_pos = TRUE, rh = 100, family = "binomial", seed = 1)
+
+
+#WQS - grid max
+spec_mix_mod4 <- names(abd_max_lags_non_zero[[1]])[-c(1:3)]
+
+wqs_grd_max_lag1 <- gwqs(any_outbreak ~ wqs, mix_name = spec_mix_mod4, data = abd_max_lags_non_zero[[1]], 
+                  q = NULL, validation = 0.6, b = 50, b1_pos = TRUE, rh = 100, family = "binomial", seed = 1)
+wqs_grd_max_lag2 <- gwqs(any_outbreak ~ wqs, mix_name = spec_mix_mod4, data = abd_max_lags_non_zero[[2]], 
+                  q = NULL, validation = 0.6, b = 50, b1_pos = TRUE, rh = 100, family = "binomial", seed = 1)
+wqs_grd_max_lag3 <- gwqs(any_outbreak ~ wqs, mix_name = spec_mix_mod4, data = abd_max_lags_non_zero[[3]], 
+                        q = NULL, validation = 0.6, b = 50, b1_pos = TRUE, rh = 100, family = "binomial", seed = 1)
+
+#WQS - lag 0 inclusive, grid mean
+spec_mix_mod3 <- names(abd_mean_lags_zero[[1]])[-c(1:3)]
+
+wqs_grd_mean_inc_lag0 <- gwqs(any_outbreak ~ wqs, mix_name = spec_mix_mod3, data = abd_mean_lags_zero[[1]], 
+               q = NULL, validation = 0.6, b = 50, b1_pos = TRUE, rh = 100, family = "binomial", seed = 1)
+wqs_grd_mean_inc_lag1 <- gwqs(any_outbreak ~ wqs, mix_name = spec_mix_mod3, data = abd_mean_lags_zero[[2]], 
+               q = NULL, validation = 0.6, b = 50, b1_pos = TRUE, rh = 100, family = "binomial", seed = 1)
+wqs_grd_mean_inc_lag2 <- gwqs(any_outbreak ~ wqs, mix_name = spec_mix_mod3, data = abd_mean_lags_zero[[3]], 
+               q = NULL, validation = 0.6, b = 50, b1_pos = TRUE, rh = 100, family = "binomial", seed = 1)
+wqs_grd_mean_inc_lag3 <- gwqs(any_outbreak ~ wqs, mix_name = spec_mix_mod3, data = abd_mean_lags_zero[[4]], 
+                        q = NULL, validation = 0.6, b = 50, b1_pos = TRUE, rh = 100, family = "binomial", seed = 1)
+
+
+#WQS - grid mean
+spec_mix_mod6 <- names(abd_mean_lags_non_zero[[1]])[-c(1:3)]
+
+wqs_grd_mean_lag1 <- gwqs(any_outbreak ~ wqs, mix_name = spec_mix_mod6, data = abd_mean_lags_non_zero[[1]], 
+               q = NULL, validation = 0.6, b = 50, b1_pos = TRUE, rh = 100, family = "binomial", seed = 1)
+wqs_grd_mean_lag2 <- gwqs(any_outbreak ~ wqs, mix_name = spec_mix_mod6, data = abd_mean_lags_non_zero[[2]], 
+               q = NULL, validation = 0.6, b = 50, b1_pos = TRUE, rh = 100, family = "binomial", seed = 1)
+wqs_grd_mean_lag3 <- gwqs(any_outbreak ~ wqs, mix_name = spec_mix_mod6, data = abd_mean_lags_non_zero[[3]], 
+                        q = NULL, validation = 0.6, b = 10, b1_pos = TRUE, rh = 10, family = "binomial", seed = 1)
+
+##### Plotting - Example #####
+gwqs_boxplot(wqs_grd_mean_lag3) + labs(title = "All Species Qtile WQS, 3x3 Cell Grid Case-Control Mean, Cumulative Exposure Lags (3-1)", subtitle = Sys.Date(), x = "Species")
+```
+
+
+
+```{r code-archive, eval = F}
+# Old code for testing bird raster aggregation
+#Code for Testing
+ex_vect <- vect(fishnet_weeks$geometry[1])
+#ex_vect <- vect(fishnet_weeks$geometry[which(fishnet_weeks$Zone_ID == 72)])
+
+ex_vect_p <- project(ex_vect, spec_rast_list[[13]])
+ex_vect_p_buf_5k <- buffer(ex_vect_p, 5000)
+
+
+bird_extr <- terra::extract(amwpel_abd_3km, ex_vect_p, snap = "out", cells = T, touches = T, weights = T)
+
+bird_extr <- terra::extract(spec_rast_list[[13]], ex_vect_p, snap = "out", cells = T, touches = T, weights = T)
+
+
+ext(ex_vect_p_buf_5k) <- ext(mallar3_abd_3km)
+buf_crop <- crop(mallar3_abd_3km, ex_vect_p_buf_5k, mask = T, touches = T, snap = "out")
+plot(buf_crop[[20]])
+lines(buf_crop[[20]], add = T)
+plot(ex_vect_p_buf_5k, add = T, lty = 2)
+plot(ex_vect_p, add = T, lty = 1, lwd = 2)
+
+ex_pt <- data.frame(lon = fishnet_weeks$longitd[1], lat = fishnet_weeks$latitud[1])
+ex_pt_prj <- project(vect(ex_pt,  geom = c("lon", "lat"), crs = crs(vect(fishnet_weeks))), spec_rast_list[[13]])
+```
+
