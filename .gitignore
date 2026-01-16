@@ -27,15 +27,40 @@
 rosm.cache/
 **/rosm.cache/
 
-# ---- Data policy: ignore all data except key objects ----
+# ---- DATA ----
+# Default: ignore all data
 data/**
+
+# Keep folder placeholders / structure
 !data/.keep
 !data/objects/
 !data/objects/.keep
 
-# ignore everything in objects...
-data/objects/**
-# ...except these tracked artifacts
+# Keep key RDS artifacts
 !data/objects/case_crossover_df.RDS
 !data/objects/timeseries_clean.RDS
 !data/objects/casecrossover_model.RDS
+
+# Keep curated small-ish datasets / lookup tables / GPKGs
+!data/**/Case_Zones.gpkg
+!data/**/Control_Zones.gpkg
+!data/**/Negative_Control_Zones.gpkg
+!data/**/fishnet_landcover.gpkg
+!data/**/Fishnet_Timeseries_10km.gpkg
+!data/**/hpai-outbreaks-clean-placeholder-*.csv
+!data/**/mn-case-ctl-*.csv
+!data/**/mn-ebird-names-lookup-*.csv
+
+# Ignore huge files 
+data/**/all-mn-feedlot-species-abundance-*.csv
+data/**/mn_weekly_era5land_*.csv
+
+# Ignore shapefile components
+data/**/*.shp
+data/**/*.dbf
+data/**/*.shx
+data/**/*.sbn
+data/**/*.sbx
+data/**/*.prj
+data/**/*.cpg
+data/**/*.shp.xml
