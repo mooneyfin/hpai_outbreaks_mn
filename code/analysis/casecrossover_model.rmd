@@ -55,7 +55,7 @@ case_crossover_df <- readRDS(file.path(objects_folder, "case_crossover_df.RDS"))
 
 # Finalized Crossbasis Terms for Climate and Bird Predictors
 
-# Leaf Area Index: linear, ns(df = 2)
+# Leaf Area Index
 cb_leaf_area_index <- crossbasis(
   x = as.matrix(case_crossover_df[, paste0("leaf_area_index_Lag", 0:4)]),
   lag = c(0, 4),
@@ -63,7 +63,7 @@ cb_leaf_area_index <- crossbasis(
   arglag = list(fun = "ns", df = 2)
 )
 
-# Longwave Radiation: linear, ns(df = 2)
+# Longwave Radiation
 cb_longwave_radiation <- crossbasis(
   x = as.matrix(case_crossover_df[, paste0("longwave_radiation_Lag", 0:4)]),
   lag = c(0, 4),
@@ -71,7 +71,7 @@ cb_longwave_radiation <- crossbasis(
   arglag = list(fun = "ns", df = 2)
 )
 
-# Precipitation: linear, ns(df = 2)
+# Precipitation
 cb_precipitation <- crossbasis(
   x = as.matrix(case_crossover_df[, paste0("precipitation_Lag", 0:4)]),
   lag = c(0, 4),
@@ -79,7 +79,7 @@ cb_precipitation <- crossbasis(
   arglag = list(fun = "ns", df = 2)
 )
 
-# Relative Humidity: linear, poly(degree = 2)
+# Relative Humidity
 cb_relative_humidity <- crossbasis(
   x = as.matrix(case_crossover_df[, paste0("relative_humidity_Lag", 0:4)]),
   lag = c(0, 4),
@@ -87,7 +87,7 @@ cb_relative_humidity <- crossbasis(
   arglag = list(fun = "ns", df = 2)
 )
 
-# Runoff: linear, poly(degree = 2)
+# Runoff
 cb_runoff <- crossbasis(
   x = as.matrix(case_crossover_df[, paste0("runoff_Lag", 0:4)]),
   lag = c(0, 4),
@@ -95,7 +95,7 @@ cb_runoff <- crossbasis(
   arglag = list(fun = "ns", df = 2)
 )
 
-# Shortwave Radiation: linear, poly(degree = 4)
+# Shortwave Radiation
 cb_shortwave_radiation <- crossbasis(
   x = as.matrix(case_crossover_df[, paste0("shortwave_radiation_Lag", 0:4)]),
   lag = c(0, 4),
@@ -103,7 +103,7 @@ cb_shortwave_radiation <- crossbasis(
   arglag = list(fun = "ns", df = 2)
 )
 
-# Snow Density: linear, poly(degree = 3)
+# Snow Density
 cb_snow_density <- crossbasis(
   x = as.matrix(case_crossover_df[, paste0("snow_density_Lag", 0:4)]),
   lag = c(0, 4),
@@ -111,7 +111,7 @@ cb_snow_density <- crossbasis(
   arglag = list(fun = "ns", df = 2)
 )
 
-# Soil Moisture: linear, ns(df = 2)
+# Soil Moisture
 cb_soil_moisture <- crossbasis(
   x = as.matrix(case_crossover_df[, paste0("soil_moisture_Lag", 0:4)]),
   lag = c(0, 4),
@@ -119,7 +119,7 @@ cb_soil_moisture <- crossbasis(
   arglag = list(fun = "ns", df = 2)
 )
 
-# Temperature: linear, poly(degree = 3)
+# Temperature
 cb_temperature <- crossbasis(
   x = as.matrix(case_crossover_df[, paste0("temperature_Lag", 0:4)]),
   lag = c(0, 4),
@@ -128,7 +128,7 @@ cb_temperature <- crossbasis(
 )
 
 
-# Total Bird Abundance: linear, ns(df = 2)
+# Total Bird Abundance
 cb_total_bird_abundance <- crossbasis(
   x = as.matrix(case_crossover_df[, paste0("total_bird_abundance_Lag", 0:4)]),
   lag = c(0, 4),
@@ -136,7 +136,7 @@ cb_total_bird_abundance <- crossbasis(
   arglag = list(fun = "ns", df = 2)
 )
 
-# Wind Speed: linear, poly(degree = 4)
+# Wind Speed
 cb_wind_speed <- crossbasis(
   x = as.matrix(case_crossover_df[, paste0("wind_speed_Lag", 0:4)]),
   lag = c(0, 4),
@@ -329,7 +329,7 @@ cp_slice_bird   <- crosspred(cb_total_bird_abundance, final_model, cen = 0, at =
 # Cumulative OR Summary Table
 # ----------------------------
 cumulative_summary <- tibble(
-  Predictor = c("Surface Runoff", "Snow Density", "Soil Moisture", "Temperature",
+  Predictor = c("Runoff", "Snow Density", "Soil Moisture", "Temperature",
                 "Precipitation", "Wind Speed", "Total Bird Abundance"),
       OR = c(
         cp_runoff$allRRfit["0.5"],
@@ -380,14 +380,14 @@ cumulative_summary <- tibble(
 plot_cumulative <- function(cp, title) {
   plot(cp, type = "cumulative", var = 0.5, ci = "area",
        col = "black", ci.arg = list(col = rgb(0,0,0,0.1), border = NA),
-       lwd = 1.5, main = title, xlab = "Lag (weeks)", ylab = "OR (95% CI)", las = 1)
+       lwd = 1.5, main = title, xlab = "", ylab = "", las = 1)
   abline(h = 1, lty = 2, col = "gray40")
 }
 
 plot_slices <- function(cp, title) {
   plot(cp, type = "slices", var = 0.5, ci = "area",
        col = "black", ci.arg = list(col = rgb(0,0,0,0.1), border = NA),
-       lwd = 1.3, main = title, xlab = "Lag (weeks)", ylab = "OR (95% CI)", las = 1)
+       lwd = 1.3, main = title, xlab = "", ylab = "", las = 1)
   abline(h = 1, lty = 2, col = "gray40")
 }
 
@@ -398,36 +398,26 @@ png(file.path(figures_folder,"figure_cumulative_ORs_casecrossover.png"), width =
 
 par(
   mfrow = c(2, 4),
-  mar = c(4.2, 4.2, 2.5, 1),   # inner margin
-  oma = c(1, 1, 0, 1),         # outer margin — removed top title
-  cex.main = 1.2,              # plot title text size
-  cex.lab = 1.2,               # axis label size
-  cex.axis = 1.1,              # axis tick label size
+  mar = c(4.2, 4.2, 2.5, 1),
+  oma = c(3, 4, 0, 1),
+  cex.main = 1.2,
+  cex.lab = 1.2,
+  cex.axis = 1.1,
   tcl = -0.3, mgp = c(2.5, 0.7, 0)
 )
 
-plot_cumulative <- function(cp, title) {
-  plot(cp,
-       type = "cumulative",
-       var = 0.5,
-       ci = "area",
-       col = "black",
-       ci.arg = list(col = rgb(0, 0, 0, 0.1), border = NA),
-       lwd = 1.7,
-       main = title,
-       xlab = "Lag (weeks)",
-       ylab = "OR (95% CI)",
-       las = 1)
-  abline(h = 1, lty = 2, col = "gray40", lwd = 1)
-}
-
-plot_cumulative(cp_runoff, "Surface Runoff")
+plot_cumulative(cp_runoff, "Runoff")
 plot_cumulative(cp_snow, "Snow Density")
 plot_cumulative(cp_soil, "Soil Moisture")
 plot_cumulative(cp_temp, "Temperature")
 plot_cumulative(cp_precip, "Precipitation")
 plot_cumulative(cp_wind, "Wind Speed")
 plot_cumulative(cp_bird, "Total Bird Abundance")
+
+mtext("Lag (weeks)", side = 1, outer = TRUE, line = 0, cex = 1.2)
+mtext("Odds Ratio (95% CI)", side = 2, outer = TRUE, line = 0, cex = 1.2)
+
+dev.off()
 
 # ----------------------------
 # Save Slices Plot
@@ -436,15 +426,15 @@ png(file.path(figures_folder,"figure_slice_ORs_casecrossover.png"), width = 11, 
 
 par(
   mfrow = c(2, 4),
-  mar = c(4.2, 4.2, 2.5, 1),   # inner margin
-  oma = c(1, 1, 0, 1),         # outer margin — removed top title
-  cex.main = 1.2,              # plot title text size
-  cex.lab = 1.2,               # axis label size
-  cex.axis = 1.1,              # axis tick label size
+  mar = c(4.2, 4.2, 2.5, 1),
+  oma = c(3, 4, 0, 1),
+  cex.main = 1.2,
+  cex.lab = 1.2,
+  cex.axis = 1.1,
   tcl = -0.3, mgp = c(2.5, 0.7, 0)
 )
 
-plot_slices(cp_slice_runoff, "Surface Runoff")
+plot_slices(cp_slice_runoff, "Runoff")
 plot_slices(cp_slice_snow, "Snow Density")
 plot_slices(cp_slice_soil, "Soil Moisture")
 plot_slices(cp_slice_temp, "Temperature")
@@ -452,7 +442,11 @@ plot_slices(cp_slice_precip, "Precipitation")
 plot_slices(cp_slice_wind, "Wind Speed")
 plot_slices(cp_slice_bird, "Total Bird Abundance")
 
+mtext("Lag (weeks)", side = 1, outer = TRUE, line = 0, cex = 1.2)
+mtext("Odds Ratio (95% CI)", side = 2, outer = TRUE, line = 0, cex = 1.2)
+
 dev.off()
+
 
 ```
 
@@ -481,7 +475,7 @@ extract_lag_ORs_wide <- function(cp_obj, varname, varval = "0.5", lags = 0:4) {
 # Create Lag-Specific Table
 # ----------------------------
 table_lag_ORs <- bind_rows(
-  extract_lag_ORs_wide(cp_slice_runoff, "Surface Runoff"),
+  extract_lag_ORs_wide(cp_slice_runoff, "Runoff"),
   extract_lag_ORs_wide(cp_slice_snow, "Snow Density"),
   extract_lag_ORs_wide(cp_slice_soil, "Soil Moisture"),
   extract_lag_ORs_wide(cp_slice_temp, "Temperature"),
@@ -517,16 +511,269 @@ for (i in lags) {
 doc <- read_docx() %>%
   body_add_flextable(ft) %>%
   body_add_par(
-    "Table 1: Lag-Specific Odds Ratios for Case-Crossover Study on the Association between Environmental Conditions and Highly Pathogenic Avian Influenza Outbreaks in Minnesota, 2022. Estimates are per 0.5 standard deviation increase in each predictor. Statistically significant odds ratios are shown in bold.",
+    "Table: Lag-Specific Odds Ratios for Case-Crossover Study on the Association between Environmental Conditions and Highly Pathogenic Avian Influenza Outbreaks in Minnesota, 2022. Estimates are per 0.5 standard deviation increase in each predictor. Statistically significant odds ratios are shown in bold.",
     style = "Normal"
   )
 
-print(doc, target = file.path(tables_folder, "Table_LagSpecific_OR_HPAI_Minnesota.docx"))
+print(doc, target = file.path(tables_folder, "Table_LagSpecific_OR_HPAI_Casecrossover.docx"))
 
 ft
 
 ```
 
+### Cumulative odds ratio table (0-4 lag)
+
+
+```{r, cumulative odds ratios}
+## Save lag specific so we can patch with cumulative
+
+ft_lagspecific <- ft
+
+# ----------------------------
+# Extract Lag-Specific ORs (Wide)
+# ----------------------------
+extract_lag_ORs_wide <- function(cp_obj, varname, varval = "0.5", lags = 0:4) {
+  lag_labels <- paste0("lag", lags)
+  or    <- cp_obj$cumRRfit[varval, lag_labels]
+  low   <- cp_obj$cumRRlow[varval, lag_labels]
+  high  <- cp_obj$cumRRhigh[varval, lag_labels]  # FIXED HERE
+  tibble(
+    Predictor = varname,
+    !!!setNames(as.list(or),   paste0("OR_Lag", lags)),
+    !!!setNames(as.list(low),  paste0("Low_Lag", lags)),
+    !!!setNames(as.list(high), paste0("High_Lag", lags)),
+    !!!setNames(as.list(sprintf("%.2f (%.2f, %.2f)", or, low, high)), paste0("Lag ", lags))
+  )
+}
+
+
+# ----------------------------
+# Create Cumulative OR Table
+# ----------------------------
+table_lag_ORs_cum <- bind_rows(
+  extract_lag_ORs_wide(cp_runoff, "Runoff"),
+  extract_lag_ORs_wide(cp_snow, "Snow Density"),
+  extract_lag_ORs_wide(cp_soil, "Soil Moisture"),
+  extract_lag_ORs_wide(cp_temp, "Temperature"),
+  extract_lag_ORs_wide(cp_precip, "Precipitation"),
+  extract_lag_ORs_wide(cp_wind, "Wind Speed"),
+  extract_lag_ORs_wide(cp_bird, "Total Bird Abundance")
+)
+
+
+
+# Highlight significant rows
+lags <- 0:4
+highlight_matrix <- sapply(lags, function(i) {
+  table_lag_ORs_cum[[paste0("Low_Lag", i)]] > 1 | table_lag_ORs_cum[[paste0("High_Lag", i)]] < 1
+})
+colnames(highlight_matrix) <- paste0("Lag ", lags)
+
+# Export to Word
+ft_cum <- table_lag_ORs_cum %>%
+  select(Predictor, paste0("Lag ", lags)) %>%
+  flextable() %>%
+  set_header_labels(Predictor = "Predictor") %>%
+  add_header_row(values = c("Predictor", "Odds Ratio (95% CI)"), colwidths = c(1, length(lags))) %>%
+  fontsize(size = 11, part = "all") %>%
+  autofit() %>%
+  align(align = "center", part = "all") %>%
+  theme_booktabs()
+
+for (i in lags) {
+  ft_cum <- bold(ft_cum, i = which(highlight_matrix[, paste0("Lag ", i)]), j = paste0("Lag ", i))
+}
+
+doc <- read_docx() %>%
+  body_add_flextable(ft_cum) %>%
+  body_add_par(
+    "Table: Cumulative Odds Ratios for Case-Crossover Study on the Association between Environmental Conditions and Highly Pathogenic Avian Influenza Outbreaks in Minnesota, 2022. Estimates are per 0.5 standard deviation increase in each predictor. Statistically significant odds ratios are shown in bold.",
+    style = "Normal"
+  )
+
+print(doc, target = file.path(tables_folder, "Table_Cumulative_OR_HPAI_Casscrossover.docx"))
+
+ft_cum
+
+```
+
+#### Combine cumulative and lag-specific odds ratio tables
+
+```{r, combine and lagspecific odds ratio tables}
+
+panel_label <- function(txt, size = 11) {
+  fp <- fp_text(bold = TRUE, font.size = size)
+  fpar(ftext(txt, fp))
+}
+
+doc <- read_docx() %>%
+  # Panel A
+  body_add_fpar(panel_label("A. Lag-specific odds ratios (per +0.5 SD)")) %>%
+  body_add_flextable(ft_lagspecific) %>%
+  body_add_par("", style = "Normal") %>%   # spacer
+
+  # Panel B
+  body_add_fpar(panel_label("B. Cumulative odds ratios (per +0.5 SD)")) %>%
+  body_add_flextable(ft_cum)
+
+print(doc, target = file.path(tables_folder, "Table_LagSpecific_and_Cumulative_ORs_Casecrossover.docx"))
+
+
+```
+
+
+
+### Cumulative odds ratio table (0-1 lag, 2-4 lag)
+
+```{r, cumulative odds ratio lag sections}
+
+
+# Cumulative Crosspreds by Lag Window (0–1 and 2–4)
+
+# ---- Surface Runoff ----
+cp_runoff_0_1 <- crosspred(cb_runoff, final_model, cen = 0, at = 0.5,
+                           cumul = TRUE, from = 0, to = 1)
+cp_runoff_2_4 <- crosspred(cb_runoff, final_model, cen = 0, at = 0.5,
+                           cumul = TRUE, from = 2, to = 4)
+
+# ---- Snow Density ----
+cp_snow_0_1 <- crosspred(cb_snow_density, final_model, cen = 0, at = 0.5,
+                         cumul = TRUE, from = 0, to = 1)
+cp_snow_2_4 <- crosspred(cb_snow_density, final_model, cen = 0, at = 0.5,
+                         cumul = TRUE, from = 2, to = 4)
+
+# ---- Soil Moisture ----
+cp_soil_0_1 <- crosspred(cb_soil_moisture, final_model, cen = 0, at = 0.5,
+                         cumul = TRUE, from = 0, to = 1)
+cp_soil_2_4 <- crosspred(cb_soil_moisture, final_model, cen = 0, at = 0.5,
+                         cumul = TRUE, from = 2, to = 4)
+
+# ---- Temperature ----
+cp_temp_0_1 <- crosspred(cb_temperature, final_model, cen = 0, at = 0.5,
+                         cumul = TRUE, from = 0, to = 1)
+cp_temp_2_4 <- crosspred(cb_temperature, final_model, cen = 0, at = 0.5,
+                         cumul = TRUE, from = 2, to = 4)
+
+# ---- Precipitation ----
+cp_precip_0_1 <- crosspred(cb_precipitation, final_model, cen = 0, at = 0.5,
+                           cumul = TRUE, from = 0, to = 1)
+cp_precip_2_4 <- crosspred(cb_precipitation, final_model, cen = 0, at = 0.5,
+                           cumul = TRUE, from = 2, to = 4)
+
+# ---- Wind Speed ----
+cp_wind_0_1 <- crosspred(cb_wind_speed, final_model, cen = 0, at = 0.5,
+                         cumul = TRUE, from = 0, to = 1)
+cp_wind_2_4 <- crosspred(cb_wind_speed, final_model, cen = 0, at = 0.5,
+                         cumul = TRUE, from = 2, to = 4)
+
+# ---- Total Bird Abundance ----
+cp_bird_0_1 <- crosspred(cb_total_bird_abundance, final_model, cen = 0, at = 0.5,
+                         cumul = TRUE, from = 0, to = 1)
+cp_bird_2_4 <- crosspred(cb_total_bird_abundance, final_model, cen = 0, at = 0.5,
+                         cumul = TRUE, from = 2, to = 4)
+
+# Table
+
+table_cum_ORs <- tibble(
+  Predictor = c("Surface Runoff", "Snow Density", "Soil Moisture",
+                "Temperature", "Precipitation", "Wind Speed", "Total Bird Abundance"),
+
+  `Lag 0–1` = c(
+    sprintf("%.2f (%.2f, %.2f)", cp_runoff_0_1$cumRRfit["0.5", 1],
+                                  cp_runoff_0_1$cumRRlow["0.5", 1],
+                                  cp_runoff_0_1$cumRRhigh["0.5", 1]),
+    sprintf("%.2f (%.2f, %.2f)", cp_snow_0_1$cumRRfit["0.5", 1],
+                                  cp_snow_0_1$cumRRlow["0.5", 1],
+                                  cp_snow_0_1$cumRRhigh["0.5", 1]),
+    sprintf("%.2f (%.2f, %.2f)", cp_soil_0_1$cumRRfit["0.5", 1],
+                                  cp_soil_0_1$cumRRlow["0.5", 1],
+                                  cp_soil_0_1$cumRRhigh["0.5", 1]),
+    sprintf("%.2f (%.2f, %.2f)", cp_temp_0_1$cumRRfit["0.5", 1],
+                                  cp_temp_0_1$cumRRlow["0.5", 1],
+                                  cp_temp_0_1$cumRRhigh["0.5", 1]),
+    sprintf("%.2f (%.2f, %.2f)", cp_precip_0_1$cumRRfit["0.5", 1],
+                                  cp_precip_0_1$cumRRlow["0.5", 1],
+                                  cp_precip_0_1$cumRRhigh["0.5", 1]),
+    sprintf("%.2f (%.2f, %.2f)", cp_wind_0_1$cumRRfit["0.5", 1],
+                                  cp_wind_0_1$cumRRlow["0.5", 1],
+                                  cp_wind_0_1$cumRRhigh["0.5", 1]),
+    sprintf("%.2f (%.2f, %.2f)", cp_bird_0_1$cumRRfit["0.5", 1],
+                                  cp_bird_0_1$cumRRlow["0.5", 1],
+                                  cp_bird_0_1$cumRRhigh["0.5", 1])
+  ),
+
+  `Lag 2–4` = c(
+    sprintf("%.2f (%.2f, %.2f)", cp_runoff_2_4$cumRRfit["0.5", 4],
+                                  cp_runoff_2_4$cumRRlow["0.5", 4],
+                                  cp_runoff_2_4$cumRRhigh["0.5", 4]),
+    sprintf("%.2f (%.2f, %.2f)", cp_snow_2_4$cumRRfit["0.5", 4],
+                                  cp_snow_2_4$cumRRlow["0.5", 4],
+                                  cp_snow_2_4$cumRRhigh["0.5", 4]),
+    sprintf("%.2f (%.2f, %.2f)", cp_soil_2_4$cumRRfit["0.5", 4],
+                                  cp_soil_2_4$cumRRlow["0.5", 4],
+                                  cp_soil_2_4$cumRRhigh["0.5", 4]),
+    sprintf("%.2f (%.2f, %.2f)", cp_temp_2_4$cumRRfit["0.5", 4],
+                                  cp_temp_2_4$cumRRlow["0.5", 4],
+                                  cp_temp_2_4$cumRRhigh["0.5", 4]),
+    sprintf("%.2f (%.2f, %.2f)", cp_precip_2_4$cumRRfit["0.5", 4],
+                                  cp_precip_2_4$cumRRlow["0.5", 4],
+                                  cp_precip_2_4$cumRRhigh["0.5", 4]),
+    sprintf("%.2f (%.2f, %.2f)", cp_wind_2_4$cumRRfit["0.5", 4],
+                                  cp_wind_2_4$cumRRlow["0.5", 4],
+                                  cp_wind_2_4$cumRRhigh["0.5", 4]),
+    sprintf("%.2f (%.2f, %.2f)", cp_bird_2_4$cumRRfit["0.5", 4],
+                                  cp_bird_2_4$cumRRlow["0.5", 4],
+                                  cp_bird_2_4$cumRRhigh["0.5", 4])
+  )
+)
+
+
+
+# Highlight significant results
+
+
+highlight_matrix <- sapply(c("Lag 0–1", "Lag 2–4"), function(w) {
+  apply(table_cum_ORs, 1, function(x) {
+    parts <- as.numeric(unlist(strsplit(gsub("[()]", "", x[[w]]), "[ ,]+")))
+    low <- parts[2]; high <- parts[3]
+    low > 1 | high < 1
+  })
+})
+colnames(highlight_matrix) <- c("Lag 0–1", "Lag 2–4")
+
+
+# Build Flextable
+
+
+ft_cum <- table_cum_ORs %>%
+  flextable() %>%
+  set_header_labels(Predictor = "Predictor") %>%
+  add_header_row(values = c("Predictor", "Cumulative Odds Ratio (95% CI)"), colwidths = c(1, 2)) %>%
+  fontsize(size = 11, part = "all") %>%
+  autofit() %>%
+  align(align = "center", part = "all") %>%
+  theme_booktabs()
+
+for (w in c("Lag 0–1", "Lag 2–4")) {
+  ft_cum <- bold(ft_cum, i = which(highlight_matrix[, w]), j = w)
+}
+
+
+# Export to Word
+
+
+doc <- read_docx() %>%
+  body_add_flextable(ft_cum) %>%
+  body_add_par(
+    "Table: Cumulative Odds Ratios for Case-Crossover Study on the Association between Environmental Conditions and Highly Pathogenic Avian Influenza Outbreaks in Minnesota (Fall + Spring 2022). Odds ratios represent cumulative effects over lag windows (0–1 weeks, 2–4 weeks) per 0.5 SD increase in each predictor. Statistically significant associations are shown in bold.",
+    style = "Normal"
+  )
+
+print(doc, target = file.path(tables_folder, "Table_Cumulative_OR_HPAI_Minnesota.docx"))
+
+ft_cum
+
+```
 
 ## Case-Crossover Model with Flexible Crossbasis
 
@@ -554,21 +801,21 @@ saveRDS(final_model_flex, file.path(objects_folder, "casecrossover_flexible_mode
 # ----------------------------
 # Crosspred Objects
 # ----------------------------
-cp_flex__runoff       <- crosspred(cb_flex_runoff, final_model_flex, cen = 0, at = 0.5, cumul = TRUE)
-cp_flex__snow         <- crosspred(cb_flex_snow_density, final_model_flex, cen = 0, at = 0.5, cumul = TRUE)
-cp_flex__soil         <- crosspred(cb_flex_soil_moisture, final_model_flex, cen = 0, at = 0.5, cumul = TRUE)
-cp_flex__temp         <- crosspred(cb_flex_temperature, final_model_flex, cen = 0, at = 0.5, cumul = TRUE)
-cp_flex__precip       <- crosspred(cb_flex_precipitation, final_model_flex, cen = 0, at = 0.5, cumul = TRUE)
-cp_flex__wind         <- crosspred(cb_flex_wind_speed, final_model_flex, cen = 0, at = 0.5, cumul = TRUE)
-cp_flex__bird         <- crosspred(cb_flex_total_bird_abundance, final_model_flex, cen = 0, at = 0.5, cumul = TRUE)
+cp_flex_runoff       <- crosspred(cb_flex_runoff, final_model_flex, cen = 0, at = 0.5, cumul = TRUE)
+cp_flex_snow         <- crosspred(cb_flex_snow_density, final_model_flex, cen = 0, at = 0.5, cumul = TRUE)
+cp_flex_soil         <- crosspred(cb_flex_soil_moisture, final_model_flex, cen = 0, at = 0.5, cumul = TRUE)
+cp_flex_temp         <- crosspred(cb_flex_temperature, final_model_flex, cen = 0, at = 0.5, cumul = TRUE)
+cp_flex_precip       <- crosspred(cb_flex_precipitation, final_model_flex, cen = 0, at = 0.5, cumul = TRUE)
+cp_flex_wind         <- crosspred(cb_flex_wind_speed, final_model_flex, cen = 0, at = 0.5, cumul = TRUE)
+cp_flex_bird         <- crosspred(cb_flex_total_bird_abundance, final_model_flex, cen = 0, at = 0.5, cumul = TRUE)
 
-cp_flex__slice_runoff <- crosspred(cb_flex_runoff, final_model_flex, cen = 0, at = 0.5)
-cp_flex__slice_snow   <- crosspred(cb_flex_snow_density, final_model_flex, cen = 0, at = 0.5)
-cp_flex__slice_soil   <- crosspred(cb_flex_soil_moisture, final_model_flex, cen = 0, at = 0.5)
-cp_flex__slice_temp   <- crosspred(cb_flex_temperature, final_model_flex, cen = 0, at = 0.5)
-cp_flex__slice_precip <- crosspred(cb_flex_precipitation, final_model_flex, cen = 0, at = 0.5)
-cp_flex__slice_wind   <- crosspred(cb_flex_wind_speed, final_model_flex, cen = 0, at = 0.5)
-cp_flex__slice_bird   <- crosspred(cb_flex_total_bird_abundance, final_model_flex, cen = 0, at = 0.5)
+cp_flex_slice_runoff <- crosspred(cb_flex_runoff, final_model_flex, cen = 0, at = 0.5)
+cp_flex_slice_snow   <- crosspred(cb_flex_snow_density, final_model_flex, cen = 0, at = 0.5)
+cp_flex_slice_soil   <- crosspred(cb_flex_soil_moisture, final_model_flex, cen = 0, at = 0.5)
+cp_flex_slice_temp   <- crosspred(cb_flex_temperature, final_model_flex, cen = 0, at = 0.5)
+cp_flex_slice_precip <- crosspred(cb_flex_precipitation, final_model_flex, cen = 0, at = 0.5)
+cp_flex_slice_wind   <- crosspred(cb_flex_wind_speed, final_model_flex, cen = 0, at = 0.5)
+cp_flex_slice_bird   <- crosspred(cb_flex_total_bird_abundance, final_model_flex, cen = 0, at = 0.5)
 
 ```
 
@@ -581,31 +828,31 @@ cumulative_summary <- tibble(
   Predictor = c("Surface Runoff", "Snow Density", "Soil Moisture", "Temperature",
                 "Precipitation", "Wind Speed", "Total Bird Abundance"),
       OR = c(
-        cp_flex__runoff$allRRfit["0.5"],
-        cp_flex__snow$allRRfit["0.5"],
-        cp_flex__soil$allRRfit["0.5"],
-        cp_flex__temp$allRRfit["0.5"],
-        cp_flex__precip$allRRfit["0.5"],
-        cp_flex__wind$allRRfit["0.5"],
-        cp_flex__bird$allRRfit["0.5"]
+        cp_flex_runoff$allRRfit["0.5"],
+        cp_flex_snow$allRRfit["0.5"],
+        cp_flex_soil$allRRfit["0.5"],
+        cp_flex_temp$allRRfit["0.5"],
+        cp_flex_precip$allRRfit["0.5"],
+        cp_flex_wind$allRRfit["0.5"],
+        cp_flex_bird$allRRfit["0.5"]
       ),
       CI_low = c(
-        cp_flex__runoff$allRRlow["0.5"],
-        cp_flex__snow$allRRlow["0.5"],
-        cp_flex__soil$allRRlow["0.5"],
-        cp_flex__temp$allRRlow["0.5"],
-        cp_flex__precip$allRRlow["0.5"],
-        cp_flex__wind$allRRlow["0.5"],
-        cp_flex__bird$allRRlow["0.5"]
+        cp_flex_runoff$allRRlow["0.5"],
+        cp_flex_snow$allRRlow["0.5"],
+        cp_flex_soil$allRRlow["0.5"],
+        cp_flex_temp$allRRlow["0.5"],
+        cp_flex_precip$allRRlow["0.5"],
+        cp_flex_wind$allRRlow["0.5"],
+        cp_flex_bird$allRRlow["0.5"]
       ),
       CI_high = c(
-        cp_flex__runoff$allRRhigh["0.5"],
-        cp_flex__snow$allRRhigh["0.5"],
-        cp_flex__soil$allRRhigh["0.5"],
-        cp_flex__temp$allRRhigh["0.5"],
-        cp_flex__precip$allRRhigh["0.5"],
-        cp_flex__wind$allRRhigh["0.5"],
-        cp_flex__bird$allRRhigh["0.5"]
+        cp_flex_runoff$allRRhigh["0.5"],
+        cp_flex_snow$allRRhigh["0.5"],
+        cp_flex_soil$allRRhigh["0.5"],
+        cp_flex_temp$allRRhigh["0.5"],
+        cp_flex_precip$allRRhigh["0.5"],
+        cp_flex_wind$allRRhigh["0.5"],
+        cp_flex_bird$allRRhigh["0.5"]
       )
 ) %>%
   mutate(`OR (95% CI)` = sprintf("%.2f (%.2f, %.2f)", OR, CI_low, CI_high)) %>%
@@ -623,20 +870,22 @@ cumulative_summary <- tibble(
     data_row.padding = px(6)
   )
 
+cumulative_summary
+
 # ----------------------------
 # Plotting Functions
 # ----------------------------
 plot_cumulative <- function(cp_flex_, title) {
   plot(cp_flex_, type = "cumulative", var = 0.5, ci = "area",
        col = "black", ci.arg = list(col = rgb(0,0,0,0.1), border = NA),
-       lwd = 1.5, main = title, xlab = "Lag (weeks)", ylab = "OR (95% CI)", las = 1)
+       lwd = 1.5, main = title, xlab = "", ylab = "", las = 1)
   abline(h = 1, lty = 2, col = "gray40")
 }
 
 plot_slices <- function(cp_flex_, title) {
   plot(cp_flex_, type = "slices", var = 0.5, ci = "area",
        col = "black", ci.arg = list(col = rgb(0,0,0,0.1), border = NA),
-       lwd = 1.3, main = title, xlab = "Lag (weeks)", ylab = "OR (95% CI)", las = 1)
+       lwd = 1.3, main = title, xlab = "", ylab = "", las = 1)
   abline(h = 1, lty = 2, col = "gray40")
 }
 
@@ -647,36 +896,24 @@ png(file.path(figures_folder,"figure_cumulative_ORs_casecrossover_flexmodel.png"
 
 par(
   mfrow = c(2, 4),
-  mar = c(4.2, 4.2, 2.5, 1),   # inner margin
-  oma = c(1, 1, 0, 1),         # outer margin — removed top title
-  cex.main = 1.2,              # plot title text size
-  cex.lab = 1.2,               # axis label size
-  cex.axis = 1.1,              # axis tick label size
+  mar = c(4.2, 4.2, 2.5, 1),
+  oma = c(3, 4, 0, 1),
+  cex.main = 1.2,
+  cex.lab = 1.2,
+  cex.axis = 1.1,
   tcl = -0.3, mgp = c(2.5, 0.7, 0)
 )
 
-plot_cumulative <- function(cp_flex_, title) {
-  plot(cp_flex_,
-       type = "cumulative",
-       var = 0.5,
-       ci = "area",
-       col = "black",
-       ci.arg = list(col = rgb(0, 0, 0, 0.1), border = NA),
-       lwd = 1.7,
-       main = title,
-       xlab = "Lag (weeks)",
-       ylab = "OR (95% CI)",
-       las = 1)
-  abline(h = 1, lty = 2, col = "gray40", lwd = 1)
-}
+plot_cumulative(cp_flex_runoff, "Runoff")
+plot_cumulative(cp_flex_snow, "Snow Density")
+plot_cumulative(cp_flex_soil, "Soil Moisture")
+plot_cumulative(cp_flex_temp, "Temperature")
+plot_cumulative(cp_flex_precip, "Precipitation")
+plot_cumulative(cp_flex_wind, "Wind Speed")
+plot_cumulative(cp_flex_bird, "Total Bird Abundance")
 
-plot_cumulative(cp_flex__runoff, "Surface Runoff")
-plot_cumulative(cp_flex__snow, "Snow Density")
-plot_cumulative(cp_flex__soil, "Soil Moisture")
-plot_cumulative(cp_flex__temp, "Temperature")
-plot_cumulative(cp_flex__precip, "Precipitation")
-plot_cumulative(cp_flex__wind, "Wind Speed")
-plot_cumulative(cp_flex__bird, "Total Bird Abundance")
+mtext("Lag (weeks)", side = 1, outer = TRUE, line = 0, cex = 1.2)
+mtext("Odds Ratio (95% CI)", side = 2, outer = TRUE, line = 0, cex = 1.2)
 
 # ----------------------------
 # Save Slices Plot
@@ -685,21 +922,24 @@ png(file.path(figures_folder,"figure_slice_ORs_casecrossover_flexmodel.png"), wi
 
 par(
   mfrow = c(2, 4),
-  mar = c(4.2, 4.2, 2.5, 1),   # inner margin
-  oma = c(1, 1, 0, 1),         # outer margin — removed top title
-  cex.main = 1.2,              # plot title text size
-  cex.lab = 1.2,               # axis label size
-  cex.axis = 1.1,              # axis tick label size
+  mar = c(4.2, 4.2, 2.5, 1),
+  oma = c(3, 4, 0, 1),
+  cex.main = 1.2,
+  cex.lab = 1.2,
+  cex.axis = 1.1,
   tcl = -0.3, mgp = c(2.5, 0.7, 0)
 )
 
-plot_slices(cp_flex__slice_runoff, "Surface Runoff")
-plot_slices(cp_flex__slice_snow, "Snow Density")
-plot_slices(cp_flex__slice_soil, "Soil Moisture")
-plot_slices(cp_flex__slice_temp, "Temperature")
-plot_slices(cp_flex__slice_precip, "Precipitation")
-plot_slices(cp_flex__slice_wind, "Wind Speed")
-plot_slices(cp_flex__slice_bird, "Total Bird Abundance")
+plot_slices(cp_flex_slice_runoff, "Runoff")
+plot_slices(cp_flex_slice_snow, "Snow Density")
+plot_slices(cp_flex_slice_soil, "Soil Moisture")
+plot_slices(cp_flex_slice_temp, "Temperature")
+plot_slices(cp_flex_slice_precip, "Precipitation")
+plot_slices(cp_flex_slice_wind, "Wind Speed")
+plot_slices(cp_flex_slice_bird, "Total Bird Abundance")
+
+mtext("Lag (weeks)", side = 1, outer = TRUE, line = 0, cex = 1.2)
+mtext("Odds Ratio (95% CI)", side = 2, outer = TRUE, line = 0, cex = 1.2)
 
 dev.off()
 
@@ -711,11 +951,11 @@ dev.off()
 # ----------------------------
 # Extract Lag-Specific ORs (Wide)
 # ----------------------------
-extract_lag_ORs_wide <- function(cp_flex__obj, varname, varval = "0.5", lags = 0:4) {
+extract_lag_ORs_wide <- function(cp_flex_obj, varname, varval = "0.5", lags = 0:4) {
   lag_labels <- paste0("lag", lags)
-  or    <- cp_flex__obj$matRRfit[varval, lag_labels]
-  low   <- cp_flex__obj$matRRlow[varval, lag_labels]
-  high  <- cp_flex__obj$matRRhigh[varval, lag_labels]  # FIXED HERE
+  or    <- cp_flex_obj$matRRfit[varval, lag_labels]
+  low   <- cp_flex_obj$matRRlow[varval, lag_labels]
+  high  <- cp_flex_obj$matRRhigh[varval, lag_labels]  
   tibble(
     Predictor = varname,
     !!!setNames(as.list(or),   paste0("OR_Lag", lags)),
@@ -730,13 +970,13 @@ extract_lag_ORs_wide <- function(cp_flex__obj, varname, varval = "0.5", lags = 0
 # Create Lag-Specific Table
 # ----------------------------
 table_lag_ORs <- bind_rows(
-  extract_lag_ORs_wide(cp_flex__slice_runoff, "Surface Runoff"),
-  extract_lag_ORs_wide(cp_flex__slice_snow, "Snow Density"),
-  extract_lag_ORs_wide(cp_flex__slice_soil, "Soil Moisture"),
-  extract_lag_ORs_wide(cp_flex__slice_temp, "Temperature"),
-  extract_lag_ORs_wide(cp_flex__slice_precip, "Precipitation"),
-  extract_lag_ORs_wide(cp_flex__slice_wind, "Wind Speed"),
-  extract_lag_ORs_wide(cp_flex__slice_bird, "Total Bird Abundance")
+  extract_lag_ORs_wide(cp_flex_slice_runoff, "Runoff"),
+  extract_lag_ORs_wide(cp_flex_slice_snow, "Snow Density"),
+  extract_lag_ORs_wide(cp_flex_slice_soil, "Soil Moisture"),
+  extract_lag_ORs_wide(cp_flex_slice_temp, "Temperature"),
+  extract_lag_ORs_wide(cp_flex_slice_precip, "Precipitation"),
+  extract_lag_ORs_wide(cp_flex_slice_wind, "Wind Speed"),
+  extract_lag_ORs_wide(cp_flex_slice_bird, "Total Bird Abundance")
 )
 
 
@@ -766,13 +1006,167 @@ for (i in lags) {
 doc <- read_docx() %>%
   body_add_flextable(ft) %>%
   body_add_par(
-    "Table 1: Lag-Specific Odds Ratios for Case-Crossover Study on the Association between Environmental Conditions and Highly Pathogenic Avian Influenza Outbreaks in Minnesota, 2022. Estimates are per 0.5 standard deviation increase in each predictor. Statistically significant odds ratios are shown in bold.",
+    "Table: Lag-Specific Odds Ratios for Case-Crossover Study on the Association between Environmental Conditions and Highly Pathogenic Avian Influenza Outbreaks in Minnesota, 2022. Estimates are per 0.5 standard deviation increase in each predictor. Statistically significant odds ratios are shown in bold.",
     style = "Normal"
   )
 
 print(doc, target = file.path(tables_folder, "Table_LagSpecific_OR_HPAI_Minnesota_flexmodel.docx"))
 
 ft
+
+```
+
+
+
+## Cumulative odds ratio table (0-1 lag, 2-4 lag)
+
+```{r, cumulative odds ratio lag sections}
+
+
+# Cumulative Crosspreds by Lag Window (0–1 and 2–4)
+
+# ---- Surface Runoff ----
+cp_runoff_0_1 <- crosspred(cb_flex_runoff, final_model_flex, cen = 0, at = 0.5,
+                           cumul = TRUE, from = 0, to = 1)
+cp_runoff_2_4 <- crosspred(cb_flex_runoff, final_model_flex, cen = 0, at = 0.5,
+                           cumul = TRUE, from = 2, to = 4)
+
+# ---- Snow Density ----
+cp_snow_0_1 <- crosspred(cb_flex_snow_density, final_model_flex, cen = 0, at = 0.5,
+                         cumul = TRUE, from = 0, to = 1)
+cp_snow_2_4 <- crosspred(cb_flex_snow_density, final_model_flex, cen = 0, at = 0.5,
+                         cumul = TRUE, from = 2, to = 4)
+
+# ---- Soil Moisture ----
+cp_soil_0_1 <- crosspred(cb_flex_soil_moisture, final_model_flex, cen = 0, at = 0.5,
+                         cumul = TRUE, from = 0, to = 1)
+cp_soil_2_4 <- crosspred(cb_flex_soil_moisture, final_model_flex, cen = 0, at = 0.5,
+                         cumul = TRUE, from = 2, to = 4)
+
+# ---- Temperature ----
+cp_temp_0_1 <- crosspred(cb_flex_temperature, final_model_flex, cen = 0, at = 0.5,
+                         cumul = TRUE, from = 0, to = 1)
+cp_temp_2_4 <- crosspred(cb_flex_temperature, final_model_flex, cen = 0, at = 0.5,
+                         cumul = TRUE, from = 2, to = 4)
+
+# ---- Precipitation ----
+cp_precip_0_1 <- crosspred(cb_flex_precipitation, final_model_flex, cen = 0, at = 0.5,
+                           cumul = TRUE, from = 0, to = 1)
+cp_precip_2_4 <- crosspred(cb_flex_precipitation, final_model_flex, cen = 0, at = 0.5,
+                           cumul = TRUE, from = 2, to = 4)
+
+# ---- Wind Speed ----
+cp_wind_0_1 <- crosspred(cb_flex_wind_speed, final_model_flex, cen = 0, at = 0.5,
+                         cumul = TRUE, from = 0, to = 1)
+cp_wind_2_4 <- crosspred(cb_flex_wind_speed, final_model_flex, cen = 0, at = 0.5,
+                         cumul = TRUE, from = 2, to = 4)
+
+# ---- Total Bird Abundance ----
+cp_bird_0_1 <- crosspred(cb_flex_total_bird_abundance, final_model_flex, cen = 0, at = 0.5,
+                         cumul = TRUE, from = 0, to = 1)
+cp_bird_2_4 <- crosspred(cb_flex_total_bird_abundance, final_model_flex, cen = 0, at = 0.5,
+                         cumul = TRUE, from = 2, to = 4)
+
+# Table
+
+table_cum_ORs <- tibble(
+  Predictor = c("Surface Runoff", "Snow Density", "Soil Moisture",
+                "Temperature", "Precipitation", "Wind Speed", "Total Bird Abundance"),
+
+  `Lag 0–1` = c(
+    sprintf("%.2f (%.2f, %.2f)", cp_runoff_0_1$cumRRfit["0.5", 1],
+                                  cp_runoff_0_1$cumRRlow["0.5", 1],
+                                  cp_runoff_0_1$cumRRhigh["0.5", 1]),
+    sprintf("%.2f (%.2f, %.2f)", cp_snow_0_1$cumRRfit["0.5", 1],
+                                  cp_snow_0_1$cumRRlow["0.5", 1],
+                                  cp_snow_0_1$cumRRhigh["0.5", 1]),
+    sprintf("%.2f (%.2f, %.2f)", cp_soil_0_1$cumRRfit["0.5", 1],
+                                  cp_soil_0_1$cumRRlow["0.5", 1],
+                                  cp_soil_0_1$cumRRhigh["0.5", 1]),
+    sprintf("%.2f (%.2f, %.2f)", cp_temp_0_1$cumRRfit["0.5", 1],
+                                  cp_temp_0_1$cumRRlow["0.5", 1],
+                                  cp_temp_0_1$cumRRhigh["0.5", 1]),
+    sprintf("%.2f (%.2f, %.2f)", cp_precip_0_1$cumRRfit["0.5", 1],
+                                  cp_precip_0_1$cumRRlow["0.5", 1],
+                                  cp_precip_0_1$cumRRhigh["0.5", 1]),
+    sprintf("%.2f (%.2f, %.2f)", cp_wind_0_1$cumRRfit["0.5", 1],
+                                  cp_wind_0_1$cumRRlow["0.5", 1],
+                                  cp_wind_0_1$cumRRhigh["0.5", 1]),
+    sprintf("%.2f (%.2f, %.2f)", cp_bird_0_1$cumRRfit["0.5", 1],
+                                  cp_bird_0_1$cumRRlow["0.5", 1],
+                                  cp_bird_0_1$cumRRhigh["0.5", 1])
+  ),
+
+  `Lag 2–4` = c(
+    sprintf("%.2f (%.2f, %.2f)", cp_runoff_2_4$cumRRfit["0.5", 4],
+                                  cp_runoff_2_4$cumRRlow["0.5", 4],
+                                  cp_runoff_2_4$cumRRhigh["0.5", 4]),
+    sprintf("%.2f (%.2f, %.2f)", cp_snow_2_4$cumRRfit["0.5", 4],
+                                  cp_snow_2_4$cumRRlow["0.5", 4],
+                                  cp_snow_2_4$cumRRhigh["0.5", 4]),
+    sprintf("%.2f (%.2f, %.2f)", cp_soil_2_4$cumRRfit["0.5", 4],
+                                  cp_soil_2_4$cumRRlow["0.5", 4],
+                                  cp_soil_2_4$cumRRhigh["0.5", 4]),
+    sprintf("%.2f (%.2f, %.2f)", cp_temp_2_4$cumRRfit["0.5", 4],
+                                  cp_temp_2_4$cumRRlow["0.5", 4],
+                                  cp_temp_2_4$cumRRhigh["0.5", 4]),
+    sprintf("%.2f (%.2f, %.2f)", cp_precip_2_4$cumRRfit["0.5", 4],
+                                  cp_precip_2_4$cumRRlow["0.5", 4],
+                                  cp_precip_2_4$cumRRhigh["0.5", 4]),
+    sprintf("%.2f (%.2f, %.2f)", cp_wind_2_4$cumRRfit["0.5", 4],
+                                  cp_wind_2_4$cumRRlow["0.5", 4],
+                                  cp_wind_2_4$cumRRhigh["0.5", 4]),
+    sprintf("%.2f (%.2f, %.2f)", cp_bird_2_4$cumRRfit["0.5", 4],
+                                  cp_bird_2_4$cumRRlow["0.5", 4],
+                                  cp_bird_2_4$cumRRhigh["0.5", 4])
+  )
+)
+
+
+
+# Highlight significant results
+
+
+highlight_matrix <- sapply(c("Lag 0–1", "Lag 2–4"), function(w) {
+  apply(table_cum_ORs, 1, function(x) {
+    parts <- as.numeric(unlist(strsplit(gsub("[()]", "", x[[w]]), "[ ,]+")))
+    low <- parts[2]; high <- parts[3]
+    low > 1 | high < 1
+  })
+})
+colnames(highlight_matrix) <- c("Lag 0–1", "Lag 2–4")
+
+
+# Build Flextable
+
+
+ft_cum <- table_cum_ORs %>%
+  flextable() %>%
+  set_header_labels(Predictor = "Predictor") %>%
+  add_header_row(values = c("Predictor", "Cumulative Odds Ratio (95% CI)"), colwidths = c(1, 2)) %>%
+  fontsize(size = 11, part = "all") %>%
+  autofit() %>%
+  align(align = "center", part = "all") %>%
+  theme_booktabs()
+
+for (w in c("Lag 0–1", "Lag 2–4")) {
+  ft_cum <- bold(ft_cum, i = which(highlight_matrix[, w]), j = w)
+}
+
+
+# Export to Word
+
+
+doc <- read_docx() %>%
+  body_add_flextable(ft_cum) %>%
+  body_add_par(
+    "Table: Cumulative Odds Ratios for Case-Crossover Study on the Association between Environmental Conditions and Highly Pathogenic Avian Influenza Outbreaks in Minnesota (Fall + Spring 2022). Odds ratios represent cumulative effects over lag windows (0–1 weeks, 2–4 weeks) per 0.5 SD increase in each predictor. Statistically significant associations are shown in bold.",
+    style = "Normal"
+  )
+
+print(doc, target = file.path(tables_folder, "Table_Cumulative_OR_HPAI_Minnesota_flexmodel.docx"))
+
+ft_cum
 
 ```
 

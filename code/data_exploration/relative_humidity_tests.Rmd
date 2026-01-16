@@ -1,0 +1,252 @@
+---
+title: "relative_humidity_tests"
+author: "Fintan Mooney"
+date: "2025-10-31"
+output: html_document
+---
+
+# This R markdown file uses a casecrossover study design to model the association between meterological conditons, climate, and wild bird abundance, on risk of highly pathogenic avian influenza (HPAI) outbreaks in Minnesota farms during 2022
+
+## Here we are testing if the additon of relative humidity improves model fit
+
+```{r setup, include=FALSE}
+ 
+knitr::opts_chunk$set(echo = TRUE)
+ 
+# ---- Package setup ----
+packages <- c(
+  "MatchIt", "readr", "sf", "survival", "dlnm", "gtsummary", "kableExtra",
+  "tidyr", "tibble", "mgcv", "ggplot2", "car", "patchwork", "corrplot",
+  "purrr", "ggspatial", "gt", "flextable", "officer", "conflicted",
+  "dplyr", "data.table", "here"
+)
+
+installed <- packages %in% rownames(installed.packages())
+if (any(!installed)) install.packages(packages[!installed])
+
+invisible(lapply(packages, library, character.only = TRUE))
+
+# Resolve conflicts
+conflict_prefer("select", "dplyr")
+conflict_prefer("filter", "dplyr")
+
+# Project folders (e.g., where the .Rproj file is)
+base_folder <- here()
+data_folder <- here("data")
+env_folder <- here("data", "EarthEngine_MN")
+objects_folder <-here("data", "objects")
+figures_folder <-here("output", "figures")
+tables_folder <-here("output", "tables")
+
+list.files(here())
+
+```
+
+## Import casecrossover df
+
+```{r, import casecrossover df}
+
+case_crossover_df <- readRDS(file.path(objects_folder, "case_crossover_df.RDS"))
+
+```
+
+
+## Crossbasis Terms
+
+```{r, finalized crossbasis}
+
+
+# Finalized Crossbasis Terms for Climate and Bird Predictors
+
+# Leaf Area Index: linear, ns(df = 2)
+cb_leaf_area_index <- crossbasis(
+  x = as.matrix(case_crossover_df[, paste0("leaf_area_index_Lag", 0:4)]),
+  lag = c(0, 4),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 2)
+)
+
+# Longwave Radiation: linear, ns(df = 2)
+cb_longwave_radiation <- crossbasis(
+  x = as.matrix(case_crossover_df[, paste0("longwave_radiation_Lag", 0:4)]),
+  lag = c(0, 4),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 2)
+)
+
+# Precipitation: linear, ns(df = 2)
+cb_precipitation <- crossbasis(
+  x = as.matrix(case_crossover_df[, paste0("precipitation_Lag", 0:4)]),
+  lag = c(0, 4),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 2)
+)
+
+# Relative Humidity: linear, poly(degree = 2)
+cb_relative_humidity <- crossbasis(
+  x = as.matrix(case_crossover_df[, paste0("relative_humidity_Lag", 0:4)]),
+  lag = c(0, 4),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 2)
+)
+
+# Runoff: linear, poly(degree = 2)
+cb_runoff <- crossbasis(
+  x = as.matrix(case_crossover_df[, paste0("runoff_Lag", 0:4)]),
+  lag = c(0, 4),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 2)
+)
+
+# Shortwave Radiation: linear, poly(degree = 4)
+cb_shortwave_radiation <- crossbasis(
+  x = as.matrix(case_crossover_df[, paste0("shortwave_radiation_Lag", 0:4)]),
+  lag = c(0, 4),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 2)
+)
+
+# Snow Density: linear, poly(degree = 3)
+cb_snow_density <- crossbasis(
+  x = as.matrix(case_crossover_df[, paste0("snow_density_Lag", 0:4)]),
+  lag = c(0, 4),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 2)
+)
+
+# Soil Moisture: linear, ns(df = 2)
+cb_soil_moisture <- crossbasis(
+  x = as.matrix(case_crossover_df[, paste0("soil_moisture_Lag", 0:4)]),
+  lag = c(0, 4),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 2)
+)
+
+# Temperature: linear, poly(degree = 3)
+cb_temperature <- crossbasis(
+  x = as.matrix(case_crossover_df[, paste0("temperature_Lag", 0:4)]),
+  lag = c(0, 4),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 2)
+)
+
+
+# Total Bird Abundance: linear, ns(df = 2)
+cb_total_bird_abundance <- crossbasis(
+  x = as.matrix(case_crossover_df[, paste0("total_bird_abundance_Lag", 0:4)]),
+  lag = c(0, 4),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 2)
+)
+
+# Wind Speed: linear, poly(degree = 4)
+cb_wind_speed <- crossbasis(
+  x = as.matrix(case_crossover_df[, paste0("wind_speed_Lag", 0:4)]),
+  lag = c(0, 4),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 2)
+)
+
+# # # Anseriformes:
+#  cb_anseri <- crossbasis(
+#    x = as.matrix(case_crossover_df[, paste0("anseriformes_Lag", 0:8)]),
+#    lag = c(0, 8),
+#    argvar = list(fun = "lin"),
+#    arglag = list(fun = "poly", degree = 2)
+#  )
+#  
+# # # Predator:
+#  cb_predators <- crossbasis(
+#    x = as.matrix(case_crossover_df[, paste0("predators_Lag", 0:8)]),
+#    lag = c(0, 8),
+#    argvar = list(fun = "lin"),
+#    arglag = list(fun = "poly", degree = 2)
+#  )
+
+
+
+
+```
+
+
+```{r, test model}
+
+
+
+# Model 1: Current Final Model
+
+model_full <- clogit(
+  outbreak_binary ~ 
+    cb_runoff + cb_snow_density + cb_soil_moisture +
+    cb_temperature + cb_precipitation +
+    cb_wind_speed + cb_total_bird_abundance +
+    strata(stratum_id),
+  method = "efron",
+  data = case_crossover_df
+)
+
+
+# Model 2: Drop Relative Humidity (but keep Precipitation)
+
+model_no_rh <- clogit(
+  outbreak_binary ~ 
+    cb_runoff + cb_snow_density + cb_soil_moisture +
+    cb_temperature + cb_precipitation +
+    cb_wind_speed + cb_total_bird_abundance +
+    strata(stratum_id),
+  method = "efron",
+  data = case_crossover_df
+)
+
+
+# Model 3: Drop Precipitation (keep Relative Humidity)
+
+model_no_precip <- clogit(
+  outbreak_binary ~ 
+    cb_runoff + cb_snow_density + cb_soil_moisture +
+    cb_temperature + cb_relative_humidity +
+    cb_wind_speed + cb_total_bird_abundance +
+    strata(stratum_id),
+  method = "efron",
+  data = case_crossover_df
+)
+
+# Model 4: Drop both Relative Humidity and Precipitation
+
+model_no_rh_precip <- clogit(
+  outbreak_binary ~ 
+    cb_runoff + cb_snow_density + cb_soil_moisture +
+    cb_temperature +
+    cb_wind_speed + cb_total_bird_abundance +
+    strata(stratum_id),
+  method = "efron",
+  data = case_crossover_df
+)
+
+
+# Compare AIC values
+aic_table <- data.frame(
+  Model = c(
+    "Full (with RH + Precipitation)",
+    "No RH (keep Precipitation)",
+    "No Precipitation (keep RH)",
+    "No RH & No Precipitation"
+  ),
+  AIC = c(
+    AIC(model_full),
+    AIC(model_no_rh),
+    AIC(model_no_precip),
+    AIC(model_no_rh_precip)
+  )
+) |>
+  dplyr::arrange(AIC)
+
+print(aic_table)
+
+### NO NEED FOR RELATIVE HUMIDITY IN THE MODEL
+```
+
+
+
+
+

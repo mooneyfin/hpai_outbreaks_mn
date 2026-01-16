@@ -1,0 +1,535 @@
+---
+title: "validation_models"
+author: "Fintan Mooney"
+date: "2025-10-31"
+output: html_document
+---
+
+# This R markdown file uses a casecrossover study design to model the association between meterological conditons, climate, and wild bird abundance, on risk of highly pathogenic avian influenza (HPAI) outbreaks in Minnesota farms during 2022
+
+## Here we are running leave-one-case-out cross validation and a predictive validation
+
+```{r setup, include=FALSE}
+ 
+knitr::opts_chunk$set(echo = TRUE)
+ 
+# ---- Package setup ----
+packages <- c(
+  "MatchIt", "readr", "sf", "survival", "dlnm", "gtsummary", "kableExtra",
+  "tidyr", "tibble", "mgcv", "ggplot2", "car", "patchwork", "corrplot",
+  "purrr", "ggspatial", "gt", "flextable", "officer", "conflicted",
+  "dplyr", "data.table", "here"
+)
+
+installed <- packages %in% rownames(installed.packages())
+if (any(!installed)) install.packages(packages[!installed])
+
+invisible(lapply(packages, library, character.only = TRUE))
+
+# Resolve conflicts
+conflict_prefer("select", "dplyr")
+conflict_prefer("filter", "dplyr")
+
+# Project folders (e.g., where the .Rproj file is)
+base_folder <- here()
+data_folder <- here("data")
+env_folder <- here("data", "EarthEngine_MN")
+objects_folder <-here("data", "objects")
+figures_folder <-here("output", "figures")
+tables_folder <-here("output", "tables")
+
+list.files(here())
+
+```
+
+## Import casecrossover df
+
+```{r, import casecrossover df}
+
+case_crossover_df <- readRDS(file.path(objects_folder, "case_crossover_df.RDS"))
+
+```
+
+
+## Crossbasis Terms
+
+```{r, finalized crossbasis}
+
+
+# Finalized Crossbasis Terms for Climate and Bird Predictors
+
+# Leaf Area Index
+cb_leaf_area_index <- crossbasis(
+  x = as.matrix(case_crossover_df[, paste0("leaf_area_index_Lag", 0:4)]),
+  lag = c(0, 4),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 2)
+)
+
+# Longwave Radiation
+cb_longwave_radiation <- crossbasis(
+  x = as.matrix(case_crossover_df[, paste0("longwave_radiation_Lag", 0:4)]),
+  lag = c(0, 4),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 2)
+)
+
+# Precipitation
+cb_precipitation <- crossbasis(
+  x = as.matrix(case_crossover_df[, paste0("precipitation_Lag", 0:4)]),
+  lag = c(0, 4),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 2)
+)
+
+# Relative Humidity
+cb_relative_humidity <- crossbasis(
+  x = as.matrix(case_crossover_df[, paste0("relative_humidity_Lag", 0:4)]),
+  lag = c(0, 4),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 2)
+)
+
+# Runoff
+cb_runoff <- crossbasis(
+  x = as.matrix(case_crossover_df[, paste0("runoff_Lag", 0:4)]),
+  lag = c(0, 4),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 2)
+)
+
+# Shortwave Radiation
+cb_shortwave_radiation <- crossbasis(
+  x = as.matrix(case_crossover_df[, paste0("shortwave_radiation_Lag", 0:4)]),
+  lag = c(0, 4),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 2)
+)
+
+# Snow Density
+cb_snow_density <- crossbasis(
+  x = as.matrix(case_crossover_df[, paste0("snow_density_Lag", 0:4)]),
+  lag = c(0, 4),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 2)
+)
+
+# Soil Moisture
+cb_soil_moisture <- crossbasis(
+  x = as.matrix(case_crossover_df[, paste0("soil_moisture_Lag", 0:4)]),
+  lag = c(0, 4),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 2)
+)
+
+# Temperature
+cb_temperature <- crossbasis(
+  x = as.matrix(case_crossover_df[, paste0("temperature_Lag", 0:4)]),
+  lag = c(0, 4),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 2)
+)
+
+
+# Total Bird Abundance
+cb_total_bird_abundance <- crossbasis(
+  x = as.matrix(case_crossover_df[, paste0("total_bird_abundance_Lag", 0:4)]),
+  lag = c(0, 4),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 2)
+)
+
+# Wind Speed
+cb_wind_speed <- crossbasis(
+  x = as.matrix(case_crossover_df[, paste0("wind_speed_Lag", 0:4)]),
+  lag = c(0, 4),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 2)
+)
+
+# # # Anseriformes:
+#  cb_anseri <- crossbasis(
+#    x = as.matrix(case_crossover_df[, paste0("anseriformes_Lag", 0:8)]),
+#    lag = c(0, 8),
+#    argvar = list(fun = "lin"),
+#    arglag = list(fun = "poly", degree = 2)
+#  )
+#  
+# # # Predator:
+#  cb_predators <- crossbasis(
+#    x = as.matrix(case_crossover_df[, paste0("predators_Lag", 0:8)]),
+#    lag = c(0, 8),
+#    argvar = list(fun = "lin"),
+#    arglag = list(fun = "poly", degree = 2)
+#  )
+
+
+
+
+```
+
+
+## Leave one case out validation
+
+```{r, correlation of variables}
+
+# ============================================================
+# Correlation Matrix of Base (Lag 0) Predictors
+# ============================================================
+
+# Include all environmental + bird variables currently used
+vars <- c(
+  "leaf_area_index",
+  "longwave_radiation",
+  "shortwave_radiation",
+  "precipitation",
+  "relative_humidity",
+  "soil_moisture",
+  "snow_density",
+  "temperature",
+  "runoff",
+  "wind_speed",
+  "total_bird_abundance"
+)
+
+# Compute correlation matrix for lag 0 values
+cor_matrix <- cor(
+  case_crossover_df[, paste0(vars, "_Lag0")],
+  use = "complete.obs"
+)
+
+# Round for readability
+cor_matrix <- round(cor_matrix, 2)
+
+# Print nicely
+print(cor_matrix)
+
+# ============================================================
+# Optional: visualize as a correlation heatmap
+# ============================================================
+if (!requireNamespace("corrplot", quietly = TRUE)) install.packages("corrplot")
+library(corrplot)
+
+corrplot(
+  cor_matrix,
+  method = "color",
+  type = "upper",
+  addCoef.col = "black",
+  tl.col = "black",
+  tl.srt = 45,
+  number.cex = 0.7,
+  col = colorRampPalette(c("purple4", "white", "darkgreen"))(200),
+  mar = c(0, 0, 2, 0)
+)
+title("Correlation Matrix of Lag-0 Environmental & Bird Predictors", line = -1)
+
+```
+
+
+
+```{r, leave one case out validation}
+library(clogitL1)
+library(dplyr)
+
+## ---- 1. Helper to rename each crossbasis block ----
+rename_cb <- function(cb, prefix) {
+  cb_mat <- as.matrix(unclass(cb))
+  if (is.null(colnames(cb_mat))) {
+    colnames(cb_mat) <- paste0("l", seq_len(ncol(cb_mat)))
+  }
+  colnames(cb_mat) <- paste0(prefix, "_", colnames(cb_mat))
+  cb_mat
+}
+
+## ---- 2. Build X using only FINAL MODEL variables ----
+X <- cbind(
+  rename_cb(cb_runoff,               "cb_runoff"),
+  rename_cb(cb_snow_density,         "cb_snow_density"),
+  rename_cb(cb_soil_moisture,        "cb_soil_moisture"),
+  rename_cb(cb_temperature,          "cb_temperature"),
+  rename_cb(cb_precipitation,        "cb_precipitation"),
+  rename_cb(cb_wind_speed,           "cb_wind_speed"),
+  rename_cb(cb_total_bird_abundance, "cb_total_bird_abundance")
+)
+
+## ---- 3. Prepare outcome and strata ----
+y <- case_crossover_df$outbreak_binary
+strata <- case_crossover_df$stratum_id
+
+# Keep only strata with both case/control
+keep_strata <- names(which(tapply(y, strata, function(z) length(unique(z))) == 2))
+sel <- strata %in% keep_strata
+
+X <- X[sel, , drop = FALSE]
+y <- y[sel]
+strata <- strata[sel]
+
+## ---- 4. Fit penalised model and cross-validate ----
+fit <- clogitL1(
+  x = X,
+  y = y,
+  strata = strata,
+  numLambda = 50,
+  minLambdaRatio = 0.001,
+  alpha = 1         # LASSO penalty
+)
+
+cvfit <- cv.clogitL1(fit, numFolds = 10)
+plot(cvfit)
+
+## ---- 5. Extract coefficients at best lambda ----
+best_lambda <- cvfit$minCV_lambda
+idx_best <- which.min(abs(fit$lambda - best_lambda))
+beta_best <- fit$beta[idx_best, ]
+names(beta_best) <- colnames(X)
+
+coef_table <- data.frame(variable = names(beta_best), beta = beta_best) |>
+  filter(beta != 0) |>
+  mutate(
+    parent_var = case_when(
+      grepl("^cb_runoff",               variable) ~ "Runoff",
+      grepl("^cb_snow_density",         variable) ~ "Snow Density",
+      grepl("^cb_soil_moisture",        variable) ~ "Soil Moisture",
+      grepl("^cb_temperature",          variable) ~ "Temperature",
+      grepl("^cb_precipitation",        variable) ~ "Precipitation",
+      grepl("^cb_wind_speed",           variable) ~ "Wind Speed",
+      grepl("^cb_total_bird_abundance", variable) ~ "Total Bird Abundance",
+      TRUE ~ "Unknown"
+    )
+  )
+
+summary_vars <- coef_table |>
+  group_by(parent_var) |>
+  summarise(
+    n_active = n(),
+    mean_abs_beta = mean(abs(beta))
+  ) |>
+  arrange(desc(mean_abs_beta))
+
+summary_vars
+
+
+# ============================================================
+# Correlation Matrix of Base (Lag 0) Predictors
+# ============================================================
+
+# Include all environmental + bird variables currently used
+vars <- c(
+  "leaf_area_index",
+  "longwave_radiation",
+  "shortwave_radiation",
+  "precipitation",
+  "relative_humidity",
+  "soil_moisture",
+  "snow_density",
+  "temperature",
+  "runoff",
+  "wind_speed",
+  "total_bird_abundance"
+)
+
+# Compute correlation matrix for lag 0 values
+cor_matrix <- cor(
+  case_crossover_df[, paste0(vars, "_Lag0")],
+  use = "complete.obs"
+)
+
+# Round for readability
+cor_matrix <- round(cor_matrix, 2)
+
+# Print nicely
+print(cor_matrix)
+
+# ============================================================
+# Optional: visualize as a correlation heatmap
+# ============================================================
+if (!requireNamespace("corrplot", quietly = TRUE)) install.packages("corrplot")
+library(corrplot)
+
+corrplot(
+  cor_matrix,
+  method = "color",
+  type = "upper",
+  addCoef.col = "black",
+  tl.col = "black",
+  tl.srt = 45,
+  number.cex = 0.7,
+  col = colorRampPalette(c("purple4", "white", "darkgreen"))(200),
+  mar = c(0, 0, 2, 0)
+)
+title("Correlation Matrix of Lag-0 Environmental & Bird Predictors", line = -1)
+```
+
+```{r, model from cross vaslidation}
+
+final_model <- clogit(
+  outbreak_binary ~
+    cb_leaf_area_index +
+    cb_temperature +
+    cb_longwave_radiation +
+    cb_soil_moisture +
+    cb_total_bird_abundance +
+    cb_runoff + 
+    cb_snow_density +
+    strata(stratum_id),
+  data = case_crossover_df,
+  method = "efron"
+)
+
+
+```
+
+## Results 
+
+```{r, report results}
+
+# =====================================================
+# Crosspred Objects (Reduced Final Model)
+# =====================================================
+
+# -- Cumulative effects --
+cp_runoff    <- crosspred(cb_runoff,       final_model, cen = 0, at = 0.5, cumul = TRUE)
+cp_snow      <- crosspred(cb_snow_density, final_model, cen = 0, at = 0.5, cumul = TRUE)
+cp_soil      <- crosspred(cb_soil_moisture,final_model, cen = 0, at = 0.5, cumul = TRUE)
+cp_temp      <- crosspred(cb_temperature,  final_model, cen = 0, at = 0.5, cumul = TRUE)
+cp_leaf      <- crosspred(cb_leaf_area_index, final_model, cen = 0, at = 0.5, cumul = TRUE)
+cp_longwave  <- crosspred(cb_longwave_radiation, final_model, cen = 0, at = 0.5, cumul = TRUE)
+cp_bird      <- crosspred(cb_total_bird_abundance, final_model, cen = 0, at = 0.5, cumul = TRUE)
+
+# -- Lag-slice effects --
+cp_slice_runoff   <- crosspred(cb_runoff,       final_model, cen = 0, at = 0.5)
+cp_slice_snow     <- crosspred(cb_snow_density, final_model, cen = 0, at = 0.5)
+cp_slice_soil     <- crosspred(cb_soil_moisture,final_model, cen = 0, at = 0.5)
+cp_slice_temp     <- crosspred(cb_temperature,  final_model, cen = 0, at = 0.5)
+cp_slice_leaf     <- crosspred(cb_leaf_area_index, final_model, cen = 0, at = 0.5)
+cp_slice_longwave <- crosspred(cb_longwave_radiation, final_model, cen = 0, at = 0.5)
+cp_slice_bird     <- crosspred(cb_total_bird_abundance, final_model, cen = 0, at = 0.5)
+
+# =====================================================
+# Cumulative OR Summary Table
+# =====================================================
+cumulative_summary <- tibble(
+  Predictor = c(
+    "Surface Runoff", 
+    "Snow Density", 
+    "Soil Moisture", 
+    "Temperature", 
+    "Leaf Area Index", 
+    "Longwave Radiation", 
+    "Total Bird Abundance"
+  ),
+  OR = c(
+    cp_runoff$allRRfit["0.5"],
+    cp_snow$allRRfit["0.5"],
+    cp_soil$allRRfit["0.5"],
+    cp_temp$allRRfit["0.5"],
+    cp_leaf$allRRfit["0.5"],
+    cp_longwave$allRRfit["0.5"],
+    cp_bird$allRRfit["0.5"]
+  ),
+  CI_low = c(
+    cp_runoff$allRRlow["0.5"],
+    cp_snow$allRRlow["0.5"],
+    cp_soil$allRRlow["0.5"],
+    cp_temp$allRRlow["0.5"],
+    cp_leaf$allRRlow["0.5"],
+    cp_longwave$allRRlow["0.5"],
+    cp_bird$allRRlow["0.5"]
+  ),
+  CI_high = c(
+    cp_runoff$allRRhigh["0.5"],
+    cp_snow$allRRhigh["0.5"],
+    cp_soil$allRRhigh["0.5"],
+    cp_temp$allRRhigh["0.5"],
+    cp_leaf$allRRhigh["0.5"],
+    cp_longwave$allRRhigh["0.5"],
+    cp_bird$allRRhigh["0.5"]
+  )
+) %>%
+  mutate(`OR (95% CI)` = sprintf("%.2f (%.2f, %.2f)", OR, CI_low, CI_high)) %>%
+  select(Predictor, `OR (95% CI)`) %>%
+  gt() %>%
+  tab_header(
+    title = md("**Case-Crossover Model: Cumulative Odds Ratios**"),
+    subtitle = "Per 0.5 SD Increase"
+  ) %>%
+  cols_label(`OR (95% CI)` = "Odds Ratio (95% Confidence Interval)") %>%
+  tab_options(
+    table.font.size = 14,
+    heading.title.font.size = 16,
+    heading.subtitle.font.size = 14,
+    data_row.padding = px(6)
+  )
+
+# =====================================================
+# Plotting Helpers
+# =====================================================
+plot_cumulative <- function(cp, title) {
+  plot(cp,
+       type = "cumulative", var = 0.5, ci = "area",
+       col = "black",
+       ci.arg = list(col = rgb(0, 0, 0, 0.1), border = NA),
+       lwd = 1.6, main = title,
+       xlab = "Lag (weeks)", ylab = "OR (95% CI)", las = 1)
+  abline(h = 1, lty = 2, col = "gray40", lwd = 1)
+}
+
+plot_slices <- function(cp, title) {
+  plot(cp,
+       type = "slices", var = 0.5, ci = "area",
+       col = "black",
+       ci.arg = list(col = rgb(0, 0, 0, 0.1), border = NA),
+       lwd = 1.4, main = title,
+       xlab = "Lag (weeks)", ylab = "OR (95% CI)", las = 1)
+  abline(h = 1, lty = 2, col = "gray40", lwd = 1)
+}
+
+# =====================================================
+# Save Plots
+# =====================================================
+
+# --- Cumulative plots ---
+png(file.path(figures_folder, "figure_cumulative_ORs_casecrossover_val.png"),
+    width = 11, height = 7, units = "in", res = 300)
+par(mfrow = c(2, 4),
+    mar = c(4.2, 4.2, 2.5, 1),
+    oma = c(1, 1, 0, 1),
+    cex.main = 1.2, cex.lab = 1.2, cex.axis = 1.1, tcl = -0.3, mgp = c(2.5, 0.7, 0))
+
+plot_cumulative(cp_runoff,   "Surface Runoff")
+plot_cumulative(cp_snow,     "Snow Density")
+plot_cumulative(cp_soil,     "Soil Moisture")
+plot_cumulative(cp_temp,     "Temperature")
+plot_cumulative(cp_leaf,     "Leaf Area Index")
+plot_cumulative(cp_longwave, "Longwave Radiation")
+plot_cumulative(cp_bird,     "Total Bird Abundance")
+
+dev.off()
+
+# --- Slice plots ---
+png(file.path(figures_folder, "figure_slice_ORs_casecrossover_val.png"),
+    width = 11, height = 7, units = "in", res = 300)
+par(mfrow = c(2, 4),
+    mar = c(4.2, 4.2, 2.5, 1),
+    oma = c(1, 1, 0, 1),
+    cex.main = 1.2, cex.lab = 1.2, cex.axis = 1.1, tcl = -0.3, mgp = c(2.5, 0.7, 0))
+
+plot_slices(cp_slice_runoff,   "Surface Runoff")
+plot_slices(cp_slice_snow,     "Snow Density")
+plot_slices(cp_slice_soil,     "Soil Moisture")
+plot_slices(cp_slice_temp,     "Temperature")
+plot_slices(cp_slice_leaf,     "Leaf Area Index")
+plot_slices(cp_slice_longwave, "Longwave Radiation")
+plot_slices(cp_slice_bird,     "Total Bird Abundance")
+
+dev.off()
+
+
+
+
+```
+
+
+
+
+

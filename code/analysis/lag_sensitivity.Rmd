@@ -1,0 +1,1018 @@
+---
+title: "lag_sensitivity"
+author: "Fintan Mooney"
+date: "2025-10-15"
+output: html_document
+---
+
+# This R markdown file creates the casecrossover dataframe for the projet on the association between meterological conditons, climate, and wild bird abundance, on risk of highly pathogenic avian influenza (HPAI) outbreaks in Minnesota farms during 2022
+
+# Here we are testing the casecrossover model using different lags (2, 6, 8)
+
+```{r setup, include=FALSE}
+ 
+knitr::opts_chunk$set(echo = TRUE)
+ 
+# ---- Package setup ----
+packages <- c(
+  "MatchIt", "readr", "sf", "survival", "dlnm", "gtsummary", "kableExtra",
+  "tidyr", "tibble", "mgcv", "ggplot2", "car", "patchwork", "corrplot",
+  "purrr", "ggspatial", "gt", "flextable", "officer", "conflicted",
+  "dplyr", "data.table", "here", "stringr"
+)
+
+installed <- packages %in% rownames(installed.packages())
+if (any(!installed)) install.packages(packages[!installed])
+
+invisible(lapply(packages, library, character.only = TRUE))
+
+# Resolve conflicts
+conflict_prefer("select", "dplyr")
+conflict_prefer("filter", "dplyr")
+
+# Project folders
+base_folder <- here()
+data_folder <- here("data")
+env_folder <- here("data", "EarthEngine_MN")
+objects_folder <-here("data", "objects")
+figures_folder <- here("output", "figures")
+tables_folder <- here("output", "tables")
+```
+
+
+## Read in the timeseries dataset
+
+```{r, read in timeseries dataset}
+
+# Timeseries
+fishnet_timeseries_clean <- readRDS(file.path(objects_folder, "fishnet_timeseries.RDS"))
+
+fishnet_timeseries_clean <- fishnet_timeseries_clean %>%
+  arrange(zone_id, week) %>%
+  # 1. Drop all columns that end with ".x"
+  select(-ends_with(".x")) %>%
+  # 2. Rename columns ending with ".y" to remove the suffix
+  rename_with(~ str_remove(.x, "\\.y$"), ends_with(".y"))
+
+# Spatial GPKG
+gpkg_path <- file.path(data_folder, "Fishnet_Timeseries_10km.gpkg")
+fishnet_weeks <- st_read(gpkg_path)
+
+## Simplify
+fishnet_weeks <- fishnet_weeks %>%
+  dplyr::select(week, shape_length, shape_area, zone_id, geom)
+
+```
+
+## Map Cases in Casecrossover Model
+
+```{r, casecrossover map}
+
+
+# Map 
+# Identify case zones
+case_zone_ids <- fishnet_timeseries_clean %>%
+  filter(any_outbreak == 1) %>%
+  distinct(zone_id)
+
+# Subset spatial features
+case_zones_sf <- fishnet_weeks %>% filter(zone_id %in% case_zone_ids$zone_id)
+control_zones_sf <- fishnet_weeks %>% filter(!(zone_id %in% case_zone_ids$zone_id))
+
+# Define output paths
+case_gpkg_out    <- file.path(data_folder, "Case_Zones.gpkg")
+control_gpkg_out <- file.path(data_folder, "Control_Zones.gpkg")
+
+# Export as GPKG
+st_write(case_zones_sf, case_gpkg_out,    delete_layer = TRUE)
+st_write(control_zones_sf, control_gpkg_out, delete_layer = TRUE)
+
+# Reproject to EPSG:3857 (Web Mercator) for basemap compatibility
+case_zones_sf_proj <- st_transform(case_zones_sf, 3857)
+control_zones_sf_proj <- st_transform(control_zones_sf, 3857)
+
+# Plot with basemap
+ggplot() +
+  # Add simple basemap
+  annotation_map_tile(type = "cartolight", zoomin = 0) +
+
+  # Control zones: outlines
+  geom_sf(data = control_zones_sf_proj, fill = NA, color = "lightblue", linewidth = 0.05) +
+
+  # Case zones: bold fill
+  geom_sf(data = case_zones_sf_proj, fill = "#d73027", color = "red", linewidth = 0.1, alpha = 0.9) +
+
+  # Scale bar
+  annotation_scale(location = "bl", width_hint = 0.3, text_cex = 0.75, line_width = 0.5, style = "ticks") +
+
+  # Theme and layout
+  theme_void(base_size = 12) +
+  theme(
+    plot.title = element_text(size = 12, face = "bold", hjust = 0.5),
+    plot.caption = element_text(size = 10, hjust = 0.5, face = "italic"),
+    plot.background = element_rect(fill = "white", color = NA)
+  ) +
+  coord_sf(expand = FALSE) +
+  labs(
+    title = "HPAI Outbreak Case Zones in Minnesota (2022)"
+  )
+```
+
+## Define Controls and Create Case-Crossover Dataset
+```{r, define controls}
+
+# DEFINE CASES + CONTROLS (REMOVE OVERLAPPING CONTROLS)
+
+# Match
+case_zones <- fishnet_timeseries_clean %>%
+  dplyr::filter(any_outbreak == 1)
+
+# Get binary cases: one row per zone_id and week with outbreak
+cases <- case_zones %>%
+  dplyr::filter(outbreak_count > 0) %>%
+  dplyr::distinct(zone_id, case_week = week)
+
+# Deduplicate case_zones to avoid many-to-many join issues
+case_zones_unique <- case_zones %>%
+  dplyr::distinct(zone_id, week, .keep_all = TRUE)
+
+# Create full lag grid (1 to 4 weeks before each case)
+case_lags <- cases %>%
+  tidyr::crossing(lag = 1:4) %>%
+  dplyr::mutate(control_week = case_week - lag) %>%
+  dplyr::filter(control_week >= 1)
+
+# --- REMOVE OVERLAPPING CONTROLS (control_week is also a case_week in same zone) ---
+case_zone_weeks <- cases %>% dplyr::select(zone_id, case_week)
+
+case_lags_clean <- case_lags %>%
+  dplyr::anti_join(case_zone_weeks, by = c("zone_id", "control_week" = "case_week"))
+
+cat("Controls removed (overlap with case weeks):",
+    nrow(case_lags) - nrow(case_lags_clean), "\n")
+
+# Controls (week-lagged, outbreak_binary = 0)
+controls <- case_lags_clean %>%
+  dplyr::left_join(case_zones_unique, by = c("zone_id", "control_week" = "week")) %>%
+  dplyr::mutate(
+    case_control    = "control",
+    outbreak_binary = 0,
+    stratum_id      = paste(zone_id, case_week, sep = "_"),
+    week            = control_week
+  ) %>%
+  dplyr::select(-outbreak_count)
+
+# Cases (outbreak_binary = 1)
+case_data <- cases %>%
+  dplyr::left_join(case_zones_unique, by = c("zone_id", "case_week" = "week")) %>%
+  dplyr::mutate(
+    case_control    = "case",
+    outbreak_binary = 1,
+    stratum_id      = paste(zone_id, case_week, sep = "_"),
+    week            = case_week,
+    control_week    = NA_integer_
+  ) %>%
+  dplyr::select(-outbreak_count)
+
+# Combine cases and controls
+case_crossover_df <- dplyr::bind_rows(case_data, controls)
+
+# Summary check
+table(case_crossover_df$case_control)
+sum(case_crossover_df$outbreak_binary)
+colnames(case_crossover_df)
+
+```
+
+
+# Check distribution of casecrossover variables
+
+```{r, distribution caseccrossover}
+
+# Move from m to mm
+
+case_crossover_df <- case_crossover_df %>%
+  mutate(
+    runoff = runoff * 1000,
+    precipitation = precipitation * 1000
+  )
+
+
+# Variables to inspect
+vars_to_check <- c(
+  "total_bird_abundance",   
+  "leaf_area_index", "longwave_radiation", "runoff", "shortwave_radiation",
+  "snow_density", "soil_moisture", "temperature",
+  "evapotranspiration", "precipitation", "wind_speed", "relative_humidity", "anseriformes", "predators"
+)
+
+# Create histograms
+plots <- lapply(vars_to_check, function(var) {
+  ggplot(case_crossover_df, aes_string(x = var)) +
+    geom_histogram(bins = 50, fill = "steelblue", color = "white") +
+    labs(title = var) +
+    theme_minimal()
+})
+
+# Display plots in a grid (adjust number of columns if needed)
+wrap_plots(plots, ncol = )
+
+library(e1071)
+# Subset to variables
+numeric_vars <- case_crossover_df %>%
+  select(all_of(vars_to_check))
+
+# Initialize result storage
+shapiro_results <- lapply(names(numeric_vars), function(var) {
+  x <- numeric_vars[[var]]
+  x <- na.omit(x)
+  
+  # Only apply Shapiro if <= 5000 non-NA values
+  shapiro_p <- if (length(x) <= 5000) {
+    shapiro.test(x)$p.value
+  } else {
+    NA
+  }
+  
+  data.frame(
+    variable = var,
+    skewness = skewness(x),
+    shapiro_p = shapiro_p,
+    n = length(x)
+  )
+})
+
+# Combine into summary table
+shapiro_df <- bind_rows(shapiro_results)
+
+# Flag non-normality
+shapiro_df <- shapiro_df %>%
+  mutate(non_normal = ifelse(!is.na(shapiro_p) & shapiro_p < 0.05, TRUE, FALSE)) %>%
+  arrange(desc(abs(skewness)))
+
+# View top
+print(shapiro_df)
+
+### Need to transform runoff, total_bird_abundance, specific humidity, and precipitation, anseriformes and predators
+
+
+```
+
+# Generate Case-Crossover Datasets with Different Lag Windows
+
+```{r, different lags}
+
+
+# LAG SENSITIVITY: BUILD DATASETS (REMOVE OVERLAPPING CONTROLS)
+
+max_lags <- c(2, 6, 8)   # lag windows to test for predictors
+n_controls <- 4          # fix the number of control weeks per case (still remove overlaps)
+vars_to_lag <- c(
+  "total_bird_abundance", "leaf_area_index", "longwave_radiation",
+  "runoff", "shortwave_radiation", "snow_density", "soil_moisture",
+  "temperature", "evapotranspiration", "precipitation",
+  "wind_speed", "relative_humidity", "anseriformes", "predators"
+)
+
+case_zones_unique <- case_zones %>%
+  dplyr::distinct(zone_id, week, .keep_all = TRUE)
+
+# Function to build case-crossover dataset for a given lag window
+build_casecrossover <- function(max_lag, n_controls = 4) {
+  message("Building case-crossover dataset with ", max_lag, " lags (", n_controls, " controls per case)...")
+
+  # ---- Create controls ----
+  case_lags <- cases %>%
+    tidyr::crossing(lag = 1:n_controls) %>%
+    dplyr::mutate(control_week = case_week - lag) %>%
+    dplyr::filter(control_week >= 1)
+
+  # --- REMOVE OVERLAPPING CONTROLS (control_week is also a case_week in same zone) ---
+  case_zone_weeks <- cases %>% dplyr::select(zone_id, case_week)
+
+  case_lags_clean <- case_lags %>%
+    dplyr::anti_join(case_zone_weeks, by = c("zone_id", "control_week" = "case_week"))
+
+  message("Controls removed (overlap with case weeks): ", nrow(case_lags) - nrow(case_lags_clean))
+
+  controls <- case_lags_clean %>%
+    dplyr::left_join(case_zones_unique, by = c("zone_id", "control_week" = "week")) %>%
+    dplyr::mutate(
+      case_control    = "control",
+      outbreak_binary = 0,
+      stratum_id      = paste(zone_id, case_week, sep = "_"),
+      week            = control_week
+    ) %>%
+    dplyr::select(-outbreak_count)
+
+  # ---- Create cases ----
+  case_data <- cases %>%
+    dplyr::left_join(case_zones_unique, by = c("zone_id", "case_week" = "week")) %>%
+    dplyr::mutate(
+      case_control    = "case",
+      outbreak_binary = 1,
+      stratum_id      = paste(zone_id, case_week, sep = "_"),
+      week            = case_week,
+      control_week    = NA_integer_
+    ) %>%
+    dplyr::select(-outbreak_count)
+
+  # ---- Combine cases + controls ----
+  case_crossover_df <- dplyr::bind_rows(case_data, controls)
+
+  # ---- Add lagged predictors (0:max_lag) ----
+  add_lagged_predictors <- function(df, original_df, vars, id_col = "zone_id", time_col = "week", max_lag = max_lag) {
+    for (varname in vars) {
+      for (lag in 0:max_lag) {
+        lagged_col <- paste0(varname, "_Lag", lag)
+        df <- df %>%
+          dplyr::left_join(
+            original_df %>%
+              dplyr::select(!!rlang::sym(id_col), !!rlang::sym(time_col), !!rlang::sym(varname)) %>%
+              dplyr::rename(!!lagged_col := !!rlang::sym(varname)) %>%
+              dplyr::mutate(!!rlang::sym(time_col) := !!rlang::sym(time_col) + lag),
+            by = c(id_col, time_col)
+          )
+      }
+    }
+    df
+  }
+
+  case_crossover_df <- add_lagged_predictors(
+    df          = case_crossover_df,
+    original_df = case_zones_unique,
+    vars        = vars_to_lag,
+    max_lag     = max_lag
+  )
+
+  # ---- Transform + scale ----
+  skewed_vars <- c("total_bird_abundance", "runoff", "precipitation", "anseriformes", "predators")
+
+  for (v in skewed_vars) {
+    for (lag in 0:max_lag) {
+      col <- paste0(v, "_Lag", lag)
+      if (col %in% names(case_crossover_df)) {
+        case_crossover_df[[col]] <- log1p(case_crossover_df[[col]])
+      }
+    }
+  }
+
+  for (v in vars_to_lag) {
+    for (lag in 0:max_lag) {
+      col <- paste0(v, "_Lag", lag)
+      case_crossover_df[[col]] <- as.numeric(scale(case_crossover_df[[col]]))
+    }
+  }
+
+  # ---- Restrict to complete strata (case + ≥1 control) ----
+  keep_strata <- names(which(tapply(
+    case_crossover_df$outbreak_binary,
+    case_crossover_df$stratum_id,
+    function(z) length(unique(z)) == 2
+  )))
+
+  case_crossover_df <- case_crossover_df %>%
+    dplyr::filter(stratum_id %in% keep_strata)
+
+  # ---- Save ----
+  out_name <- paste0("case_crossover_df_", max_lag, "lag.RDS")
+  saveRDS(case_crossover_df, file.path(objects_folder, out_name))
+  message("Saved: ", out_name)
+
+  return(case_crossover_df)
+}
+
+# Run for all lag windows
+case_crossover_df_2lag <- build_casecrossover(2, n_controls = 4)
+case_crossover_df_6lag <- build_casecrossover(6, n_controls = 4)
+case_crossover_df_8lag <- build_casecrossover(8, n_controls = 4)
+
+
+```
+
+## Test against the casecrossover model with 4 lags
+
+### Compare AICs
+
+```{r, compare AICs}
+
+# Load  4 lag model
+
+case_crossover_df_4lag <- readRDS(file.path(objects_folder, "case_crossover_df.RDS")) # baseline 4-lag
+
+
+# Helper to build crossbasis and fit clogit model
+
+fit_casecrossover_model <- function(df, max_lag) {
+  message("Fitting model for ", max_lag, " lags ...")
+  
+  # Build crossbasis objects using correct lag range
+  cb_runoff    <- crossbasis(as.matrix(df[, paste0("runoff_Lag", 0:max_lag)]),
+                             lag = c(0, max_lag),
+                             argvar = list(fun="lin"),
+                             arglag = list(fun="ns", df=2))
+  cb_snow      <- crossbasis(as.matrix(df[, paste0("snow_density_Lag", 0:max_lag)]),
+                             lag = c(0, max_lag),
+                             argvar = list(fun="lin"),
+                             arglag = list(fun="ns", df=2))
+  cb_soil      <- crossbasis(as.matrix(df[, paste0("soil_moisture_Lag", 0:max_lag)]),
+                             lag = c(0, max_lag),
+                             argvar = list(fun="lin"),
+                             arglag = list(fun="ns", df=2))
+  cb_temp      <- crossbasis(as.matrix(df[, paste0("temperature_Lag", 0:max_lag)]),
+                             lag = c(0, max_lag),
+                             argvar = list(fun="lin"),
+                             arglag = list(fun="ns", df=2))
+  cb_precip    <- crossbasis(as.matrix(df[, paste0("precipitation_Lag", 0:max_lag)]),
+                             lag = c(0, max_lag),
+                             argvar = list(fun="lin"),
+                             arglag = list(fun="ns", df=2))
+  cb_wind      <- crossbasis(as.matrix(df[, paste0("wind_speed_Lag", 0:max_lag)]),
+                             lag = c(0, max_lag),
+                             argvar = list(fun="lin"),
+                             arglag = list(fun="ns", df=2))
+  cb_bird      <- crossbasis(as.matrix(df[, paste0("total_bird_abundance_Lag", 0:max_lag)]),
+                             lag = c(0, max_lag),
+                             argvar = list(fun="lin"),
+                             arglag = list(fun="ns", df=2))
+  
+  # Fit clogit model
+  fit <- clogit(
+    outbreak_binary ~ 
+      cb_runoff + cb_snow + cb_soil + cb_temp + 
+      cb_precip + cb_wind + cb_bird + 
+      strata(stratum_id),
+    method = "efron",
+    data = df
+  )
+  
+  return(fit)
+}
+
+
+# Fit models and extract AICs
+
+fit_2lag <- fit_casecrossover_model(case_crossover_df_2lag, 2)
+fit_4lag <- fit_casecrossover_model(case_crossover_df_4lag, 4)
+fit_6lag <- fit_casecrossover_model(case_crossover_df_6lag, 6)
+fit_8lag <- fit_casecrossover_model(case_crossover_df_8lag, 8)
+
+aic_table <- tibble(
+  Model = c("2-lag", "4-lag", "6-lag", "8-lag"),
+  AIC = c(
+    AIC(fit_2lag),
+    AIC(fit_4lag),
+    AIC(fit_6lag),
+    AIC(fit_8lag)
+  )
+)
+
+# SUMMARIZE THE MODELS !
+aic_table %>%
+  arrange(AIC) %>%
+  mutate(
+    DeltaAIC = AIC - min(AIC)
+  ) %>%
+  gt::gt() %>%
+  gt::tab_header(
+    title = md("**Case-Crossover Model Comparison by Lag Window**"),
+    subtitle = "AIC values for models with 2, 4, 6, and 8 week lag structures"
+  ) %>%
+  gt::fmt_number(columns = c(AIC, DeltaAIC), decimals = 2)
+
+
+
+```
+
+
+# Lets compute results for the model with 8-lags as it has the lowest AIC
+
+## Analyzing cumulative and lag specific odds ratios from case-crossover with 8 lags 
+
+```{r, 8 lag test}
+
+## Crossbasis for 8-lag
+
+# Finalized Crossbasis Terms for Climate and Bird Predictors
+
+# Leaf Area Index
+cb_leaf_area_index <- crossbasis(
+  x = as.matrix(case_crossover_df_8lag[, paste0("leaf_area_index_Lag", 0:8)]),
+  lag = c(0, 8),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 2)
+)
+
+# Longwave Radiation
+cb_longwave_radiation <- crossbasis(
+  x = as.matrix(case_crossover_df_8lag[, paste0("longwave_radiation_Lag", 0:8)]),
+  lag = c(0, 8),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 2)
+)
+
+# Precipitation
+cb_precipitation <- crossbasis(
+  x = as.matrix(case_crossover_df_8lag[, paste0("precipitation_Lag", 0:8)]),
+  lag = c(0, 8),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 2)
+)
+
+# Relative Humidity
+cb_relative_humidity <- crossbasis(
+  x = as.matrix(case_crossover_df_8lag[, paste0("relative_humidity_Lag", 0:8)]),
+  lag = c(0, 8),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 2)
+)
+
+# Runoff
+cb_runoff <- crossbasis(
+  x = as.matrix(case_crossover_df_8lag[, paste0("runoff_Lag", 0:8)]),
+  lag = c(0, 8),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 2)
+)
+
+# Shortwave Radiation
+cb_shortwave_radiation <- crossbasis(
+  x = as.matrix(case_crossover_df_8lag[, paste0("shortwave_radiation_Lag", 0:8)]),
+  lag = c(0, 8),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 2)
+)
+
+# Snow Density
+cb_snow_density <- crossbasis(
+  x = as.matrix(case_crossover_df_8lag[, paste0("snow_density_Lag", 0:8)]),
+  lag = c(0, 8),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 2)
+)
+
+# Soil Moisture
+cb_soil_moisture <- crossbasis(
+  x = as.matrix(case_crossover_df_8lag[, paste0("soil_moisture_Lag", 0:8)]),
+  lag = c(0, 8),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 2)
+)
+
+# Temperature
+cb_temperature <- crossbasis(
+  x = as.matrix(case_crossover_df_8lag[, paste0("temperature_Lag", 0:8)]),
+  lag = c(0, 8),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 2)
+)
+
+
+# Total Bird Abundance
+cb_total_bird_abundance <- crossbasis(
+  x = as.matrix(case_crossover_df_8lag[, paste0("total_bird_abundance_Lag", 0:8)]),
+  lag = c(0, 8),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 2)
+)
+
+# Wind Speed
+cb_wind_speed <- crossbasis(
+  x = as.matrix(case_crossover_df_8lag[, paste0("wind_speed_Lag", 0:8)]),
+  lag = c(0, 8),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 2)
+)
+
+# # # Anseriformes:
+#  cb_anseri <- crossbasis(
+#    x = as.matrix(case_crossover_df_8lag[, paste0("anseriformes_Lag", 0:8)]),
+#    lag = c(0, 8),
+#    argvar = list(fun = "lin"),
+#    arglag = list(fun = "poly", degree = 2)
+#  )
+#  
+# # # Predator:
+#  cb_predators <- crossbasis(
+#    x = as.matrix(case_crossover_df_8lag[, paste0("predators_Lag", 0:8)]),
+#    lag = c(0, 8),
+#    argvar = list(fun = "lin"),
+#    arglag = list(fun = "poly", degree = 2)
+#  )
+
+
+# Fit Model
+
+model_8lag <- clogit(
+  outbreak_binary ~ 
+    cb_runoff + cb_snow_density + cb_soil_moisture + cb_temperature +
+    cb_precipitation + cb_wind_speed + cb_total_bird_abundance +
+    strata(stratum_id),
+  method = "efron",
+  data = case_crossover_df_8lag
+)
+
+
+# Crosspred Objects
+cp_runoff       <- crosspred(cb_runoff,       model_8lag, cen = 0, at = 0.5, cumul = TRUE)
+cp_snow         <- crosspred(cb_snow_density, model_8lag, cen = 0, at = 0.5, cumul = TRUE)
+cp_soil         <- crosspred(cb_soil_moisture,model_8lag, cen = 0, at = 0.5, cumul = TRUE)
+cp_temp         <- crosspred(cb_temperature,  model_8lag, cen = 0, at = 0.5, cumul = TRUE)
+cp_precip       <- crosspred(cb_precipitation,model_8lag, cen = 0, at = 0.5, cumul = TRUE)
+cp_wind         <- crosspred(cb_wind_speed,   model_8lag, cen = 0, at = 0.5, cumul = TRUE)
+cp_bird         <- crosspred(cb_total_bird_abundance, model_8lag, cen = 0, at = 0.5, cumul = TRUE)
+
+cp_slice_runoff <- crosspred(cb_runoff,       model_8lag, cen = 0, at = 0.5)
+cp_slice_snow   <- crosspred(cb_snow_density, model_8lag, cen = 0, at = 0.5)
+cp_slice_soil   <- crosspred(cb_soil_moisture,model_8lag, cen = 0, at = 0.5)
+cp_slice_temp   <- crosspred(cb_temperature,  model_8lag, cen = 0, at = 0.5)
+cp_slice_precip <- crosspred(cb_precipitation,model_8lag, cen = 0, at = 0.5)
+cp_slice_wind   <- crosspred(cb_wind_speed,   model_8lag, cen = 0, at = 0.5)
+cp_slice_bird   <- crosspred(cb_total_bird_abundance, model_8lag, cen = 0, at = 0.5)
+
+
+# Cumulative OR Summary Table
+
+cumulative_summary <- tibble(
+  Predictor = c("Runoff", "Snow Density", "Soil Moisture", "Temperature",
+                "Precipitation", "Wind Speed", "Total Bird Abundance"),
+  OR = c(
+    cp_runoff$allRRfit["0.5"],
+    cp_snow$allRRfit["0.5"],
+    cp_soil$allRRfit["0.5"],
+    cp_temp$allRRfit["0.5"],
+    cp_precip$allRRfit["0.5"],
+    cp_wind$allRRfit["0.5"],
+    cp_bird$allRRfit["0.5"]
+  ),
+  CI_low = c(
+    cp_runoff$allRRlow["0.5"],
+    cp_snow$allRRlow["0.5"],
+    cp_soil$allRRlow["0.5"],
+    cp_temp$allRRlow["0.5"],
+    cp_precip$allRRlow["0.5"],
+    cp_wind$allRRlow["0.5"],
+    cp_bird$allRRlow["0.5"]
+  ),
+  CI_high = c(
+    cp_runoff$allRRhigh["0.5"],
+    cp_snow$allRRhigh["0.5"],
+    cp_soil$allRRhigh["0.5"],
+    cp_temp$allRRhigh["0.5"],
+    cp_precip$allRRhigh["0.5"],
+    cp_wind$allRRhigh["0.5"],
+    cp_bird$allRRhigh["0.5"]
+  )
+) %>%
+  mutate(`OR (95% CI)` = sprintf("%.2f (%.2f, %.2f)", OR, CI_low, CI_high)) %>%
+  select(Predictor, `OR (95% CI)`) %>%
+  gt() %>%
+  tab_header(
+    title = md("**Case-Crossover Model (8-lag): Cumulative Odds Ratios**"),
+    subtitle = "Per 0.5 SD Increase"
+  ) %>%
+  cols_label(`OR (95% CI)` = "Odds Ratio (95% Confidence Interval)") %>%
+  tab_options(
+    table.font.size = 14,
+    heading.title.font.size = 16,
+    heading.subtitle.font.size = 14,
+    data_row.padding = px(6)
+  )
+
+cumulative_summary 
+
+
+# Lag-Specific Odds Ratio Table (0–8 weeks)
+
+
+extract_lag_ORs_wide <- function(cp_obj, varname, varval = "0.5", lags = 0:8) {
+  lag_labels <- paste0("lag", lags)
+  or   <- cp_obj$matRRfit[varval, lag_labels]
+  low  <- cp_obj$matRRlow[varval, lag_labels]
+  high <- cp_obj$matRRhigh[varval, lag_labels]
+  tibble(
+    Predictor = varname,
+    !!!setNames(as.list(or),   paste0("OR_Lag", lags)),
+    !!!setNames(as.list(low),  paste0("Low_Lag", lags)),
+    !!!setNames(as.list(high), paste0("High_Lag", lags)),
+    !!!setNames(as.list(sprintf("%.2f (%.2f, %.2f)", or, low, high)), paste0("Lag ", lags))
+  )
+}
+
+# Combine all predictors
+table_lag_ORs <- bind_rows(
+  extract_lag_ORs_wide(cp_slice_runoff, "Runoff"),
+  extract_lag_ORs_wide(cp_slice_snow,   "Snow Density"),
+  extract_lag_ORs_wide(cp_slice_soil,   "Soil Moisture"),
+  extract_lag_ORs_wide(cp_slice_temp,   "Temperature"),
+  extract_lag_ORs_wide(cp_slice_precip, "Precipitation"),
+  extract_lag_ORs_wide(cp_slice_wind,   "Wind Speed"),
+  extract_lag_ORs_wide(cp_slice_bird,   "Total Bird Abundance")
+)
+
+# Identify significant lags (CI entirely above/below 1)
+lags <- 0:8
+highlight_matrix <- sapply(lags, function(i) {
+  table_lag_ORs[[paste0("Low_Lag", i)]] > 1 | table_lag_ORs[[paste0("High_Lag", i)]] < 1
+})
+colnames(highlight_matrix) <- paste0("Lag ", lags)
+
+# Build flextable for export
+ft <- table_lag_ORs %>%
+  select(Predictor, paste0("Lag ", lags)) %>%
+  flextable() %>%
+  set_header_labels(Predictor = "Predictor") %>%
+  add_header_row(values = c("Predictor", "Odds Ratio (95% CI)"), colwidths = c(1, length(lags))) %>%
+  fontsize(size = 11, part = "all") %>%
+  autofit() %>%
+  align(align = "center", part = "all") %>%
+  theme_booktabs()
+
+for (i in lags) {
+  ft <- bold(ft, i = which(highlight_matrix[, paste0("Lag ", i)]), j = paste0("Lag ", i))
+}
+
+# Export Word table
+doc <- read_docx() %>%
+  body_add_flextable(ft) %>%
+  body_add_par(
+    "Table: Lag-Specific Odds Ratios for the 8-week Case-Crossover Model of Environmental and Bird Predictors of HPAI Outbreaks in Minnesota (2022). Odds ratios are per 0.5 SD increase; statistically significant values are shown in bold.",
+    style = "Normal"
+  )
+
+print(doc, target = file.path(tables_folder, "Table_LagSpecific_OR_HPAI_Minnesota_8lag.docx"))
+
+ft
+
+
+
+```
+
+## Analyzing cumulative and lag specific odds ratios with arglag in crossbasis = poly (df = 2)
+
+```{r, 8 lag test with poly df=2}
+
+## Crossbasis for 8-lag
+
+# Finalized Crossbasis Terms for Climate and Bird Predictors
+
+# Leaf Area Index
+cb_leaf_area_index <- crossbasis(
+  x = as.matrix(case_crossover_df_8lag[, paste0("leaf_area_index_Lag", 0:8)]),
+  lag = c(0, 8),
+  argvar = list(fun = "lin"),
+  arglag = list(fun="poly", degree=2)
+)
+
+# Longwave Radiation
+cb_longwave_radiation <- crossbasis(
+  x = as.matrix(case_crossover_df_8lag[, paste0("longwave_radiation_Lag", 0:8)]),
+  lag = c(0, 8),
+  argvar = list(fun = "lin"),
+  arglag = list(fun="poly", degree=2)
+)
+
+# Precipitation
+cb_precipitation <- crossbasis(
+  x = as.matrix(case_crossover_df_8lag[, paste0("precipitation_Lag", 0:8)]),
+  lag = c(0, 8),
+  argvar = list(fun = "lin"),
+  arglag = list(fun="poly", degree=2)
+)
+
+# Relative Humidity
+cb_relative_humidity <- crossbasis(
+  x = as.matrix(case_crossover_df_8lag[, paste0("relative_humidity_Lag", 0:8)]),
+  lag = c(0, 8),
+  argvar = list(fun = "lin"),
+  arglag = list(fun="poly", degree=2)
+)
+
+# Runoff
+cb_runoff <- crossbasis(
+  x = as.matrix(case_crossover_df_8lag[, paste0("runoff_Lag", 0:8)]),
+  lag = c(0, 8),
+  argvar = list(fun = "lin"),
+  arglag = list(fun="poly", degree=2)
+)
+
+# Shortwave Radiation
+cb_shortwave_radiation <- crossbasis(
+  x = as.matrix(case_crossover_df_8lag[, paste0("shortwave_radiation_Lag", 0:8)]),
+  lag = c(0, 8),
+  argvar = list(fun = "lin"),
+  arglag = list(fun="poly", degree=2)
+)
+
+# Snow Density
+cb_snow_density <- crossbasis(
+  x = as.matrix(case_crossover_df_8lag[, paste0("snow_density_Lag", 0:8)]),
+  lag = c(0, 8),
+  argvar = list(fun = "lin"),
+  arglag = list(fun="poly", degree=2)
+)
+
+# Soil Moisture
+cb_soil_moisture <- crossbasis(
+  x = as.matrix(case_crossover_df_8lag[, paste0("soil_moisture_Lag", 0:8)]),
+  lag = c(0, 8),
+  argvar = list(fun = "lin"),
+  arglag = list(fun="poly", degree=2)
+)
+
+# Temperature
+cb_temperature <- crossbasis(
+  x = as.matrix(case_crossover_df_8lag[, paste0("temperature_Lag", 0:8)]),
+  lag = c(0, 8),
+  argvar = list(fun = "lin"),
+  arglag = list(fun="poly", degree=2)
+)
+
+
+# Total Bird Abundance
+cb_total_bird_abundance <- crossbasis(
+  x = as.matrix(case_crossover_df_8lag[, paste0("total_bird_abundance_Lag", 0:8)]),
+  lag = c(0, 8),
+  argvar = list(fun = "lin"),
+  arglag = list(fun="poly", degree=2)
+)
+
+# Wind Speed
+cb_wind_speed <- crossbasis(
+  x = as.matrix(case_crossover_df_8lag[, paste0("wind_speed_Lag", 0:8)]),
+  lag = c(0, 8),
+  argvar = list(fun = "lin"),
+  arglag = list(fun="poly", degree=2)
+)
+
+# # # Anseriformes:
+#  cb_anseri <- crossbasis(
+#    x = as.matrix(case_crossover_df_8lag[, paste0("anseriformes_Lag", 0:8)]),
+#    lag = c(0, 8),
+#    argvar = list(fun = "lin"),
+#    arglag = list(fun = "poly", degree = 2)
+#  )
+#  
+# # # Predator:
+#  cb_predators <- crossbasis(
+#    x = as.matrix(case_crossover_df_8lag[, paste0("predators_Lag", 0:8)]),
+#    lag = c(0, 8),
+#    argvar = list(fun = "lin"),
+#    arglag = list(fun = "poly", degree = 2)
+#  )
+
+
+# Fit Model
+
+model_8lag <- clogit(
+  outbreak_binary ~ 
+    cb_runoff + cb_snow_density + cb_soil_moisture + cb_temperature +
+    cb_precipitation + cb_wind_speed + cb_total_bird_abundance +
+    strata(stratum_id),
+  method = "efron",
+  data = case_crossover_df_8lag
+)
+
+
+# Crosspred Objects
+
+cp_runoff       <- crosspred(cb_runoff,       model_8lag, cen = 0, at = 0.5, cumul = TRUE)
+cp_snow         <- crosspred(cb_snow_density, model_8lag, cen = 0, at = 0.5, cumul = TRUE)
+cp_soil         <- crosspred(cb_soil_moisture,model_8lag, cen = 0, at = 0.5, cumul = TRUE)
+cp_temp         <- crosspred(cb_temperature,  model_8lag, cen = 0, at = 0.5, cumul = TRUE)
+cp_precip       <- crosspred(cb_precipitation,model_8lag, cen = 0, at = 0.5, cumul = TRUE)
+cp_wind         <- crosspred(cb_wind_speed,   model_8lag, cen = 0, at = 0.5, cumul = TRUE)
+cp_bird         <- crosspred(cb_total_bird_abundance, model_8lag, cen = 0, at = 0.5, cumul = TRUE)
+
+cp_slice_runoff <- crosspred(cb_runoff,       model_8lag, cen = 0, at = 0.5)
+cp_slice_snow   <- crosspred(cb_snow_density, model_8lag, cen = 0, at = 0.5)
+cp_slice_soil   <- crosspred(cb_soil_moisture,model_8lag, cen = 0, at = 0.5)
+cp_slice_temp   <- crosspred(cb_temperature,  model_8lag, cen = 0, at = 0.5)
+cp_slice_precip <- crosspred(cb_precipitation,model_8lag, cen = 0, at = 0.5)
+cp_slice_wind   <- crosspred(cb_wind_speed,   model_8lag, cen = 0, at = 0.5)
+cp_slice_bird   <- crosspred(cb_total_bird_abundance, model_8lag, cen = 0, at = 0.5)
+
+
+# Cumulative OR Summary Table
+
+cumulative_summary <- tibble(
+  Predictor = c("Runoff", "Snow Density", "Soil Moisture", "Temperature",
+                "Precipitation", "Wind Speed", "Total Bird Abundance"),
+  OR = c(
+    cp_runoff$allRRfit["0.5"],
+    cp_snow$allRRfit["0.5"],
+    cp_soil$allRRfit["0.5"],
+    cp_temp$allRRfit["0.5"],
+    cp_precip$allRRfit["0.5"],
+    cp_wind$allRRfit["0.5"],
+    cp_bird$allRRfit["0.5"]
+  ),
+  CI_low = c(
+    cp_runoff$allRRlow["0.5"],
+    cp_snow$allRRlow["0.5"],
+    cp_soil$allRRlow["0.5"],
+    cp_temp$allRRlow["0.5"],
+    cp_precip$allRRlow["0.5"],
+    cp_wind$allRRlow["0.5"],
+    cp_bird$allRRlow["0.5"]
+  ),
+  CI_high = c(
+    cp_runoff$allRRhigh["0.5"],
+    cp_snow$allRRhigh["0.5"],
+    cp_soil$allRRhigh["0.5"],
+    cp_temp$allRRhigh["0.5"],
+    cp_precip$allRRhigh["0.5"],
+    cp_wind$allRRhigh["0.5"],
+    cp_bird$allRRhigh["0.5"]
+  )
+) %>%
+  mutate(`OR (95% CI)` = sprintf("%.2f (%.2f, %.2f)", OR, CI_low, CI_high)) %>%
+  select(Predictor, `OR (95% CI)`) %>%
+  gt() %>%
+  tab_header(
+    title = md("**Case-Crossover Model (8-lag): Cumulative Odds Ratios**"),
+    subtitle = "Per 0.5 SD Increase"
+  ) %>%
+  cols_label(`OR (95% CI)` = "Odds Ratio (95% Confidence Interval)") %>%
+  tab_options(
+    table.font.size = 14,
+    heading.title.font.size = 16,
+    heading.subtitle.font.size = 14,
+    data_row.padding = px(6)
+  )
+
+cumulative_summary 
+
+
+# Lag-Specific Odds Ratio Table (0–8 weeks)
+
+extract_lag_ORs_wide <- function(cp_obj, varname, varval = "0.5", lags = 0:8) {
+  lag_labels <- paste0("lag", lags)
+  or   <- cp_obj$matRRfit[varval, lag_labels]
+  low  <- cp_obj$matRRlow[varval, lag_labels]
+  high <- cp_obj$matRRhigh[varval, lag_labels]
+  tibble(
+    Predictor = varname,
+    !!!setNames(as.list(or),   paste0("OR_Lag", lags)),
+    !!!setNames(as.list(low),  paste0("Low_Lag", lags)),
+    !!!setNames(as.list(high), paste0("High_Lag", lags)),
+    !!!setNames(as.list(sprintf("%.2f (%.2f, %.2f)", or, low, high)), paste0("Lag ", lags))
+  )
+}
+
+# Combine all predictors
+table_lag_ORs <- bind_rows(
+  extract_lag_ORs_wide(cp_slice_runoff, "Runoff"),
+  extract_lag_ORs_wide(cp_slice_snow,   "Snow Density"),
+  extract_lag_ORs_wide(cp_slice_soil,   "Soil Moisture"),
+  extract_lag_ORs_wide(cp_slice_temp,   "Temperature"),
+  extract_lag_ORs_wide(cp_slice_precip, "Precipitation"),
+  extract_lag_ORs_wide(cp_slice_wind,   "Wind Speed"),
+  extract_lag_ORs_wide(cp_slice_bird,   "Total Bird Abundance")
+)
+
+# Identify significant lags (CI entirely above/below 1)
+lags <- 0:8
+highlight_matrix <- sapply(lags, function(i) {
+  table_lag_ORs[[paste0("Low_Lag", i)]] > 1 | table_lag_ORs[[paste0("High_Lag", i)]] < 1
+})
+colnames(highlight_matrix) <- paste0("Lag ", lags)
+
+# Build flextable for export
+ft <- table_lag_ORs %>%
+  select(Predictor, paste0("Lag ", lags)) %>%
+  flextable() %>%
+  set_header_labels(Predictor = "Predictor") %>%
+  add_header_row(values = c("Predictor", "Odds Ratio (95% CI)"), colwidths = c(1, length(lags))) %>%
+  fontsize(size = 11, part = "all") %>%
+  autofit() %>%
+  align(align = "center", part = "all") %>%
+  theme_booktabs()
+
+for (i in lags) {
+  ft <- bold(ft, i = which(highlight_matrix[, paste0("Lag ", i)]), j = paste0("Lag ", i))
+}
+
+# Export Word table
+doc <- read_docx() %>%
+  body_add_flextable(ft) %>%
+  body_add_par(
+    "Table: Lag-Specific Odds Ratios for the 8-week Case-Crossover Model of Environmental and Bird Predictors of HPAI Outbreaks in Minnesota (2022). Odds ratios are per 0.5 SD increase; statistically significant values are shown in bold.",
+    style = "Normal"
+  )
+
+print(doc, target = file.path(tables_folder, "Table_LagSpecific_OR_HPAI_Minnesota_8lag_poly_df2.docx"))
+
+ft
+
+
+
+
+
+
+```
+
+# Even though the AIC is the lowest for the case-crossover over 8-lags, we can see from the cumlative and lag-specific odds ratios that the model is very unstable (wide confidence intervals). We thus choose the case-crossover over 4-lags that has a moderate AIC and stable results
+
+
+

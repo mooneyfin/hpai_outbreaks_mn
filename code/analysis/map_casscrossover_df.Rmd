@@ -1,0 +1,115 @@
+---
+title: "create_casecrossover_map"
+author: "Fintan Mooney"
+date: "2025-10-15"
+output: html_document
+---
+
+# This R markdown file creates the casecrossover map for the projet on the association between meterological conditons, climate, and wild bird abundance, on risk of highly pathogenic avian influenza (HPAI) outbreaks in Minnesota farms during 2022
+
+```{r setup, include=FALSE}
+ 
+knitr::opts_chunk$set(echo = TRUE)
+ 
+# ---- Package setup ----
+packages <- c(
+  "MatchIt", "readr", "sf", "survival", "dlnm", "gtsummary", "kableExtra",
+  "tidyr", "tibble", "mgcv", "ggplot2", "car", "patchwork", "corrplot",
+  "purrr", "ggspatial", "gt", "flextable", "officer", "conflicted",
+  "dplyr", "data.table", "here", "stringr"
+)
+
+installed <- packages %in% rownames(installed.packages())
+if (any(!installed)) install.packages(packages[!installed])
+
+invisible(lapply(packages, library, character.only = TRUE))
+
+# Resolve conflicts
+conflict_prefer("select", "dplyr")
+conflict_prefer("filter", "dplyr")
+
+# Project folders (e.g., where the .Rproj file is)
+base_folder <- here()
+data_folder <- here("data")
+env_folder <- here("data", "EarthEngine_MN")
+objects_folder <-here("data", "objects")
+```
+
+
+## Read in the timeseries dataset
+
+```{r, read in timeseries dataset}
+
+# Timeseries
+fishnet_timeseries_clean <- readRDS(file.path(objects_folder, "fishnet_timeseries.RDS"))
+
+fishnet_timeseries_clean <- fishnet_timeseries_clean %>%
+  arrange(zone_id, week) %>%
+  # 1. Drop all columns that end with ".x"
+  select(-ends_with(".x")) %>%
+  # 2. Rename columns ending with ".y" to remove the suffix
+  rename_with(~ str_remove(.x, "\\.y$"), ends_with(".y"))
+
+# Spatial GPKG
+gpkg_path <- file.path(data_folder, "Fishnet_Timeseries_10km.gpkg")
+fishnet_weeks <- st_read(gpkg_path)
+
+## Simplify
+fishnet_weeks <- fishnet_weeks %>%
+  dplyr::select(week, shape_length, shape_area, zone_id, geom)
+
+```
+
+## Map Cases in Casecrossover Model
+
+```{r, casecrossover map}
+
+
+# Map 
+# Identify case zones
+case_zone_ids <- fishnet_timeseries_clean %>%
+  filter(any_outbreak == 1) %>%
+  distinct(zone_id)
+
+# Subset spatial features
+case_zones_sf <- fishnet_weeks %>% filter(zone_id %in% case_zone_ids$zone_id)
+control_zones_sf <- fishnet_weeks %>% filter(!(zone_id %in% case_zone_ids$zone_id))
+
+# Define output paths
+case_gpkg_out    <- file.path(data_folder, "Case_Zones.gpkg")
+control_gpkg_out <- file.path(data_folder, "Control_Zones.gpkg")
+
+# Export as GPKG
+st_write(case_zones_sf, case_gpkg_out,    delete_layer = TRUE)
+st_write(control_zones_sf, control_gpkg_out, delete_layer = TRUE)
+
+# Reproject to EPSG:3857 (Web Mercator) for basemap compatibility
+case_zones_sf_proj <- st_transform(case_zones_sf, 3857)
+control_zones_sf_proj <- st_transform(control_zones_sf, 3857)
+
+# Plot with basemap
+ggplot() +
+  # Add simple basemap
+  annotation_map_tile(type = "cartolight", zoomin = 0) +
+
+  # Control zones: outlines
+  geom_sf(data = control_zones_sf_proj, fill = NA, color = "lightblue", linewidth = 0.05) +
+
+  # Case zones: bold fill
+  geom_sf(data = case_zones_sf_proj, fill = "#d73027", color = "red", linewidth = 0.1, alpha = 0.9) +
+
+  # Scale bar
+  annotation_scale(location = "bl", width_hint = 0.3, text_cex = 0.75, line_width = 0.5, style = "ticks") +
+
+  # Theme and layout
+  theme_void(base_size = 12) +
+  theme(
+    plot.title = element_text(size = 12, face = "bold", hjust = 0.5),
+    plot.caption = element_text(size = 10, hjust = 0.5, face = "italic"),
+    plot.background = element_rect(fill = "white", color = NA)
+  ) +
+  coord_sf(expand = FALSE) +
+  labs(
+    title = "HPAI Outbreak Case Zones in Minnesota (2022)"
+  )
+```

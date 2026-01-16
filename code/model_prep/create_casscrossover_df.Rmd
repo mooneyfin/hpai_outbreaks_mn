@@ -16,7 +16,7 @@ packages <- c(
   "MatchIt", "readr", "sf", "survival", "dlnm", "gtsummary", "kableExtra",
   "tidyr", "tibble", "mgcv", "ggplot2", "car", "patchwork", "corrplot",
   "purrr", "ggspatial", "gt", "flextable", "officer", "conflicted",
-  "dplyr", "data.table", "here"
+  "dplyr", "data.table", "here", "stringr"
 )
 
 installed <- packages %in% rownames(installed.packages())
@@ -117,27 +117,40 @@ ggplot() +
 ## Define Controls and Create Case-Crossover Dataset
 ```{r, define controls}
 
-# Match
+# ---- Define Cases and Controls ----
+
+# Filter to zones with any outbreak
 case_zones <- fishnet_timeseries_clean %>%
   filter(any_outbreak == 1) 
 
-# Get binary cases: one row per zone_id and week with outbreak
+# Get cases: one row per zone_id and week with outbreak
 cases <- case_zones %>%
   filter(outbreak_count > 0) %>%
-  distinct(zone_id, case_week = week)  # one case per outbreak week
+  distinct(zone_id, case_week = week)
 
-# Deduplicate case_zones to avoid many-to-many join issues
+# Deduplicate case_zones for joining
 case_zones_unique <- case_zones %>%
   distinct(zone_id, week, .keep_all = TRUE)
 
-# Create full lag grid (1 to 4 weeks before each case)
+# Create control weeks (1-4 weeks before each case)
 case_lags <- cases %>%
   crossing(lag = 1:4) %>%
   mutate(control_week = case_week - lag) %>%
   filter(control_week >= 1)
 
-# Controls (week-lagged, outbreak_binary = 0)
-controls <- case_lags %>%
+# Remove overlapping controls (control week = case week in same zone)
+case_zone_weeks <- cases %>% select(zone_id, case_week)
+
+case_lags_clean <- case_lags %>%
+  anti_join(case_zone_weeks, by = c("zone_id", "control_week" = "case_week"))
+
+cat("Controls removed (overlap with case weeks):", nrow(case_lags) - nrow(case_lags_clean), "\n")
+
+### HERE WE REMOVED CONTROLS THAT OVERLAP
+#### Specifically, some cells have outbreaks at two different farms within the same four week period; we do not delete them as cases, but we remove the overlapping controls. 
+
+# Build controls dataset
+controls <- case_lags_clean %>%
   left_join(case_zones_unique, by = c("zone_id", "control_week" = "week")) %>%
   mutate(
     case_control = "control",
@@ -147,7 +160,7 @@ controls <- case_lags %>%
   ) %>%
   dplyr::select(-outbreak_count)
 
-# Cases (outbreak_binary = 1)
+# Build cases dataset
 case_data <- cases %>%
   left_join(case_zones_unique, by = c("zone_id", "case_week" = "week")) %>%
   mutate(
@@ -162,14 +175,94 @@ case_data <- cases %>%
 # Combine cases and controls
 case_crossover_df <- bind_rows(case_data, controls)
 
-# Summary check
+# ---- Summary checks ----
+cat("\nCase-control distribution:\n")
 table(case_crossover_df$case_control)
-sum(case_crossover_df$outbreak_binary)
+
+cat("\nTotal cases:", sum(case_crossover_df$outbreak_binary), "\n")
+
+# Check controls per case
+controls_per_case <- case_crossover_df %>%
+  filter(case_control == "control") %>%
+  count(stratum_id, name = "n_controls")
+
+cat("\nControls per case:\n")
+table(controls_per_case$n_controls)
 
 colnames(case_crossover_df)
 
+
+
 ```
 
+## Validate control selection for zones with multiple cases
+```{r, validate multi-case zones}
+
+# Check: how many zone-weeks have outbreaks?
+case_zones %>%
+  filter(outbreak_count > 0) %>%
+  distinct(zone_id, week) %>%
+  nrow()
+
+# vs total outbreak events
+print(sum(case_zones$outbreak_count))
+
+
+
+# Zones with multiple cases
+multi_case_zones <- cases %>%
+  group_by(zone_id) %>%
+  summarise(n_cases = n(), case_weeks = list(case_week), .groups = "drop") %>%
+  filter(n_cases > 1)
+
+cat("Zones with multiple cases:", nrow(multi_case_zones), "\n")
+cat("Total cases in multi-case zones:", sum(multi_case_zones$n_cases), "\n")
+
+# Check: Do any control weeks overlap with case weeks in the same zone?
+case_zone_weeks <- cases %>% select(zone_id, case_week)
+
+proposed_controls <- cases %>%
+  crossing(lag = 1:4) %>%
+  mutate(control_week = case_week - lag) %>%
+  filter(control_week >= 1)
+
+# Flag controls that are also case weeks in the same zone
+overlap <- proposed_controls %>%
+  inner_join(case_zone_weeks, by = c("zone_id", "control_week" = "case_week"))
+
+cat("Control weeks that are ALSO case weeks in same zone:", nrow(overlap), "\n")
+
+if (nrow(overlap) > 0) {
+  print(overlap)
+} else {
+  cat("✓ No overlap — all control weeks are case-free in their respective zones.\n")
+}
+
+## WE DO NOT REMOVE CASES BECAUSE EVEN THOUGH THEY MAY HAVE HAPPENED IN THE SAME ZONE OVER THE FOUR WEEK PERIOD THEY WERE FROM DIFFERENT FARMS
+
+
+# Check for duplicate zone-week combinations in controls
+control_dupes <- case_crossover_df %>%
+  filter(case_control == "control") %>%
+  count(zone_id, week) %>%
+  filter(n > 1)
+
+cat("Control zone-weeks appearing more than once:", nrow(control_dupes), "\n")
+
+if (nrow(control_dupes) > 0) {
+  print(control_dupes)
+  
+  # Show which strata these belong to
+  case_crossover_df %>%
+    filter(case_control == "control") %>%
+    inner_join(control_dupes, by = c("zone_id", "week")) %>%
+    select(zone_id, week, stratum_id, case_week) %>%
+    arrange(zone_id, week) %>%
+    print(n = 30)
+}
+
+## WE DO NOT REMOVE CONTROLS ZONE-WEEKS THAT APPEAR MORE THAN ONE BECAUSE THEY COME FROM DIFFERENT STRATA AND THUS ARE SUITABLE FOR THE CONDITONAL LOGISTIC REGRESSION
+```
 
 # Check distribution of casecrossover variables
 
@@ -293,10 +386,21 @@ case_crossover_df <- add_lagged_predictors(
   max_lag = 4
 )
 
+# Verify lagged variables were added correctly
+cat("Columns in case_crossover_df:", ncol(case_crossover_df), "\n")
+cat("Rows in case_crossover_df:", nrow(case_crossover_df), "\n")
 
+# Check for missing values in lagged variables
+case_crossover_df %>%
+  select(ends_with("_Lag0")) %>%
+  summarise(across(everything(), ~sum(is.na(.)))) %>%
+  pivot_longer(everything(), names_to = "var", values_to = "n_missing") %>%
+  filter(n_missing > 0)
 
-
+## NOTHING IS MISSING
 ```
+
+
 
 
 ## Transform and Scale Variables
@@ -339,6 +443,55 @@ for (var in vars_to_lag) {
     case_crossover_df[[lagged_col]] <- scale(case_crossover_df[[lagged_col]])
   }
 }
+```
+
+## Check that no control weeks have cases
+
+```{r, validation check}
+
+# Check for overlap in final dataset
+case_weeks <- cases %>% select(zone_id, case_week)
+
+overlap_check <- case_crossover_df %>%
+  filter(case_control == "control") %>%
+  inner_join(case_weeks, by = c("zone_id", "week" = "case_week"))
+
+cat("Control weeks overlapping with case weeks:", nrow(overlap_check), "\n")  # should be 0
+```
+
+## Count number of cases and controls again
+
+```{r, count number of cases and controls again}
+
+
+# Cases and controls
+cat("Total cases (zone-weeks):", sum(case_crossover_df$outbreak_binary == 1), "\n")
+cat("Total controls (zone-weeks):", sum(case_crossover_df$outbreak_binary == 0), "\n")
+
+# Total outbreak events (sum of outbreak_count for case rows)
+total_outbreaks <- case_crossover_df %>%
+  filter(outbreak_binary == 1) %>%
+  left_join(
+    case_zones_unique %>% select(zone_id, week, outbreak_count),
+    by = c("zone_id", "week")
+  ) %>%
+  summarise(total = sum(outbreak_count, na.rm = TRUE)) %>%
+  pull(total)
+
+cat("Total outbreak events:", total_outbreaks, "\n")
+
+# Summary table
+cat("\nCase-control distribution:\n")
+table(case_crossover_df$case_control)
+
+# Controls per case
+cat("\nControls per case:\n")
+case_crossover_df %>%
+  filter(case_control == "control") %>%
+  count(stratum_id) %>%
+  count(n, name = "n_cases") %>%
+  rename(n_controls = n)
+
 ```
 
 ### Export casecrossover df
