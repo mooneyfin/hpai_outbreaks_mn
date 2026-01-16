@@ -1,18 +1,41 @@
+# macOS
+.DS_Store
+
 # R / RStudio
 .Rproj.user/
 .Rhistory
 .RData
 .Ruserdata
+.RDataTmp*
 
-# Ignore all data except key objects
-data/*
+# R app history / session junk
+.Rapp.history
+
+# Quarto / Rmd / caches
+*_cache/
+*_files/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Office temp files
+~$*.docx
+~$*.pptx
+~$*.xlsx
+
+# Map tile cache (rosm / osm)
+rosm.cache/
+**/rosm.cache/
+
+# ---- Data policy: ignore all data except key objects ----
+data/**
 !data/.keep
 !data/objects/
 !data/objects/.keep
-data/objects/*
+
+# ignore everything in objects...
+data/objects/**
+# ...except these tracked artifacts
 !data/objects/case_crossover_df.RDS
 !data/objects/timeseries_clean.RDS
 !data/objects/casecrossover_model.RDS
-
-# Global ignore
-.DS_Store
