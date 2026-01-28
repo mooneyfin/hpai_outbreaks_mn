@@ -1,0 +1,516 @@
+---
+title: "season_model_tests"
+author: "Fintan Mooney"
+date: "2025-10-24"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+ 
+knitr::opts_chunk$set(echo = TRUE)
+ 
+# ---- Package setup ----
+packages <- c(
+  "MatchIt", "readr", "sf", "survival", "dlnm", "gtsummary", "kableExtra",
+  "tidyr", "tibble", "mgcv", "ggplot2", "car", "patchwork", "corrplot",
+  "purrr", "ggspatial", "gt", "flextable", "officer", "conflicted",
+  "dplyr", "data.table", "here"
+)
+
+installed <- packages %in% rownames(installed.packages())
+if (any(!installed)) install.packages(packages[!installed])
+
+invisible(lapply(packages, library, character.only = TRUE))
+
+# Resolve conflicts
+conflict_prefer("select", "dplyr")
+conflict_prefer("filter", "dplyr")
+
+# Project folders (e.g., where the .Rproj file is)
+base_folder <- here()
+data_folder <- here("data")
+env_folder <- here("data", "EarthEngine_MN")
+objects_folder <-here("data", "objects")
+figures_folder <-here("output", "figures")
+tables_folder <-here("output", "tables")
+
+list.files(here())
+
+```
+
+## Timeseries 
+
+### Read in Timeseries 
+
+```{r, import timeseries dataframe}
+
+# Timeseries
+fishnet_timeseries_clean <- readRDS(file.path(objects_folder, "fishnet_timeseries.RDS"))
+
+
+```
+
+### Prepare for modeling
+
+```{r, prepare}
+timeseries_clean <- fishnet_timeseries_clean %>%
+  arrange(zone_id, week)
+
+timeseries_clean$season <- factor(timeseries_clean$season,
+                                  levels = c("Fall", "Spring", "Winter", "Summer"))
+
+```
+
+
+## Scale
+
+```{r, scale}
+
+# Variables to log1p transform
+log_vars <- c("total_bird_abundance", "runoff", "precipitation")
+
+# Apply log1p transformation only if column exists
+timeseries_clean <- timeseries_clean %>%
+  mutate(across(all_of(log_vars), ~ log1p(.), .names = "{.col}"))
+
+# All variables to scale 
+vars_to_scale <- c(
+  "total_bird_abundance", "leaf_area_index", "longwave_radiation", "runoff",
+  "shortwave_radiation", "snow_density", "soil_moisture", 
+  "temperature", "evapotranspiration", "precipitation", "wind_speed",
+  "relative_humidity"
+)
+
+# Apply z-score scaling
+timeseries_clean <- timeseries_clean %>%
+  mutate(across(all_of(vars_to_scale), scale, .names = "{.col}"))
+
+
+```
+
+### Crossbasis terms (timeseries)
+
+
+#### Linear
+
+
+```{r, crossbasis lin}
+
+colnames(timeseries_clean)
+
+# Crossbasis terms for selected variables using Lag0–Lag4
+cb_lin_relative_humidity <- crossbasis(
+  timeseries_clean$relative_humidity,
+  lag = 4,
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 2)
+)
+
+cb_lin_evap <- crossbasis(
+  timeseries_clean$evapotranspiration,
+  lag = 4,
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 2)
+)
+
+cb_lin_leaf_area_index <- crossbasis(
+  timeseries_clean$leaf_area_index,
+  lag = 4,
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 2)
+)
+
+cb_lin_runoff <- crossbasis(
+  timeseries_clean$runoff,
+  lag = 4,
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 2)
+)
+
+cb_lin_shortwave_radiation <- crossbasis(
+  timeseries_clean$shortwave_radiation,
+  lag = 4,
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 2)
+)
+
+cb_lin_longwave_radiation <- crossbasis(
+  timeseries_clean$longwave_radiation,
+  lag = 4,
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 2)
+)
+
+cb_lin_snow_density <- crossbasis(
+  timeseries_clean$snow_density,
+  lag = 4,
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 2)
+)
+
+cb_lin_soil_moisture <- crossbasis(
+  timeseries_clean$soil_moisture,
+  lag = 4,
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 2)
+)
+
+cb_lin_temperature <- crossbasis(
+  timeseries_clean$temperature,
+  lag = 4,
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 2)
+)
+
+cb_lin_precipitation <- crossbasis(
+  timeseries_clean$precipitation,
+  lag = 4,
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 2)
+)
+
+cb_lin_wind_speed <- crossbasis(
+  timeseries_clean$wind_speed,
+  lag = 4,
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 2)
+)
+
+cb_lin_bird_abundance <- crossbasis(
+  timeseries_clean$total_bird_abundance,
+  lag = 4,
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 2)
+)
+
+
+```
+
+#### Natural Spline (df = 3)
+
+```{r, crossbasis ns df 3}
+
+
+# Crossbasis terms for selected variables using Lag0–Lag4
+
+cb_ns_relative_humidity <- crossbasis(
+  timeseries_clean$relative_humidity,
+  lag = 4,
+  argvar = list(fun = "ns", df = 2),
+  arglag = list(fun = "ns", df = 3)
+)
+
+cb_ns_evap <- crossbasis(
+  timeseries_clean$evapotranspiration,
+  lag = 4,
+  argvar = list(fun = "ns", df = 2),
+  arglag = list(fun = "ns", df = 3)
+)
+
+cb_ns_leaf_area_index <- crossbasis(
+  timeseries_clean$leaf_area_index,
+  lag = 4,
+  argvar = list(fun = "ns", df = 2),
+  arglag = list(fun = "ns", df = 3)
+)
+
+cb_ns_runoff <- crossbasis(
+  timeseries_clean$runoff,
+  lag = 4,
+  argvar = list(fun = "ns", df = 2),
+  arglag = list(fun = "ns", df = 3)
+)
+
+cb_ns_shortwave_radiation <- crossbasis(
+  timeseries_clean$shortwave_radiation,
+  lag = 4,
+  argvar = list(fun = "ns", df = 2),
+  arglag = list(fun = "ns", df = 3)
+)
+
+cb_ns_longwave_radiation <- crossbasis(
+  timeseries_clean$longwave_radiation,
+  lag = 4,
+  argvar = list(fun = "ns", df = 2),
+  arglag = list(fun = "ns", df = 3)
+)
+
+cb_ns_snow_density <- crossbasis(
+  timeseries_clean$snow_density,
+  lag = 4,
+  argvar = list(fun = "ns", df = 2),
+  arglag = list(fun = "ns", df = 3)
+)
+
+cb_ns_soil_moisture <- crossbasis(
+  timeseries_clean$soil_moisture,
+  lag = 4,
+  argvar = list(fun = "ns", df = 2),
+  arglag = list(fun = "ns", df = 3)
+)
+
+cb_ns_temperature <- crossbasis(
+  timeseries_clean$temperature,
+  lag = 4,
+  argvar = list(fun = "ns", df = 2),
+  arglag = list(fun = "ns", df = 3)
+)
+
+cb_ns_precipitation <- crossbasis(
+  timeseries_clean$precipitation,
+  lag = 4,
+  argvar = list(fun = "ns", df = 2),
+  arglag = list(fun = "ns", df = 3)
+)
+
+cb_ns_wind_speed <- crossbasis(
+  timeseries_clean$wind_speed,
+  lag = 4,
+  argvar = list(fun = "ns", df = 2),
+  arglag = list(fun = "ns", df = 3)
+)
+
+cb_ns_bird_abundance <- crossbasis(
+  timeseries_clean$total_bird_abundance,
+  lag = 4,
+  argvar = list(fun = "ns", df = 2),
+  arglag = list(fun = "ns", df = 3)
+)
+
+
+```
+
+#### Natural Spline (df=2)
+
+```{r, crossbasis ns df 2}
+
+
+# Crossbasis terms for selected variables using Lag0–Lag4
+
+cb_ns2_relative_humidity <- crossbasis(
+  timeseries_clean$relative_humidity,
+  lag = 4,
+  argvar = list(fun = "ns", df = 2),
+  arglag = list(fun = "ns", df = 2)
+)
+
+cb_ns2_evap <- crossbasis(
+  timeseries_clean$evapotranspiration,
+  lag = 4,
+  argvar = list(fun = "ns", df = 2),
+  arglag = list(fun = "ns", df = 2)
+)
+
+cb_ns2_leaf_area_index <- crossbasis(
+  timeseries_clean$leaf_area_index,
+  lag = 4,
+  argvar = list(fun = "ns", df = 2),
+  arglag = list(fun = "ns", df = 2)
+)
+
+cb_ns2_runoff <- crossbasis(
+  timeseries_clean$runoff,
+  lag = 4,
+  argvar = list(fun = "ns", df = 2),
+  arglag = list(fun = "ns", df = 2)
+)
+
+cb_ns2_shortwave_radiation <- crossbasis(
+  timeseries_clean$shortwave_radiation,
+  lag = 4,
+  argvar = list(fun = "ns", df = 2),
+  arglag = list(fun = "ns", df = 2)
+)
+
+cb_ns2_longwave_radiation <- crossbasis(
+  timeseries_clean$longwave_radiation,
+  lag = 4,
+  argvar = list(fun = "ns", df = 2),
+  arglag = list(fun = "ns", df = 2)
+)
+
+cb_ns2_snow_density <- crossbasis(
+  timeseries_clean$snow_density,
+  lag = 4,
+  argvar = list(fun = "ns", df = 2),
+  arglag = list(fun = "ns", df = 2)
+)
+
+cb_ns2_soil_moisture <- crossbasis(
+  timeseries_clean$soil_moisture,
+  lag = 4,
+  argvar = list(fun = "ns", df = 2),
+  arglag = list(fun = "ns", df = 2)
+)
+
+cb_ns2_temperature <- crossbasis(
+  timeseries_clean$temperature,
+  lag = 4,
+  argvar = list(fun = "ns", df = 2),
+  arglag = list(fun = "ns", df = 2)
+)
+
+cb_ns2_precipitation <- crossbasis(
+  timeseries_clean$precipitation,
+  lag = 4,
+  argvar = list(fun = "ns", df = 2),
+  arglag = list(fun = "ns", df = 2)
+)
+
+cb_ns2_wind_speed <- crossbasis(
+  timeseries_clean$wind_speed,
+  lag = 4,
+  argvar = list(fun = "ns", df = 2),
+  arglag = list(fun = "ns", df = 2)
+)
+
+cb_ns2_bird_abundance <- crossbasis(
+  timeseries_clean$total_bird_abundance,
+  lag = 4,
+  argvar = list(fun = "ns", df = 2),
+  arglag = list(fun = "ns", df = 2)
+)
+
+
+```
+
+
+## Test Models with Seasonal Fixed Effects
+
+```{r, model seasonal effects}
+
+season_timeseries_model_lin <- bam(outbreak_binary ~
+                   cb_lin_precipitation +
+                   cb_lin_snow_density + 
+                   cb_lin_runoff +
+                   cb_lin_soil_moisture +
+                   cb_lin_bird_abundance +
+                   cb_lin_wind_speed +
+                   cb_lin_temperature +
+                     s(lat, lon, bs ="ds", k =200) +
+                    season, # fixed effect
+                    family = nb(),
+                    data = timeseries_clean,
+                    method = "fREML",
+                    discrete = TRUE)
+
+summary(season_timeseries_model_lin)
+
+season_timeseries_model_ns <- bam(outbreak_binary ~
+                   cb_ns_precipitation +
+                   cb_ns_snow_density + 
+                   cb_ns_runoff +
+                   cb_ns_soil_moisture +
+                   cb_ns_bird_abundance +
+                   cb_ns_wind_speed +
+                   cb_ns_temperature +
+                     s(lat, lon, bs ="ds", k =200) +
+                    season, # fixed effect
+                    family = nb(),
+                    data = timeseries_clean,
+                    method = "fREML",
+                    discrete = TRUE)
+
+summary(season_timeseries_model_ns)
+
+season_timeseries_model_ns_2 <- bam(outbreak_binary ~
+                   cb_ns2_precipitation +
+                   cb_ns2_snow_density + 
+                   cb_ns2_runoff +
+                   cb_ns2_soil_moisture +
+                   cb_ns2_bird_abundance +
+                   cb_ns2_wind_speed +
+                   cb_ns2_temperature +
+                     s(lat, lon, bs ="ds", k =200) +
+                    season, # fixed effect
+                    family = nb(),
+                    data = timeseries_clean,
+                    method = "fREML",
+                    discrete = TRUE)
+
+summary(season_timeseries_model_ns_2)
+
+
+season_timeseries_model_binomial <- bam(outbreak_binary ~
+                   cb_ns2_precipitation +
+                   cb_ns2_snow_density + 
+                   cb_ns2_runoff +
+                   cb_ns2_soil_moisture +
+                   cb_ns2_bird_abundance +
+                   cb_ns2_wind_speed +
+                   cb_ns2_temperature +
+                     s(lat, lon, bs ="ds", k =200) +
+                    season, # fixed effect
+family = binomial(link = "logit"),
+                    data = timeseries_clean,
+                    method = "fREML",
+                    discrete = TRUE)
+
+summary(season_timeseries_model_binomial)
+
+season_timeseries_model_quasi <- bam(outbreak_binary ~
+                   cb_ns2_precipitation +
+                   cb_ns2_snow_density + 
+                   cb_ns2_runoff +
+                   cb_ns2_soil_moisture +
+                   cb_ns2_bird_abundance +
+                   cb_ns2_wind_speed +
+                   cb_ns2_temperature +
+                     s(lat, lon, bs ="ds", k =200) +
+                    season, # fixed effect
+family = quasibinomial(link = "logit"),
+                    data = timeseries_clean,
+                    method = "fREML",
+                    discrete = TRUE)
+
+summary(season_timeseries_model_quasi)
+
+season_timeseries_model_binomial_lin <- bam(outbreak_binary ~
+                   cb_lin_precipitation +
+                   cb_lin_snow_density + 
+                   cb_lin_runoff +
+                   cb_lin_soil_moisture +
+                   cb_lin_bird_abundance +
+                   cb_lin_wind_speed +
+                   cb_lin_temperature +
+                     s(lat, lon, bs ="ds", k =200) +
+                    season, # fixed effect
+family = binomial(link = "logit"),
+                    data = timeseries_clean,
+                    method = "fREML",
+                    discrete = TRUE)
+
+summary(season_timeseries_model_binomial)
+
+season_timeseries_model_quasi_lin <- bam(outbreak_binary ~
+                   cb_lin_precipitation +
+                   cb_lin_snow_density + 
+                   cb_lin_runoff +
+                   cb_lin_soil_moisture +
+                   cb_lin_bird_abundance +
+                   cb_lin_wind_speed +
+                   cb_lin_temperature +
+                     s(lat, lon, bs ="ds", k =200) +
+                    season, # fixed effect
+family = quasibinomial(link = "logit"),
+                    data = timeseries_clean,
+                    method = "fREML",
+                    discrete = TRUE)
+
+summary(season_timeseries_model_quasi_lin)
+
+AIC(season_timeseries_model_lin,season_timeseries_model_ns, season_timeseries_model_ns_2, season_timeseries_model_binomial,season_timeseries_model_binomial_lin,season_timeseries_model_quasi_lin)
+season_timeseries_model_quasi$gcv.ubre
+
+res_dev  <- deviance(season_timeseries_model_binomial)
+df_resid <- df.residual(season_timeseries_model_binomial)
+dispersion <- res_dev / df_resid
+dispersion
+
+
+```
+
+# We choose the model that has non-linear (ns, df = 2) arglag and argvar crossbasis terms and is in the negative binomial family
+## This choice is because we expect there to be a non-linear exposure-response relationship when modeling on the full dataset (timeseries) and because the outcome is overdispersed
+### This is the season_timeseries_model_ns_2 above (any reductions in AIC between the other negative binomial models is negligible)

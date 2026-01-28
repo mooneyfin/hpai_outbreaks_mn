@@ -12,7 +12,7 @@ knitr::opts_chunk$set(echo = TRUE)
  
 # ---- Package setup ----
 packages <- c(
-  "MatchIt", "readr", "sf", "survival", "dlnm", "gtsummary", "kableExtra",
+  "MatchIt", "readr", "sf", "survival", "stringr", "leaflet", "dlnm", "gtsummary", "kableExtra",
   "tidyr", "tibble", "mgcv", "ggplot2", "car", "patchwork", "corrplot",
   "purrr", "ggspatial", "gt", "flextable", "officer", "conflicted",
   "dplyr", "data.table", "here"
@@ -26,6 +26,7 @@ invisible(lapply(packages, library, character.only = TRUE))
 # Resolve conflicts
 conflict_prefer("select", "dplyr")
 conflict_prefer("filter", "dplyr")
+conflict_prefer("lag", "dplyr")
 
 # Project folders (e.g., where the .Rproj file is)
 base_folder <- here()
@@ -44,6 +45,8 @@ gpkg_path <- file.path(data_folder, "Fishnet_Timeseries_10km.gpkg")
 fishnet_weeks <- st_read(gpkg_path)
 
 colnames(fishnet_weeks)
+
+## Also bring in 
 
 ```
 
@@ -212,6 +215,7 @@ for (v in z_cols) {
 ```
 
 ## Read in feedlot data (contains info on outbreaks)
+
 ```{r, add feedlot data}
 
 fishnet_weeks <- data2022_z
@@ -227,16 +231,7 @@ feedlot_second <- st_read(second_path)
 # Combine into one spatial object
 feedlot_merged <- rbind(feedlot_first, feedlot_second)
 
-nrow(feedlot_merged)      # Total rows
-st_geometry_type(feedlot_merged)  # Geometry type
-unique(feedlot_merged$week)       # Confirm week coverage
-
-colnames(fishnet_weeks)
-colnames(feedlot_merged)
-
-feedlot_meged <- st_drop_geometry(feedlot_merged)
-
-# Make sure week is lowercase and integer
+# Standardize column names
 feedlot_merged <- feedlot_merged %>%
   rename(
     outbreak_id     = outbreak_i,
@@ -244,14 +239,316 @@ feedlot_merged <- feedlot_merged %>%
     outbreak_week   = Outbreak_W,
     outbreak_count  = Outbreak_C,
     close_outbreak  = Close_Outb,
-    week            = Week  # standardize to lowercase
+    week            = Week
   ) %>%
   mutate(week = as.integer(week))
 
+sum(feedlot_merged$outbreak_count)
+
+```
+
+
+## Check that outbreaks are independent at each feedlot/farm (meaning they >1 do not occur within 12 weeks)
+```{r, check on distinct outbreaks}
+#--- CHECKS
+# Check feedlot identifiers in week 1
+feedlot_merged %>%
+  filter(week == 1) %>%
+  summarise(
+    n_rows = n(),
+    n_unique_feedlot_id = n_distinct(feedlot_id),
+    n_unique_name = n_distinct(name),
+    n_unique_geometry = n_distinct(geometry)
+  )
+
+# Check if feedlot_id is unique per location
+feedlot_merged %>%
+  filter(week == 1) %>%
+  st_drop_geometry() %>%
+  group_by(feedlot_id) %>%
+  summarise(n = n()) %>%
+  filter(n > 1)
+
+#-------
+
+### Need to make sure outbreaks are independent (that is they do not happen in the same feedlot/farm within 12 weeks)
+
+# ---- Filter to independent spillovers (12-week gap rule) ----
+min_gap_weeks <- 12
+
+# Get only the weeks where an outbreak occurred at each feedlot
+feedlot_outbreaks <- feedlot_merged %>%
+  st_drop_geometry() %>%
+  filter(outbreak_count > 0) %>%
+  arrange(feedlot_id, week) %>%
+  group_by(feedlot_id) %>%
+  mutate(
+    detection_num = row_number(),
+    weeks_since_last = week - lag(week),
+    independent = detection_num == 1 | (!is.na(weeks_since_last) & weeks_since_last >= min_gap_weeks)
+  ) %>%
+  ungroup()
+
+# Summary
+cat("Total outbreak events:", sum(feedlot_outbreaks$outbreak_count), "\n")
+cat("Unique feedlots with outbreaks:", n_distinct(feedlot_outbreaks$feedlot_id), "\n")
+cat("Unique outbreak id:", n_distinct(feedlot_outbreaks$outbreak_id), "\n")
+cat("Independent spillovers:", sum(feedlot_outbreaks$independent), "\n")
+cat("Excluded (repeat <12 weeks):", sum(!feedlot_outbreaks$independent), "\n")
+
+# Check feedlots with multiple outbreak weeks
+feedlot_outbreaks %>%
+  group_by(feedlot_id) %>%
+  filter(n() > 1) %>%
+  arrange(feedlot_id, week) %>%
+  select(feedlot_id, zone_id, week, outbreak_count, detection_num, weeks_since_last, independent) %>%
+  print(n = 20)
+
+# The above confirms that all the outbreaks are independent 
+
+# Which feedlot-weeks to exclude
+excluded_feedlot_weeks <- feedlot_outbreaks %>%
+  filter(!independent) %>%
+  select(feedlot_id, zone_id, week)
+
+cat("\nExcluded feedlot-weeks:\n")
+print(excluded_feedlot_weeks, n = 20)
+
+
+feedlot_outbreaks %>%
+  group_by(outbreak_id) %>%
+  filter(n() > 1) %>%
+  arrange(outbreak_id) %>%
+  select(outbreak_id, feedlot_id, zone_id, week, outbreak_count)
+
+hpai_mn_2022 %>%
+  group_by(outbreak_id) %>%
+  filter(n() > 1) %>%
+  arrange(outbreak_id, date_confirmed) %>%
+  select(outbreak_id, premises, lat, lon, date_confirmed, type)
+```
+
+## Check with the raw outbreak data
+
+```{r, check with the raw outbreak data}
+
+# Load raw data 
+hpai_outbreaks <- read_csv(file.path(data_folder, "hpai-outbreaks-clean-placeholder-032124.csv"))
+
+# Filter to Minnesota 2022 
+hpai_mn_2022 <- hpai_outbreaks %>%
+  filter(
+    state == "MN",
+    date_confirmed >= as.Date("2022-01-01"),
+    date_confirmed <= as.Date("2022-12-31")
+  )
+
+cat("Total MN outbreaks in 2022:", nrow(hpai_mn_2022), "\n")
+
+# Check for premises with multiple detections
+hpai_mn_2022 <- hpai_mn_2022 %>%
+  mutate(week = as.numeric(floor(difftime(date_confirmed, as.Date("2022-01-01"), units = "weeks")) + 1))
+
+# Are there repeat detections at same premises?
+hpai_mn_2022 %>%
+  group_by(lat, lon) %>%  # or use premises_id if available
+  filter(n() > 1) %>%
+  arrange(lat, lon, date_confirmed) %>%
+  mutate(
+    days_since_last = as.numeric(date_confirmed - lag(date_confirmed)),
+    weeks_since_last = days_since_last / 7
+  ) %>%
+  select(lat, lon, date_confirmed, week, days_since_last, weeks_since_last) %>%
+  print(n = 20)
+
+## This confirms that there are repeat detection at same farm but they do not happen within 12-weeks of each other
+
+```
+
+# But wait one outbreak was not assigned to a feedlot
+## Lets look what happened (must have been an issue with the join)
+```{r, missing outbreak}
+# Compare outbreak IDs between raw data and feedlot_merged
+raw_ids <- hpai_mn_2022$outbreak_id
+merged_ids <- feedlot_outbreaks %>%
+  pull(outbreak_id) %>%
+  str_split("_") %>%
+  unlist() %>%
+  as.numeric()
+
+# Which outbreak ID is missing?
+setdiff(raw_ids, merged_ids)
+
+# Get the missing outbreak as sf
+missing_sf <- hpai_mn_2022 %>%
+  filter(outbreak_id == 309) %>%
+  st_as_sf(coords = c("lon", "lat"), crs = 4326) %>%
+  st_transform(st_crs(feedlot_merged))
+
+# Buffer the missing outbreak by 20km and filter feedlots
+missing_buffer <- st_buffer(missing_sf, dist = 20000)
+feedlots_nearby <- feedlot_merged %>%
+  st_filter(missing_buffer)
+
+# Transform to WGS84 
+feedlots_nearby_wgs84 <- feedlots_nearby %>%
+  st_transform(4326)
+
+# Get the missing outbreak
+missing_outbreak <- hpai_mn_2022 %>%
+  filter(outbreak_id == 309)
+
+# Get all other outbreaks
+other_outbreaks <- hpai_mn_2022 %>%
+  filter(outbreak_id != 309)
+
+# Transform case_zones to WGS84 for leaflet
+
+
+# Split feedlots into those with and without outbreaks
+feedlots_with_outbreak <- feedlots_nearby_wgs84 %>%
+  filter(outbreak_count > 0)
+
+feedlots_no_outbreak <- feedlots_nearby_wgs84 %>%
+  filter(outbreak_count == 0 | is.na(outbreak_count))
+
+# Create leaflet map
+leaflet() %>%
+  addProviderTiles("CartoDB.Positron") %>%
+  addCircles(
+    data = feedlots_no_outbreak,
+    radius = 5,
+    color = "orange",
+    fillOpacity = 0.6,
+    popup = ~paste("Outbreak Count:", outbreak_count),
+    group = "Feedlots (No Outbreak)"
+  ) %>%
+  addCircles(
+    data = feedlots_with_outbreak,
+    radius = 10,
+    color = "purple",
+    fillOpacity = 0.9,
+    popup = ~paste("Outbreak Count:", outbreak_count),
+    group = "Feedlots (With Outbreak)"
+  ) %>%
+  addCircles(
+    lng = other_outbreaks$lon,
+    lat = other_outbreaks$lat,
+    radius = 5,
+    color = "green",
+    fillOpacity = 0.6,
+    label = paste("Outbreak ID:", other_outbreaks$outbreak_id),
+    group = "Other Outbreaks"
+  ) %>%
+  addCircles(
+    lng = missing_outbreak$lon,
+    lat = missing_outbreak$lat,
+    radius = 10,
+    color = "red",
+    fillOpacity = 0.8,
+    popup = paste("MISSING - Outbreak ID:", missing_outbreak$outbreak_id, 
+                  "<br>Date:", missing_outbreak$date_confirmed),
+    group = "Missing Outbreak"
+  ) %>%
+  addLayersControl(
+    overlayGroups = c("Case Zones", "Feedlots (No Outbreak)", "Feedlots (With Outbreak)", 
+                      "Other Outbreaks", "Missing Outbreak"),
+    options = layersControlOptions(collapsed = FALSE)
+  ) %>%
+  setView(
+    lng = missing_outbreak$lon,
+    lat = missing_outbreak$lat,
+    zoom = 11
+  )
+
+## Lets find nearest feedlot 
+
+# Get the missing outbreak as sf in the same CRS as feedlots
+missing_sf <- hpai_mn_2022 %>%
+  filter(outbreak_id == 309) %>%
+  st_as_sf(coords = c("lon", "lat"), crs = 4326) %>%
+  st_transform(st_crs(feedlot_merged))
+
+# Find the nearest feedlot
+nearest_idx <- st_nearest_feature(missing_sf, feedlot_merged)
+nearest_feedlot <- feedlot_merged[nearest_idx, ]
+
+# Check distance
+distance_m <- st_distance(missing_sf, nearest_feedlot) %>% as.numeric()
+cat("Distance to nearest feedlot:", round(distance_m), "meters\n")
+
+# View the nearest feedlot details
+nearest_feedlot %>%
+  st_drop_geometry() %>%
+  select(any_of(c("feedlot_id", "name", "zone_id", "Outbreak_C")))
+
+colnames(feedlot_merged)
+```
+
+## Assing missing outbreak to nearest feedlot
+
+```{r, assign missing outbreak}
+
+# Get outbreak 309 details
+outbreak_309 <- hpai_mn_2022 %>%
+  filter(outbreak_id == 309) %>%
+  select(outbreak_id, date_confirmed, week, lat, lon, premises, type)
+
+print(outbreak_309)
+
+# Get the nearest feedlot's feedlot_id
+nearest_feedlot_id <- nearest_feedlot$feedlot_id[1]
+nearest_zone_id <- nearest_feedlot$zone_id[1]
+
+cat("Nearest feedlot_id:", nearest_feedlot_id, "\n")
+cat("Zone_id:", nearest_zone_id, "\n")
+cat("Outbreak 309 week:", outbreak_309$week, "\n")
+
+# Update feedlot_merged to add outbreak 309 to the nearest feedlot for that week
+feedlot_merged <- feedlot_merged %>%
+  mutate(
+    outbreak_id = case_when(
+      feedlot_id == nearest_feedlot_id & week == outbreak_309$week ~ "309",
+      TRUE ~ as.character(outbreak_id)
+    ),
+    outbreak_count = case_when(
+      feedlot_id == nearest_feedlot_id & week == outbreak_309$week ~ 1,
+      TRUE ~ as.numeric(outbreak_count)
+    ),
+    outbreak_week = case_when(
+      feedlot_id == nearest_feedlot_id & week == outbreak_309$week ~ "35",
+      TRUE ~ as.character(outbreak_week)
+    ),
+    outbreak_dist = case_when(
+      feedlot_id == nearest_feedlot_id & week == outbreak_309$week ~ as.character(round(distance_m, 2)),
+      TRUE ~ as.character(outbreak_dist)
+    )
+  )
+
+# Verify the update
+feedlot_merged %>%
+  filter(feedlot_id == nearest_feedlot_id, week == outbreak_309$week) %>%
+  st_drop_geometry() %>%
+  select(feedlot_id, zone_id, week, outbreak_id, outbreak_count, outbreak_week)
+```
+
+
+
+## Clean feedlot data and rename 
+```{r, add feedlot data}
+# Get unique zones that contain feedlots
+zones_with_feedlots <- feedlot_merged %>%
+  st_drop_geometry() %>%
+  distinct(zone_id)
+
+cat("Zones with feedlots:", nrow(zones_with_feedlots), "\n")
+
+# Aggregate feedlot data to zone-week level
 feedlot_zone_week <- feedlot_merged %>%
+  st_drop_geometry() %>%
   group_by(zone_id, week) %>%
   summarise(
-    outbreak_binary     = as.integer(any(outbreak_id == 1, na.rm = TRUE)),
+    outbreak_binary = as.integer(any(outbreak_id == 1, na.rm = TRUE)),
     outbreak_dist   = min(outbreak_dist, na.rm = TRUE),
     outbreak_week   = min(outbreak_week, na.rm = TRUE),
     outbreak_count  = sum(outbreak_count, na.rm = TRUE),
@@ -259,28 +556,64 @@ feedlot_zone_week <- feedlot_merged %>%
     .groups = "drop"
   )
 
+# Filter fishnet_weeks to only zones with feedlots, then join
 fishnet_weeks <- st_drop_geometry(fishnet_weeks)
 
 fishnet_weeks <- fishnet_weeks %>%
   mutate(week = as.integer(week)) %>%
-  left_join(feedlot_zone_week, by = c("zone_id", "week")) 
+  inner_join(zones_with_feedlots, by = "zone_id") %>%  # Keep only zones with feedlots
+  left_join(feedlot_zone_week, by = c("zone_id", "week"))
 
-fishnet_weeks %>%
-  summarise(
-    total_outbreaks = sum(outbreak_count, na.rm = TRUE),
-    mean_outbreak_binary = sum(outbreak_binary, na.rm = TRUE),
-    mean_outbreak_dist = mean(outbreak_dist, na.rm = TRUE),
-    total_close_outbreaks = mean(close_outbreak, na.rm = TRUE)
-  )
+cat("Total zones in fishnet_weeks after filtering:", n_distinct(fishnet_weeks$zone_id), "\n")
+cat("Total rows in fishnet_weeks:", nrow(fishnet_weeks), "\n")
 
+# Continue with cleanup
 fishnet_weeks <- fishnet_weeks %>%
-  select(-outbreak_binary, -lat, -lon) %>%  # Remove if exists and remove columns leftover
+  select(-any_of(c("outbreak_binary", "lat", "lon"))) %>%
   mutate(outbreak_binary = if_else(!is.na(outbreak_count) & outbreak_count > 0, 1L, 0L))
 
 fishnet_timeseries <- fishnet_weeks
+
+# Checks
+
+# Check total outcomes and outcome_binary
+cat("outbreaks:", sum(fishnet_timeseries$outbreak_binary), "\n")
+cat("outbreak binary:", sum(fishnet_timeseries$outbreak_count), "\n")
+
+
+# Check how many zones have cases vs total zones
+
+fishnet_timeseries %>%
+  group_by(zone_id) %>%
+  summarise(has_case  = any(!is.na(outbreak_dist))) %>%
+  count(has_case)
+
+# Create indicator for zones that ever had a case
+fishnet_timeseries <- fishnet_timeseries %>%
+  group_by(zone_id) %>%
+  mutate(any_outbreak = max(outbreak_binary, na.rm = TRUE)) %>%
+  ungroup()
+
+# Count case-weeks (zone-weeks in cells that had a case at any point)
+case_weeks <- fishnet_timeseries %>%
+  filter(any_outbreak == 1) %>%
+  nrow()
+
+# Count negative control-weeks (zone-weeks in cells that never had a case)
+negative_control_weeks <- fishnet_timeseries %>%
+  filter(any_outbreak == 0) %>%
+  nrow()
+
+# Summary
+cat("Total zone-weeks:", nrow(fishnet_timeseries), "\n")
+cat("Case-weeks (zones with any outbreak):", case_weeks, "\n")
+cat("Negative control-weeks (zones never had outbreak):", negative_control_weeks, "\n")
+
+
 ```
 
 
+# Read in bird data
 
 ```{r, read in full bird data}
 
@@ -400,7 +733,7 @@ zones_all_zero_sf <- fishnet_timeseries[zone_id %in% zone_ids_all_zero]
 fishnet_timeseries[, bird_zero := ifelse(zone_id %in% zone_ids_all_zero, "No Birds", "Has Birds")]
 
 ## Map if desired
-# # If not already an sf object, convert it
+# If not already an sf object, convert it
 # fishnet_sf <- st_as_sf(fishnet_timeseries)
 # 
 # # Reproject to WGS 84 (for plotting or basemaps)

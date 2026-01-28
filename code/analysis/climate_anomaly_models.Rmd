@@ -196,10 +196,10 @@ theme_pub <- ggplot2::theme_bw(base_size = 12) +
   ggplot2::theme(
     panel.grid    = ggplot2::element_blank(),
     panel.border  = ggplot2::element_rect(color = "black", fill = NA, linewidth = 0.4),
-    plot.title    = ggplot2::element_text(face = "bold", size = 12),
+    plot.title    = ggplot2::element_text(face = "bold", size = 10),
     axis.title    = ggplot2::element_text(size = 10),
     strip.text    = ggplot2::element_text(face = "bold"),
-    plot.caption  = ggplot2::element_text(size = 9, hjust = 0)
+    plot.caption  = ggplot2::element_text(size = 10, hjust = 0)
   )
 
 # Nonlinear anomaly smooths
@@ -253,10 +253,14 @@ smooth_plots <- lapply(seq_along(pred_vars), function(i) {
     )
 })
 
+# Create the 3×2 grid of anomaly plots
 panel_anomalies <- patchwork::wrap_plots(smooth_plots, ncol = 3) +
+plot_layout(axis_titles = "collect")
+
+panel_anomalies <- panel_anomalies +
   patchwork::plot_annotation(
-    title = "Nonlinear Relative Risk of HPAI Outbreaks vs Environmental Anomalies",
-    theme = ggplot2::theme(plot.title = ggplot2::element_text(size = 12, face = "bold"))
+    title   = "Nonlinear Relative Risk of HPAI Spillover Events vs Environmental Anomalies",
+    theme   = ggplot2::theme(plot.title = ggplot2::element_text(size = 12, face = "bold"))
   )
 
 
@@ -289,7 +293,7 @@ p_spatial <- ggplot2::ggplot() +
   ggplot2::scale_fill_viridis_c(name = "Relative risk", option = "E") +
   ggplot2::coord_sf(expand = FALSE) +
   ggplot2::labs(
-    title = "Spatial Smooth: Baseline Relative Risk of HPAI Outbreaks",
+    title = "Spatial Smooth: Baseline Relative Risk of HPAI Spillover Events",
     x = "Longitude", y = "Latitude"
   ) +
   theme_pub
@@ -309,16 +313,19 @@ season_effects <- broom::tidy(model_25yr, parametric = TRUE) |>
   )
 
 p_season <- ggplot2::ggplot(season_effects, ggplot2::aes(x = Season, y = RR)) +
-  ggplot2::geom_col(fill = "steelblue") +
-  ggplot2::geom_errorbar(ggplot2::aes(ymin = lower, ymax = upper), width = 0.2) +
+  # point for estimate
+  ggplot2::geom_point(size = 3, shape = 21, fill = "black") +
+  # vertical error bars
+  ggplot2::geom_errorbar(ggplot2::aes(ymin = lower, ymax = upper), width = 0.15, linewidth = 0.6) +
+  # dashed baseline at RR = 1 (Winter reference)
   ggplot2::geom_hline(yintercept = 1, linetype = "dashed") +
-  ggplot2::coord_cartesian(ylim = c(0, 30)) +
+  ggplot2::coord_cartesian(ylim = c(0, 55)) +
   ggplot2::scale_y_continuous(
-    breaks = seq(0, 30, by = 5),
+    breaks = seq(0, 55, by = 5),
     labels = function(x) ifelse(x %% 1 == 0, as.character(as.integer(x)), as.character(x))
   ) +
   ggplot2::labs(
-    title = "Seasonal Baseline Effects on HPAI Outbreak Risk",
+    title = "Seasonal Baseline Effects on HPAI Spillover Risk",
     x = "Season",
     y = "Relative risk vs Winter"
   ) +
@@ -334,7 +341,7 @@ final_panel_25yr <-
   (panel_anomalies /
    (p_spatial | p_season)) +
   patchwork::plot_annotation(
-    caption = "Negative-binomial GAM: The association between climate anomalies in 2022 (compared to 25yr mean) on HPAI outbreak risk in commercial and backyard farms.",
+    caption = "Negative-binomial GAM: The association between climate anomalies in 2022 (compared to 25yr mean) on HPAI spillover risk in commercial and backyard farms.",
     theme = ggplot2::theme(plot.caption = ggplot2::element_text(size = 9, hjust = 0))
   )
 
@@ -383,10 +390,10 @@ theme_pub <- ggplot2::theme_bw(base_size = 12) +
   ggplot2::theme(
     panel.grid    = ggplot2::element_blank(),
     panel.border  = ggplot2::element_rect(color = "black", fill = NA, linewidth = 0.4),
-    plot.title    = ggplot2::element_text(face = "bold", size = 12),
+    plot.title    = ggplot2::element_text(face = "bold", size = 10),
     axis.title    = ggplot2::element_text(size = 10),
     strip.text    = ggplot2::element_text(face = "bold"),
-    plot.caption  = ggplot2::element_text(size = 9, hjust = 0)
+    plot.caption  = ggplot2::element_text(size = 10, hjust = 0)
   )
 
 # Nonlinear anomaly smooths
@@ -440,11 +447,16 @@ smooth_plots <- lapply(seq_along(pred_vars), function(i) {
     )
 })
 
+# Create the 3×2 grid of anomaly plots
 panel_anomalies <- patchwork::wrap_plots(smooth_plots, ncol = 3) +
+plot_layout(axis_titles = "collect")
+
+panel_anomalies <- panel_anomalies +
   patchwork::plot_annotation(
-    title = "Nonlinear Relative Risk of HPAI Outbreaks vs Environmental Anomalies",
-    theme = ggplot2::theme(plot.title = ggplot2::element_text(size = 12, face = "bold"))
+    title   = "Nonlinear Relative Risk of HPAI Spillover Events vs Environmental Anomalies",
+    theme   = ggplot2::theme(plot.title = ggplot2::element_text(size = 12, face = "bold"))
   )
+
 
 
 # Spatial smooth with contour + fishnet overlay
@@ -476,7 +488,7 @@ p_spatial <- ggplot2::ggplot() +
   ggplot2::scale_fill_viridis_c(name = "Relative risk", option = "E") +
   ggplot2::coord_sf(expand = FALSE) +
   ggplot2::labs(
-    title = "Spatial Smooth: Baseline Relative Risk of HPAI Outbreaks",
+    title = "Spatial Smooth: Baseline Relative Risk of HPAI Spillover Events",
     x = "Longitude", y = "Latitude"
   ) +
   theme_pub
@@ -496,16 +508,19 @@ season_effects <- broom::tidy(model_10yr, parametric = TRUE) |>
   )
 
 p_season <- ggplot2::ggplot(season_effects, ggplot2::aes(x = Season, y = RR)) +
-  ggplot2::geom_col(fill = "steelblue") +
-  ggplot2::geom_errorbar(ggplot2::aes(ymin = lower, ymax = upper), width = 0.2) +
+  # point for estimate
+  ggplot2::geom_point(size = 3, shape = 21, fill = "black") +
+  # vertical error bars
+  ggplot2::geom_errorbar(ggplot2::aes(ymin = lower, ymax = upper), width = 0.15, linewidth = 0.6) +
+  # dashed baseline at RR = 1 (Winter reference)
   ggplot2::geom_hline(yintercept = 1, linetype = "dashed") +
-  ggplot2::coord_cartesian(ylim = c(0, 30)) +
+  ggplot2::coord_cartesian(ylim = c(0, 70)) +
   ggplot2::scale_y_continuous(
-    breaks = seq(0, 30, by = 5),
+    breaks = seq(0, 70, by = 5),
     labels = function(x) ifelse(x %% 1 == 0, as.character(as.integer(x)), as.character(x))
   ) +
   ggplot2::labs(
-    title = "Seasonal Baseline Effects on HPAI Outbreak Risk",
+    title = "Seasonal Baseline Effects on HPAI Spillover Risk",
     x = "Season",
     y = "Relative risk vs Winter"
   ) +
@@ -521,7 +536,7 @@ final_panel_10yr <-
   (panel_anomalies /
    (p_spatial | p_season)) +
   patchwork::plot_annotation(
-    caption = "Negative-binomial GAM: The association between climate anomalies in 2022 (compared to 10yr mean) on HPAI outbreak risk in commercial and backyard farms.",
+    caption = "Negative-binomial GAM: The association between climate anomalies in 2022 (compared to 10yr mean) on HPAI spillover risk in commercial and backyard farms.",
     theme = ggplot2::theme(plot.caption = ggplot2::element_text(size = 9, hjust = 0))
   )
 
