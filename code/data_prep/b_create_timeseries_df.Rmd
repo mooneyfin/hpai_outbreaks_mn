@@ -1,0 +1,670 @@
+---
+title: "Create Timeseries Dataframe"
+author: "Fintan Mooney"
+date: "2025-10-15"
+output: html_document
+---
+
+# NOTE: This script requires confidential HPAI spillover point-location data
+# (not publicly available). The processed grid-cell level output is provided
+# in data/ and downstream analyses can be run without this file.
+
+# Builds the timeseries panel dataframe for analyzing met conditions, climate anomalies,
+# and wild bird abundance against HPAI outbreak risk on MN farms in 2022!
+# Computes multi-year climatologies, z-scores, and flags non-independent spillovers...
+
+```{r include=FALSE}
+rm(list=ls())
+project.folder = paste0(print(here::here()),'/')
+source(paste0(project.folder,'create_folder_structure.R'))
+source(paste0(functions.folder,'script_initiate.R'))
+```
+
+
+# Bring in base dataframe
+
+```{r, bring in base dataframe}
+
+## Bring in the weekly fishnet with data
+
+weekly_fishnet <- readRDS(file.path(objects_folder, "mn_fishnet_processed.rds"))
+
+
+```
+
+
+# Read in climate data
+
+```{r, read in climate data}
+# Load all historical climate data for baselines
+all_years <- 1997:2022
+files <- file.path(env_data, paste0("mn_weekly_era5land_", all_years, ".csv"))
+all_data <- map2_dfr(files, all_years, ~ read_csv(.x) %>% mutate(year = .y))
+all_data <- all_data %>%
+  mutate(
+    week_start = as.Date(as.character(week_start), format = "%Y%m%d"),
+    snow_density = ifelse(snow_density <= 100, 0, snow_density) # remove lower bound for snow density, default value for no snow
+  )
+
+# Create baseline periods
+baseline_10yr <- all_data %>% filter(year %in% 2012:2021)
+baseline_15yr <- all_data %>% filter(year %in% 2007:2021)
+baseline_20yr <- all_data %>% filter(year %in% 2002:2021)
+baseline_25yr <- all_data %>% filter(year %in% 1997:2021)
+
+# Climate variables
+vars <- c("leaf_area_index", "longwave_radiation", "runoff_sum", "shortwave_radiation",
+          "snow_density", "soil_moisture", "relative_humidity", "temperature",
+          "evapotranspiration", "precipitation", "wind_speed", "surface_pressure")
+
+# Add ISO week and filter
+add_week <- function(df) df %>% mutate(week = lubridate::isoweek(week_start)) %>% filter(week <= 52)
+baseline_10yr <- add_week(baseline_10yr)
+baseline_15yr <- add_week(baseline_15yr)
+baseline_20yr <- add_week(baseline_20yr)
+baseline_25yr <- add_week(baseline_25yr)
+
+```
+
+## Create 5-year climatologies 
+
+```{r, create climatolgy}
+# Summarize climatology
+summarize_climatology <- function(df) {
+  df %>%
+    group_by(zone_id, week) %>%
+    summarise(across(all_of(vars), list(mean = mean, sd = sd), .names = "{.col}_{.fn}"), .groups = "drop")
+}
+
+# Function to add year suffix to climatology columns
+add_suffix <- function(df, yr_label) {
+  clim_cols <- grep("_(mean|sd)$", names(df), value = TRUE)
+  new_names <- paste0(clim_cols, "_", yr_label)
+  setNames(df, ifelse(names(df) %in% clim_cols, 
+                       paste0(names(df), "_", yr_label), 
+                       names(df)))
+}
+
+clim_10yr <- add_suffix(summarize_climatology(baseline_10yr), "10yr")
+clim_15yr <- add_suffix(summarize_climatology(baseline_15yr), "15yr")
+clim_20yr <- add_suffix(summarize_climatology(baseline_20yr), "20yr")
+clim_25yr <- add_suffix(summarize_climatology(baseline_25yr), "25yr")
+
+# Join 
+fishnet_timeseries <- weekly_fishnet %>%
+  left_join(clim_10yr, by = c("zone_id", "week")) %>%
+  left_join(clim_15yr, by = c("zone_id", "week")) %>%
+  left_join(clim_20yr, by = c("zone_id", "week")) %>%
+  left_join(clim_25yr, by = c("zone_id", "week"))
+
+# Compute z-scores
+for (v in vars) {
+  for (yr in c(10, 15, 20, 25)) {
+    m <- paste0(v, "_mean_", yr, "yr")
+    s <- paste0(v, "_sd_", yr, "yr")
+    z <- paste0(v, "_z_", yr, "yr")
+    fishnet_timeseries[[z]] <- (fishnet_timeseries[[v]] - fishnet_timeseries[[m]]) / fishnet_timeseries[[s]]
+  }
+}
+
+
+```
+
+## We have extreme outliers so need to winsorize
+
+```{r, winsorize}
+# Winsorize z-scores
+z_cols <- grep("_z_(10yr|15yr|20yr|25yr)$", names(fishnet_timeseries), value = TRUE)
+
+winsorize_with_summary <- function(x, varname, limit = 4) {
+  before_outliers <- sum(x < -limit | x > limit, na.rm = TRUE)
+  x_winsorized <- pmin(pmax(x, -limit), limit)
+  message(sprintf("%s: %d values winsorized (limit ±%s)", varname, before_outliers, limit))
+  return(x_winsorized)
+}
+
+for (v in z_cols) {
+  fishnet_timeseries[[v]] <- winsorize_with_summary(fishnet_timeseries[[v]], v, limit = 4)
+}
+
+```
+
+# Check that outbreaks are independent at each zone (>4 weeks apart)
+```{r, check on distinct outbreaks}
+
+min_gap_weeks <- 4
+
+# Get zone-weeks with outbreaks
+zone_outbreaks <- fishnet_timeseries %>%
+  filter(outbreak_binary == 1) %>%
+  arrange(zone_id, week) %>%
+  group_by(zone_id) %>%
+  mutate(
+    detection_num = row_number(),
+    weeks_since_last = week - lag(week),
+    independent = detection_num == 1 | (!is.na(weeks_since_last) & weeks_since_last >= min_gap_weeks)
+  ) %>%
+  ungroup()
+
+# Summary
+cat("Total outbreak zone-weeks:", nrow(zone_outbreaks), "\n")
+cat("Unique zones with outbreaks:", n_distinct(zone_outbreaks$zone_id), "\n")
+cat("Independent spillovers:", sum(zone_outbreaks$independent), "\n")
+cat("Excluded (repeat <12 weeks):", sum(!zone_outbreaks$independent), "\n")
+
+# Inspect zones with multiple outbreak weeks
+zone_outbreaks %>%
+  group_by(zone_id) %>%
+  filter(n() > 1) %>%
+  arrange(zone_id, week) %>%
+  select(zone_id, week, outbreak_count, outbreak_id, detection_num, weeks_since_last, independent) %>%
+  print(n = 20)
+
+# Excluded zone-weeks
+excluded_zone_weeks <- zone_outbreaks %>%
+  filter(!independent) %>%
+  select(zone_id, week)
+
+cat("\nExcluded zone-weeks:\n")
+print(excluded_zone_weeks, n = 20)
+```
+
+- There are 19 zones that have more than one spillover event within 4 weeks; however, we need to check with the original farm-outbreak dataset to see if these outbreaks actually came from the same farm
+
+## Check with raw outbreak data 
+
+```{r, check with the raw outbreak data}
+
+# Load raw data
+spillover_file <- file.path(spillover_data, "hpai-outbreaks-clean-placeholder-032124.csv")
+if (!file.exists(spillover_file)) {
+  stop("This script needs the confidential spillover data (hpai-outbreaks-clean-placeholder-032124.csv). See data/confidential/README.md for how to get it.")
+}
+hpai_outbreaks <- read_csv(spillover_file)
+
+# Filter to Minnesota 2022
+hpai_mn_2022 <- hpai_outbreaks %>%
+  filter(
+    state == "MN",
+    date_confirmed >= as.Date("2022-01-01"),
+    date_confirmed <= as.Date("2022-12-31")
+  ) %>%
+  mutate(week = as.numeric(floor(difftime(date_confirmed, as.Date("2022-01-01"), units = "weeks")) + 1))
+
+cat("Total MN outbreaks in 2022:", nrow(hpai_mn_2022), "\n")
+
+# Check repeat detections at same premises
+hpai_mn_2022 %>%
+  group_by(lat, lon) %>%
+  filter(n() > 1) %>%
+  arrange(lat, lon, date_confirmed) %>%
+  mutate(
+    days_since_last = as.numeric(date_confirmed - lag(date_confirmed)),
+    weeks_since_last = days_since_last / 7
+  ) %>%
+  select(lat, lon, date_confirmed, week, days_since_last, weeks_since_last) %>%
+  print()
+
+```
+
+## Check distance between outbreaks at same cell
+
+```{r, look at distance between outbreaks at same cell}
+
+# Get the CRS from the original fishnet timeseries
+fishnet_raw <- st_read(file.path(spatial_data, "fishnet_10km_timeseries.gpkg"))
+target_crs <- st_crs(fishnet_raw)
+print(target_crs)
+
+weekly_fishnet_sf_path <- file.path(processed_data, "mn_fishnet_processed.gpkg")
+
+weekly_fishnet_sf <- st_read(weekly_fishnet_sf_path) %>%
+  st_transform(crs = target_crs)
+
+hpai_mn_sf <- hpai_mn_2022 %>%
+  st_as_sf(coords = c("lon", "lat"), crs = 4326) %>%
+  st_transform(crs = target_crs)
+
+# Assign zone_id
+hpai_mn_sf <- st_join(hpai_mn_sf, weekly_fishnet_sf %>% distinct(zone_id, geom), join = st_within)
+
+# For zones with multiple outbreaks, compute pairwise distances and time gaps
+multi_outbreak_zones <- hpai_mn_sf %>%
+  st_drop_geometry() %>%
+  count(zone_id) %>%
+  filter(n > 1) %>%
+  pull(zone_id)
+
+# Pairwise comparison within each zone
+pairwise_results <- list()
+
+for (z in multi_outbreak_zones) {
+  zone_pts <- hpai_mn_sf %>% filter(zone_id == z) %>% arrange(date_confirmed)
+  n <- nrow(zone_pts)
+  if (n < 2) next
+  
+  for (i in 1:(n - 1)) {
+    for (j in (i + 1):n) {
+      dist_m <- as.numeric(st_distance(zone_pts[i, ], zone_pts[j, ]))
+      days_apart <- as.numeric(zone_pts$date_confirmed[j] - zone_pts$date_confirmed[i])
+      
+      pairwise_results[[length(pairwise_results) + 1]] <- tibble(
+        zone_id = z,
+        outbreak_id_1 = zone_pts$outbreak_id[i],
+        outbreak_id_2 = zone_pts$outbreak_id[j],
+        distance_km = dist_m / 1000,
+        days_apart = days_apart,
+        weeks_apart = days_apart / 7,
+        same_farm = dist_m < 100  # <100m = essentially same location
+      )
+    }
+  }
+}
+
+pairwise_df <- bind_rows(pairwise_results) %>%
+  arrange(distance_km, days_apart)
+
+print(pairwise_df, n = 40)
+
+cat("\nDistance summary for within-zone outbreak pairs:\n")
+summary(pairwise_df$distance_km)
+
+
+# Look at non-same-farm pairs that are close and within 4 weeks
+pairwise_df %>%
+  filter(!same_farm, weeks_apart < 4) %>%
+  mutate(
+    exclude_200m = distance_km < 0.2,
+    exclude_500m = distance_km < 0.5,
+    exclude_1km  = distance_km < 1.0
+  ) %>%
+  select(zone_id, outbreak_id_1, outbreak_id_2, distance_km, weeks_apart, 
+         exclude_200m, exclude_500m, exclude_1km) %>%
+  print(n = 40)
+
+# Count
+cat("\nExcluded under <200m & <4k:", 
+    sum(pairwise_df$distance_km < 0.2 & pairwise_df$weeks_apart < 4 & !pairwise_df$same_farm), "\n")
+cat("Excluded under <500m & <4wk:", 
+    sum(pairwise_df$distance_km < 0.5 & pairwise_df$weeks_apart < 4 & !pairwise_df$same_farm), "\n")
+cat("Excluded under <1km & <4wk:", 
+    sum(pairwise_df$distance_km < 1.0 & pairwise_df$weeks_apart < 4 & !pairwise_df$same_farm), "\n")
+
+pairwise_df %>%
+  filter(!same_farm) %>%
+  mutate(dist_bin = cut(distance_km, breaks = c(0, 0.2, 0.5, 1, 2, 5, 11))) %>%
+  group_by(dist_bin) %>%
+  summarise(
+    n_pairs = n(),
+    pct_within_4wk = mean(weeks_apart < 4) * 100,
+    median_weeks_apart = median(weeks_apart)
+  )
+
+
+```
+
+## Check for non-independent outbreaks across different cells
+```{r, cross-cell pairwise distances}
+
+# All pairwise distances between outbreaks in DIFFERENT zones, within 4 weeks
+cross_cell_results <- list()
+
+# Sort by date for consistent ordering
+hpai_mn_sf <- hpai_mn_sf %>% arrange(date_confirmed)
+
+n_outbreaks <- nrow(hpai_mn_sf)
+
+for (i in 1:(n_outbreaks - 1)) {
+  for (j in (i + 1):n_outbreaks) {
+    # Only compare outbreaks in different zones
+    if (hpai_mn_sf$zone_id[i] == hpai_mn_sf$zone_id[j]) next
+    
+    days_apart <- as.numeric(hpai_mn_sf$date_confirmed[j] - hpai_mn_sf$date_confirmed[i])
+    
+    # Only check pairs within 4 weeks to save computation
+    if (days_apart > 28) next
+    
+    dist_m <- as.numeric(st_distance(hpai_mn_sf[i, ], hpai_mn_sf[j, ]))
+    
+    # Only keep if within 1km (max threshold we care about)
+    if (dist_m > 1000) next
+    
+    cross_cell_results[[length(cross_cell_results) + 1]] <- tibble(
+      zone_id_1 = hpai_mn_sf$zone_id[i],
+      zone_id_2 = hpai_mn_sf$zone_id[j],
+      outbreak_id_1 = hpai_mn_sf$outbreak_id[i],
+      outbreak_id_2 = hpai_mn_sf$outbreak_id[j],
+      distance_km = dist_m / 1000,
+      days_apart = days_apart,
+      weeks_apart = days_apart / 7
+    )
+  }
+}
+
+if (length(cross_cell_results) > 0) {
+  cross_cell_df <- bind_rows(cross_cell_results) %>%
+    arrange(distance_km, days_apart)
+  
+  cat("Cross-cell pairs within 1km & 4 weeks:\n")
+  print(cross_cell_df)
+  
+  cat("\nCross-cell pairs by threshold:\n")
+  cat("  <200m & <4 wks:", sum(cross_cell_df$distance_km < 0.2), "\n")
+  cat("  <500m & <4 wks:", sum(cross_cell_df$distance_km < 0.5), "\n")
+  cat("  <1km & <4 wks:",  sum(cross_cell_df$distance_km < 1.0), "\n")
+} else {
+  cat("No cross-cell outbreak pairs within 1km & 4 weeks.\n")
+}
+```
+
+
+
+## We are going to flag the second outbreaks that occur in the same cells as another outbreak within 4 weeks and less than 200m, 500m, and 1km.
+
+```{r, flag second outbreaks by rules}
+
+# Get outbreak_ids flagged under each threshold (always the later outbreak)
+flag_ids <- pairwise_df %>%
+  filter(weeks_apart < 4) %>%
+  mutate(
+    flag_200m = distance_km < 0.2,
+    flag_500m = distance_km < 0.5,
+    flag_1km  = distance_km < 1.0
+  ) %>%
+  summarise(
+    ids_200m = list(unique(outbreak_id_2[flag_200m])),
+    ids_500m = list(unique(outbreak_id_2[flag_500m])),
+    ids_1km  = list(unique(outbreak_id_2[flag_1km]))
+  )
+
+ids_200m <- flag_ids$ids_200m[[1]]
+ids_500m <- flag_ids$ids_500m[[1]]
+ids_1km  <- flag_ids$ids_1km[[1]]
+# Add cross-cell non-independent outbreak to 1km flags
+ids_1km <- union(ids_1km, 268)
+
+# Helper: check if any flagged id is in a comma-separated string
+contains_flagged <- function(id_str, flagged_ids) {
+  if (is.na(id_str)) return(FALSE)
+  ids <- as.numeric(trimws(unlist(strsplit(id_str, ","))))
+  any(ids %in% flagged_ids)
+}
+
+fishnet_timeseries <- fishnet_timeseries %>%
+  mutate(
+    flag_nearby_200m = sapply(outbreak_id, contains_flagged, ids_200m),
+    flag_nearby_500m = sapply(outbreak_id, contains_flagged, ids_500m),
+    flag_nearby_1km  = sapply(outbreak_id, contains_flagged, ids_1km)
+  )
+
+table(fishnet_timeseries$flag_nearby_200m)
+table(fishnet_timeseries$flag_nearby_500m)
+table(fishnet_timeseries$flag_nearby_1km)
+
+```
+
+
+
+# More checks
+```{r, more checks}
+
+
+# Check total outcomes and outcome_binary
+cat("outbreak binary:", sum(fishnet_timeseries$outbreak_binary), "\n")
+cat("outbreak count:", sum(fishnet_timeseries$outbreak_count), "\n")
+
+# Check outbreaks that are within 4 weeks and in a distance threshold
+cat("outbreak is after an outbreak within 4 weeks and less than 200m away:", sum(fishnet_timeseries$flag_nearby_200m), "\n")
+cat("outbreak is after an outbreak within 4 weeks and less than 500m away:", sum(fishnet_timeseries$flag_nearby_500m), "\n")
+cat("outbreak is after an outbreak within 4 weeks and less than 1km away:", sum(fishnet_timeseries$flag_nearby_1km), "\n")
+
+# Same-farm repeat outbreaks within 4 weeks
+same_farm_4wk <- pairwise_df %>%
+  filter(same_farm, weeks_apart < 4) %>%
+  pull(outbreak_id_2) %>%
+  unique()
+
+# Combined flags (same farm + distance threshold)
+ids_same_farm   <- same_farm_4wk
+ids_200m_all    <- union(ids_same_farm, ids_200m)
+ids_500m_all    <- union(ids_same_farm, ids_500m)
+ids_1km_all     <- union(ids_same_farm, ids_1km)
+
+# Full breakdown using outbreak events (not zone-weeks)
+outbreak_events <- hpai_mn_sf %>%
+  st_drop_geometry() %>%
+  select(outbreak_id, zone_id, date_confirmed)
+
+# Total outbreak events
+total_events <- sum(fishnet_timeseries$outbreak_count)
+cat("Total outbreak events:", total_events, "\n")
+cat("Outbreak zone-weeks:", sum(fishnet_timeseries$outbreak_binary), "\n")
+
+# Non-independent events at each distance threshold (<4 wks)
+cat("\n--- Non-independent outbreak events ---\n")
+cat("Non-independent (<200m & <4 wks):", length(ids_200m), "\n")
+cat("Non-independent (<500m & <4 wks):", length(ids_500m), "\n")
+cat("Non-independent (<1km & <4 wks):", length(ids_1km), "\n")
+
+# Independent events
+cat("\n--- Independent events ---\n")
+cat("Independent (200m threshold):", total_events - length(ids_200m), "\n")
+cat("Independent (500m threshold):", total_events - length(ids_500m), "\n")
+cat("Independent (1km threshold):", total_events - length(ids_1km), "\n")
+
+# Check how many zones have cases vs total zones
+fishnet_timeseries %>%
+  group_by(zone_id) %>%
+  reframe(has_case = any(any_outbreak == 1)) %>%
+  count(has_case)
+
+# Count case-weeks and control-weeks
+case_weeks <- fishnet_timeseries %>% filter(any_outbreak == 1) %>% nrow()
+negative_control_weeks <- fishnet_timeseries %>% filter(any_outbreak == 0) %>% nrow()
+
+cat("\nTotal zone-weeks:", nrow(fishnet_timeseries), "\n")
+cat("Case-weeks (zones with any outbreak):", case_weeks, "\n")
+cat("Negative control-weeks (zones never had outbreak):", negative_control_weeks, "\n")
+
+```
+
+
+
+# Create any extra variables
+
+```{r, create extra variables}
+fishnet_timeseries <- fishnet_timeseries %>%
+  group_by(zone_id) %>%
+  mutate(any_outbreak = as.integer(any(outbreak_binary > 0))) %>%
+  ungroup()
+
+
+fishnet_timeseries <- fishnet_timeseries %>%
+  mutate(
+    # Convert week index to month 
+    month = lubridate::month(lubridate::ymd("2022-01-01") + lubridate::weeks(week - 1)),
+    
+    month_factor = as.factor(month),
+
+    # Create warm season dummy: May (5) to September (9)
+    warm_season = ifelse(month %in% 5:9, 1, 0),
+
+    # Create spring dummy: March (3), April (4), May (5)
+    spring = ifelse(month %in% 3:5, 1, 0),
+
+    # Create spring/fall dummy: March-May or September-November
+    spring_fall = ifelse(month %in% c(3:5, 9:11), 1, 0),
+    
+
+    # Create season factor
+    season = case_when(
+      month %in% c(12, 1, 2) ~ "Winter",
+      month %in% 3:5         ~ "Spring",
+      month %in% 6:8         ~ "Summer",
+      month %in% 9:11        ~ "Fall"
+    ),
+    season = factor(season, levels = c("Winter", "Spring", "Summer", "Fall"))
+
+  )
+
+
+
+# Constants
+p <- 1013.25  # pressure in hPa (standard sea-level pressure)
+
+fishnet_timeseries <- fishnet_timeseries %>%
+  mutate(
+    # Convert temperature to Kelvin
+    temp_k = temperature + 273.15,
+
+  )
+
+seasonal_outbreaks <- fishnet_timeseries %>%
+  group_by(season) %>%
+  summarise(outbreaks = sum(outbreak_count, na.rm = TRUE)) %>%
+  arrange(match(season, c("Winter", "Spring", "Summer", "Fall")))
+
+```
+
+## Export summary of independent outbreaks (needed season column)
+```{r, export summary of independent outreaks}
+
+
+# Export Summary
+
+# Per-season breakdown
+season_independent <- fishnet_timeseries %>%
+  filter(outbreak_binary == 1) %>%
+  mutate(
+    independent_count = ifelse(flag_nearby_500m, outbreak_count - 1L, outbreak_count)
+  ) %>%
+  group_by(season) %>%
+  summarise(
+    total_events = sum(outbreak_count, na.rm = TRUE),
+    independent_events = sum(independent_count, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+spillover_summary <- list(
+  total = sum(fishnet_timeseries$outbreak_count, na.rm = TRUE),
+  non_independent_200m = length(ids_200m),
+  non_independent_500m = length(ids_500m),
+  non_independent_1km  = length(ids_1km),
+  by_season = season_independent
+)
+
+saveRDS(spillover_summary, file.path(objects_folder, "spillover_summary.RDS"))
+
+```
+
+
+# Change any variable names 
+
+```{r, change variable names}
+ 
+fishnet_timeseries <- fishnet_timeseries %>%
+  rename_with(~ gsub("runoff_sum", "runoff", .x), .cols = everything())
+
+weekly_fishnet <- weekly_fishnet %>%
+  rename_with(~ gsub("runoff_sum", "runoff", .x), .cols = everything())
+
+```
+
+# Note on using the dataframe
+# 
+# weekly_fishnet (or fishnet_timeseries) is a zone_id x week panel (173,368 rows).
+#
+# Key outcome columns:
+#   - outbreak_binary: 1 if outbreak in that zone-week, 0 otherwise
+#   - outbreak_count: number of outbreaks in that zone-week
+#   - any_outbreak: 1 if the zone ever had an outbreak (any week), 0 otherwise
+#
+# Independence flags (for excluding potential lateral spread):
+#   - flag_nearby_1km:  TRUE if zone-week contains a "second" outbreak <1km & <12wks from a prior outbreak in same zone
+#   - flag_nearby_500m: TRUE if <500m & <12wks
+#   - flag_nearby_200m: TRUE if <200m & <12wks
+#
+# Analysis filtering:
+#   Primary analysis:      filter(!flag_nearby_1km | outbreak_binary == 0)   — removes 9 zone-weeks
+#   Sensitivity 1:         filter(!flag_nearby_500m | outbreak_binary == 0)  — removes 3 zone-weeks
+#   Sensitivity 2:         no exclusion, use all data
+#
+# Bird abundance columns:
+#   - total_bird_abundance, anseriformes, predators: 
+#       For outbreak zones (any_outbreak == 1): derived from outbreak-specific eBird estimates (averaged if >1 outbreak per zone-week)
+#       For non-outbreak zones (any_outbreak == 0): derived from zone-level eBird estimates for negative controls
+#
+# Climate columns:
+#   - Raw 2022 values: temperature, precipitation, wind_speed, etc.
+#   - Z-scores: {variable}_z_{10/15/20/25}yr — 2022 values compared to baseline climatology (winsorized at ±4)
+#
+# Feedlot columns:
+#   - feedlot_count, au_count, birds_au: summed per zone
+#   - cafo_flag: 1 if any CAFO in zone
+#   - near_river: 1 if any feedlot near river in zone
+#
+# Land cover columns:
+#   - land_cover_label: majority land cover type per zone (reference: "Developed, Medium Intensity")
+#   - farm_possible: 1 if majority land cover is Cultivated Crops, Pasture/Hay, or Emergent Herbaceous Wetlands
+#
+# Other:
+#   - outbreak_week: comma-separated weeks when outbreaks occurred in that zone (zone-level, same for all weeks)
+#   - outbreak_id: comma-separated outbreak IDs for that zone-week (NA if no outbreak)
+#   - bird_zero: "No Birds" / "Has Birds" — zones with zero bird abundance across all weeks
+
+
+## Export RDS
+
+```{r, export rds}
+
+saveRDS(fishnet_timeseries, file.path(objects_folder, "fishnet_timeseries.RDS"))
+```
+
+# Export version of timeseries excluding the second outbreaks that occur within 4 weeks and within 500m of a prior outbreak
+## This dataframe will be used in the modeling of the climate anomalies and the model that controls for astrological season
+
+```{r, export modeling timeseries dataframe}
+
+# Identify the LATER outbreak in each non-independent pair (within 500m and 4 weeks, including same farm)
+non_independent_pairs <- pairwise_df %>%
+  filter(distance_km < 0.5, weeks_apart < 4)
+
+# The proceeding outbreak 
+non_independent_outbreaks <- non_independent_pairs %>%
+  pull(outbreak_id_2) %>%
+  unique()
+
+# Count how many non-independent outbreak IDs fall in each zone-week
+excluded_zone_weeks <- fishnet_timeseries %>%
+  filter(outbreak_binary == 1) %>%
+  rowwise() %>%
+  mutate(
+    n_flagged = sum(as.numeric(trimws(unlist(strsplit(outbreak_id, ",")))) %in% non_independent_outbreaks)
+  ) %>%
+  ungroup() %>%
+  filter(n_flagged > 0) %>%
+  select(zone_id, week, n_flagged)
+
+cat("Zone-weeks with flagged outbreaks:", nrow(excluded_zone_weeks), "\n")
+print(excluded_zone_weeks)
+
+# Subtract the actual number of non-independent events per zone-week
+fishnet_timeseries_modeling <- fishnet_timeseries %>%
+  left_join(excluded_zone_weeks, by = c("zone_id", "week")) %>%
+  mutate(
+    n_flagged = ifelse(is.na(n_flagged), 0L, n_flagged),
+    outbreak_count = outbreak_count - n_flagged,
+    outbreak_binary = ifelse(outbreak_count > 0, 1L, 0L)
+  ) %>%
+  select(-n_flagged)
+
+# Verify
+cat("Original outbreak events:", sum(fishnet_timeseries$outbreak_count), "\n")
+cat("Modeling outbreak events:", sum(fishnet_timeseries_modeling$outbreak_count), "\n")
+cat("Removed:", sum(fishnet_timeseries$outbreak_count) - sum(fishnet_timeseries_modeling$outbreak_count), "\n")
+cat("Outbreak binary zone-weeks:", sum(fishnet_timeseries_modeling$outbreak_binary), "\n")
+
+saveRDS(fishnet_timeseries_modeling, file.path(objects_folder, "fishnet_timeseries_modeling.RDS"))
+
+
+```

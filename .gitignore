@@ -5,10 +5,8 @@
 .Rproj.user/
 .Rhistory
 .RData
-.Ruserdata
 .RDataTmp*
-
-# R app history / session junk
+.Ruserdata
 .Rapp.history
 
 # Quarto / Rmd / caches
@@ -20,6 +18,7 @@
 
 # Office temp files
 ~$*.docx
+~$*.doc
 ~$*.pptx
 ~$*.xlsx
 
@@ -28,39 +27,39 @@ rosm.cache/
 **/rosm.cache/
 
 # ---- DATA ----
-# Default: ignore all data
+# All raw/processed data files are hosted on Zenodo (see README.md).
+# Only folder structure, documentation, and key RDS objects are tracked.
 data/**
-
-# Keep folder placeholders / structure
 !data/.keep
+!data/confidential/
+!data/confidential/README.md
+!data/confidential/.keep
+!data/raw/
+!data/raw/.keep
+!data/raw/feedlot_data/.keep
+!data/raw/meteorological_data/.keep
+!data/raw/bird_abundance_data/.keep
+!data/raw/spatial_data/.keep
+!data/file_locations/
+!data/file_locations/file_locations.R
 !data/objects/
-!data/objects/.keep
+!data/objects/objects.R
+!data/objects/dataframes/
+!data/objects/dataframes/*.RDS
+!data/objects/dataframes/*.rds
+!data/objects/dataframes/.keep
+# These two are ~194MB each — too large for GitHub, available on Zenodo
+data/objects/dataframes/fishnet_timeseries.RDS
+data/objects/dataframes/fishnet_timeseries_modeling.RDS
+!data/objects/models/
+!data/objects/models/*.RDS
+!data/objects/models/.keep
+!data/processed/
+!data/processed/.keep
 
-# Keep key RDS artifacts
-!data/objects/case_crossover_df.RDS
-!data/objects/timeseries_clean.RDS
-!data/objects/casecrossover_model.RDS
+# Root-level output (not tracked individually)
+output/
 
-# Keep curated small-ish datasets / lookup tables / GPKGs
-!data/**/Case_Zones.gpkg
-!data/**/Control_Zones.gpkg
-!data/**/Negative_Control_Zones.gpkg
-!data/**/fishnet_landcover.gpkg
-!data/**/Fishnet_Timeseries_10km.gpkg
-!data/**/hpai-outbreaks-clean-placeholder-*.csv
-!data/**/mn-case-ctl-*.csv
-!data/**/mn-ebird-names-lookup-*.csv
-
-# Ignore huge files 
-data/**/all-mn-feedlot-species-abundance-*.csv
-data/**/mn_weekly_era5land_*.csv
-
-# Ignore shapefile components
-data/**/*.shp
-data/**/*.dbf
-data/**/*.shx
-data/**/*.sbn
-data/**/*.sbx
-data/**/*.prj
-data/**/*.cpg
-data/**/*.shp.xml
+# Manuscript / supporting docs (not part of the analysis repo)
+*.pdf
+Supporting Information*.docx

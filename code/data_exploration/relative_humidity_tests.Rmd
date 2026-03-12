@@ -1,45 +1,17 @@
 ---
-title: "relative_humidity_tests"
+title: "Relative Humidity Sensitivity Tests"
 author: "Fintan Mooney"
 date: "2025-10-31"
 output: html_document
 ---
 
-# This R markdown file uses a casecrossover study design to model the association between meterological conditons, climate, and wild bird abundance, on risk of highly pathogenic avian influenza (HPAI) outbreaks in Minnesota farms during 2022
+# Testing whether relative humidity improves casecrossover model fit
 
-## Here we are testing if the additon of relative humidity improves model fit
-
-```{r setup, include=FALSE}
- 
-knitr::opts_chunk$set(echo = TRUE)
- 
-# ---- Package setup ----
-packages <- c(
-  "MatchIt", "readr", "sf", "survival", "dlnm", "gtsummary", "kableExtra",
-  "tidyr", "tibble", "mgcv", "ggplot2", "car", "patchwork", "corrplot",
-  "purrr", "ggspatial", "gt", "flextable", "officer", "conflicted",
-  "dplyr", "data.table", "here"
-)
-
-installed <- packages %in% rownames(installed.packages())
-if (any(!installed)) install.packages(packages[!installed])
-
-invisible(lapply(packages, library, character.only = TRUE))
-
-# Resolve conflicts
-conflict_prefer("select", "dplyr")
-conflict_prefer("filter", "dplyr")
-
-# Project folders (e.g., where the .Rproj file is)
-base_folder <- here()
-data_folder <- here("data")
-env_folder <- here("data", "EarthEngine_MN")
-objects_folder <-here("data", "objects")
-figures_folder <-here("output", "figures")
-tables_folder <-here("output", "tables")
-
-list.files(here())
-
+```{r include=FALSE}
+rm(list=ls())
+project.folder = paste0(print(here::here()),'/')
+source(paste0(project.folder,'create_folder_structure.R'))
+source(paste0(functions.folder,'script_initiate.R'))
 ```
 
 ## Import casecrossover df

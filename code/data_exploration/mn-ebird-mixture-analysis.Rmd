@@ -1,31 +1,25 @@
 ---
-title: "hpai-mn-outbreak-mixture-analysis"
+title: "eBird Species Mixture Analysis"
 author: "Rishi Kowalski, ScM"
 date: "2025-12-08"
 ---
 
--> Code for HPAI Outbreaks in MN analysis, bird mixture analysis.
--> 05/13/2025, rishi.kowalski@mssm.edu
+Bird mixture analysis for HPAI outbreaks in MN using WQS regression.
+Assesses cumulative impact of bird species mixtures on outbreak risk at various lags.
 
--> Approach:
-  - Assess cumulative impact of various bird mixtures on outbreak case/control cells at various lags via WQS
-  - Geography: case and control cells 
-  
+```{r include=FALSE}
+rm(list=ls())
+project.folder = paste0(print(here::here()),'/')
+source(paste0(project.folder,'create_folder_structure.R'))
+source(paste0(functions.folder,'script_initiate.R'))
 
-```{r setup}
-library(terra)
-library(ebirdst)
-library(dplyr)
-library(sf)
-library(gWQS)
-library(lwqs)
-library(tidyr)
-library(ggplot2)
-library(geosphere)
-library(RColorBrewer)
-library(cowplot)
-library(parallel)
-library(MMWRweek)
+# Additional packages for mixture analysis
+extra_pkgs <- c('terra', 'ebirdst', 'gWQS', 'lwqs', 'geosphere', 'RColorBrewer', 'parallel', 'MMWRweek')
+new_extra <- extra_pkgs[!(extra_pkgs %in% installed.packages()[,"Package"])]
+if(length(new_extra)) install.packages(new_extra, repos = "https://cloud.r-project.org")
+lapply(extra_pkgs, require, character.only = TRUE)
+
+# Note: ebirdst requires a separate API key setup (see ?ebirdst::ebirdst_access_key)
 ```
 
 
@@ -73,13 +67,13 @@ names(spec_rast_list) <- c("mallar3", "cangoo", "wooduc", "buwtea", "commer", "r
     - Run once, dataset of feelots, outbreak status, and lag-specific bird abundance saved as: mn-case-ctl-cell-abd-farm-agg-121025.csv
 
 ```{r read-in-data}
-#Read in Data
-fishnet_weeks <- st_read("/Users/kowalr03/Library/CloudStorage/OneDrive-TheMountSinaiHospital/HPAI_data/hpai-data-sharing/Case_Crossover_Study_Design/casecontrol_sf.shp")
+# Read in data using project folder paths
+fishnet_weeks <- st_read(file.path(processed_data, "casecontrol_sf.shp"))
 
-case_control_df <- read.csv("/Users/kowalr03/Library/CloudStorage/OneDrive-TheMountSinaiHospital/HPAI_data/hpai-data-sharing/Case_Crossover_Study_Design/casecontrol_df.csv", 
-                            stringsAsFactors = F)
+case_control_df <- read.csv(file.path(processed_data, "casecontrol_df.csv"),
+                            stringsAsFactors = FALSE)
 
-spec_name_com <- read.csv("//Users/kowalr03/Data/hpai/mn-ebird-names-lookup-050225.csv")
+spec_name_com <- read.csv(file.path(bird_abundance_data, "mn-ebird-names-lookup-050225.csv"))
 ```
 
 

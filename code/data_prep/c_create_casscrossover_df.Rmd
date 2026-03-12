@@ -1,0 +1,654 @@
+---
+title: "Create Case-Crossover Dataframe"
+author: "Fintan Mooney"
+date: "2025-10-15"
+output: html_document
+---
+
+# NOTE: This script requires confidential HPAI spillover point-location data
+# (not publicly available). The processed grid-cell level output is provided
+# in data/ and downstream analyses can be run without this file.
+
+# Creates the case-crossover dataframe for the HPAI outbreak analysis!
+# Defines case and control windows, adds lagged predictors, and handles
+# non-independent spillover exclusions at multiple distance thresholds...
+
+```{r include=FALSE}
+rm(list=ls())
+project.folder = paste0(print(here::here()),'/')
+source(paste0(project.folder,'create_folder_structure.R'))
+source(paste0(functions.folder,'script_initiate.R'))
+```
+
+
+## Read in the timeseries dataset
+
+```{r, read in timeseries dataset}
+
+# Timeseries
+fishnet_timeseries_clean <- readRDS(file.path(objects_folder, "fishnet_timeseries.RDS"))
+
+fishnet_timeseries_clean <- fishnet_timeseries_clean %>%
+  arrange(zone_id, week) %>%
+  # 1. Drop all columns that end with ".x"
+  select(-ends_with(".x")) %>%
+  # 2. Rename columns ending with ".y" to remove the suffix
+  rename_with(~ str_remove(.x, "\\.y$"), ends_with(".y"))
+
+# Spatial GPKG
+weekly_fishnet_sf <- st_read(paste0(spatial_data, "/fishnet_10km_timeseries.gpkg"))
+
+
+```
+
+## Map Cases in Casecrossover Model
+
+```{r, casecrossover map}
+
+
+# Map 
+# Identify case zones
+case_zone_ids <- fishnet_timeseries_clean %>%
+  filter(any_outbreak == 1) %>%
+  distinct(zone_id)
+
+# Identify negative control zones (has feedlots but no outbreak)
+neg_control_zone_ids <- fishnet_timeseries_clean %>%
+  filter(any_outbreak == 0, feedlot_count > 0) %>%
+  distinct(zone_id)
+
+# Subset spatial features (first week only to remove timeseries)
+case_zones_sf <- weekly_fishnet_sf %>%
+  filter(zone_id %in% case_zone_ids$zone_id) %>%
+  group_by(zone_id) %>%
+  slice(1) %>%
+  ungroup()
+
+control_zones_sf <- weekly_fishnet_sf %>%
+  filter(!(zone_id %in% case_zone_ids$zone_id)) %>%
+  group_by(zone_id) %>%
+  slice(1) %>%
+  ungroup()
+
+neg_control_zones_sf <- weekly_fishnet_sf %>%
+  filter(zone_id %in% neg_control_zone_ids$zone_id) %>%
+  group_by(zone_id) %>%
+  slice(1) %>%
+  ungroup()
+
+# Define output paths
+case_gpkg_out        <- file.path(processed_data, "Case_Zones.gpkg")
+control_gpkg_out     <- file.path(processed_data, "Control_Zones.gpkg")
+neg_control_gpkg_out <- file.path(processed_data, "Neg_Control_Zones.gpkg")
+
+# Export as GPKG
+st_write(case_zones_sf, case_gpkg_out, delete_layer = TRUE)
+st_write(control_zones_sf, control_gpkg_out, delete_layer = TRUE)
+st_write(neg_control_zones_sf, neg_control_gpkg_out, delete_layer = TRUE)
+
+# Reproject to EPSG:3857 (Web Mercator) for basemap compatibility
+case_zones_sf_proj <- st_transform(case_zones_sf, 3857)
+control_zones_sf_proj <- st_transform(control_zones_sf, 3857)
+neg_control_zones_sf_proj <- st_transform(neg_control_zones_sf, 3857)
+
+# Plot with basemap
+ggplot() +
+  # Add simple basemap
+  annotation_map_tile(type = "cartolight", zoomin = 0) +
+
+  # Negative Control zones: outlines and fill
+  geom_sf(data = neg_control_zones_sf_proj, fill = "lightblue", color = "lightblue", linewidth = 0.05) +
+
+  # Case zones: bold fill
+  geom_sf(data = case_zones_sf_proj, fill = "#d73027", color = "red", linewidth = 0.1, alpha = 0.9) +
+
+  # Control zones: outlines (without feedlot or case)
+  geom_sf(data = control_zones_sf_proj, fill = NA, color = "lightgrey", linewidth = 0.05) +
+
+  # Scale bar
+  annotation_scale(location = "bl", width_hint = 0.3, text_cex = 0.75, line_width = 0.5, style = "ticks") +
+
+  # Theme and layout
+  theme_void(base_size = 12) +
+  theme(
+    plot.title = element_text(size = 12, face = "bold", hjust = 0.5),
+    plot.caption = element_text(size = 10, hjust = 0.5, face = "italic"),
+    plot.background = element_rect(fill = "white", color = NA)
+  ) +
+  coord_sf(expand = FALSE) +
+  labs(
+    title = "HPAI Outbreak Case Zones in Minnesota (2022)"
+  )
+```
+
+## Define Controls and Create Case-Crossover Dataset
+```{r, define controls}
+
+# ---- Define Cases and Controls ----
+
+# Filter to zones with any outbreak
+case_zones <- fishnet_timeseries_clean %>%
+  filter(any_outbreak == 1) 
+
+# Get cases: one row per zone_id and week with outbreak
+cases <- case_zones %>%
+  filter(outbreak_count > 0) %>%
+  distinct(zone_id, case_week = week)
+
+# Deduplicate case_zones for joining
+case_zones_unique <- case_zones %>%
+  distinct(zone_id, week, .keep_all = TRUE)
+
+# Create control weeks (1-4 weeks before each case)
+case_lags <- cases %>%
+  crossing(lag = 1:4) %>%
+  mutate(control_week = case_week - lag) %>%
+  filter(control_week >= 1)
+
+# Remove overlapping controls (control week = case week in same zone)
+case_zone_weeks <- cases %>% select(zone_id, case_week)
+
+case_lags_clean <- case_lags %>%
+  anti_join(case_zone_weeks, by = c("zone_id", "control_week" = "case_week"))
+
+cat("Controls removed (overlap with case weeks):", nrow(case_lags) - nrow(case_lags_clean), "\n")
+
+### HERE WE REMOVED CONTROLS THAT OVERLAP
+#### Specifically, some cells have outbreaks at two different farms within the same four week period; we do not delete them as cases, but we remove the overlapping controls. 
+
+# Build controls dataset
+controls <- case_lags_clean %>%
+  left_join(case_zones_unique, by = c("zone_id", "control_week" = "week")) %>%
+  mutate(
+    case_control = "control",
+    outbreak_binary = 0,
+    stratum_id = paste(zone_id, case_week, sep = "_"),
+    week = control_week
+  ) %>%
+  dplyr::select(-outbreak_count)
+
+# Build cases dataset
+case_data <- cases %>%
+  left_join(case_zones_unique, by = c("zone_id", "case_week" = "week")) %>%
+  mutate(
+    case_control = "case",
+    outbreak_binary = 1,
+    stratum_id = paste(zone_id, case_week, sep = "_"),
+    week = case_week,
+    control_week = NA
+  ) %>%
+  dplyr::select(-outbreak_count)
+
+# Combine cases and controls
+case_crossover_df <- bind_rows(case_data, controls)
+
+# ---- Summary checks ----
+cat("\nCase-control distribution:\n")
+table(case_crossover_df$case_control)
+
+cat("\nTotal cases:", sum(case_crossover_df$outbreak_binary), "\n")
+
+# Check controls per case
+controls_per_case <- case_crossover_df %>%
+  filter(case_control == "control") %>%
+  count(stratum_id, name = "n_controls")
+
+cat("\nControls per case:\n")
+table(controls_per_case$n_controls)
+
+colnames(case_crossover_df)
+
+
+
+```
+
+## Validate control selection for zones with multiple cases
+```{r, validate multi-case zones}
+
+# Check: how many zone-weeks have outbreaks?
+case_zones %>%
+  filter(outbreak_count > 0) %>%
+  distinct(zone_id, week) %>%
+  nrow()
+
+# vs total outbreak events
+print(sum(case_zones$outbreak_count))
+
+
+
+# Zones with multiple cases
+multi_case_zones <- cases %>%
+  group_by(zone_id) %>%
+  summarise(n_cases = n(), case_weeks = list(case_week), .groups = "drop") %>%
+  filter(n_cases > 1)
+
+cat("Zones with multiple cases:", nrow(multi_case_zones), "\n")
+cat("Total cases in multi-case zones:", sum(multi_case_zones$n_cases), "\n")
+
+# Check: Do any control weeks overlap with case weeks in the same zone?
+case_zone_weeks <- cases %>% select(zone_id, case_week)
+
+proposed_controls <- cases %>%
+  crossing(lag = 1:4) %>%
+  mutate(control_week = case_week - lag) %>%
+  filter(control_week >= 1)
+
+# Flag controls that are also case weeks in the same zone
+overlap <- proposed_controls %>%
+  inner_join(case_zone_weeks, by = c("zone_id", "control_week" = "case_week"))
+
+cat("Control weeks that are ALSO case weeks in same zone:", nrow(overlap), "\n")
+
+if (nrow(overlap) > 0) {
+  print(overlap)
+} else {
+  cat("✓ No overlap — all control weeks are case-free in their respective zones.\n")
+}
+
+## WE DO NOT REMOVE CASES BECAUSE EVEN THOUGH THEY MAY HAVE HAPPENED IN THE SAME ZONE OVER THE FOUR WEEK PERIOD THEY WERE FROM DIFFERENT FARMS
+
+
+# Check for duplicate zone-week combinations in controls
+control_dupes <- case_crossover_df %>%
+  filter(case_control == "control") %>%
+  count(zone_id, week) %>%
+  filter(n > 1)
+
+cat("Control zone-weeks appearing more than once:", nrow(control_dupes), "\n")
+
+if (nrow(control_dupes) > 0) {
+  print(control_dupes)
+  
+  # Show which strata these belong to
+  case_crossover_df %>%
+    filter(case_control == "control") %>%
+    inner_join(control_dupes, by = c("zone_id", "week")) %>%
+    select(zone_id, week, stratum_id, case_week) %>%
+    arrange(zone_id, week) %>%
+    print(n = 30)
+}
+
+## WE DO NOT REMOVE CONTROLS ZONE-WEEKS THAT APPEAR MORE THAN ONE BECAUSE THEY COME FROM DIFFERENT STRATA AND THUS ARE SUITABLE FOR THE CONDITONAL LOGISTIC REGRESSION
+```
+
+# Check distribution of casecrossover variables
+
+```{r, distribution caseccrossover}
+
+# Move from m to mm
+
+case_crossover_df <- case_crossover_df %>%
+  mutate(
+    runoff = runoff * 1000,
+    precipitation = precipitation * 1000
+  )
+
+
+# Variables to inspect
+vars_to_check <- c(
+  "total_bird_abundance",   
+  "leaf_area_index", "longwave_radiation", "runoff", "shortwave_radiation",
+  "snow_density", "soil_moisture", "temperature",
+  "evapotranspiration", "precipitation", "wind_speed", "relative_humidity", "anseriformes", "predators"
+)
+
+# Create histograms
+plots <- lapply(vars_to_check, function(var) {
+  ggplot(case_crossover_df, aes_string(x = var)) +
+    geom_histogram(bins = 50, fill = "steelblue", color = "white") +
+    labs(title = var) +
+    theme_minimal()
+})
+
+# Display plots in a grid (adjust number of columns if needed)
+wrap_plots(plots, ncol = )
+
+library(e1071)
+# Subset to variables
+numeric_vars <- case_crossover_df %>%
+  select(all_of(vars_to_check))
+
+# Initialize result storage
+shapiro_results <- lapply(names(numeric_vars), function(var) {
+  x <- numeric_vars[[var]]
+  x <- na.omit(x)
+  
+  # Only apply Shapiro if <= 5000 non-NA values
+  shapiro_p <- if (length(x) <= 5000) {
+    shapiro.test(x)$p.value
+  } else {
+    NA
+  }
+  
+  data.frame(
+    variable = var,
+    skewness = skewness(x),
+    shapiro_p = shapiro_p,
+    n = length(x)
+  )
+})
+
+# Combine into summary table
+shapiro_df <- bind_rows(shapiro_results)
+
+# Flag non-normality
+shapiro_df <- shapiro_df %>%
+  mutate(non_normal = ifelse(!is.na(shapiro_p) & shapiro_p < 0.05, TRUE, FALSE)) %>%
+  arrange(desc(abs(skewness)))
+
+# View top
+print(shapiro_df)
+
+### Need to transform runoff, total_bird_abundance, specific humidity, and precipitation, anseriformes and predators
+
+
+```
+
+## Create lagged variables
+
+```{r, lag variables}
+
+# Drop duplicates from original_df to ensure safe left_joins
+case_zones_unique <- case_zones %>%
+  distinct(zone_id, week, .keep_all = TRUE)
+
+
+add_lagged_predictors <- function(df, original_df, vars, id_col = "zone_id", time_col = "week", max_lag = 4) {
+  for (varname in vars) {
+    for (lag in 0:max_lag) {
+      lagged_col <- paste0(varname, "_Lag", lag)
+      df <- df %>%
+        left_join(
+          original_df %>%
+            dplyr::select(!!sym(id_col), !!sym(time_col), !!sym(varname)) %>%
+            rename(!!lagged_col := !!sym(varname)) %>%
+            mutate(!!time_col := !!sym(time_col) + lag),
+          by = c(id_col, time_col)
+        )
+    }
+  }
+  return(df)
+}
+
+
+vars_to_lag <- c( "total_bird_abundance",
+                 "leaf_area_index",
+                 "longwave_radiation",
+                 "runoff",
+                 "shortwave_radiation",
+                 "snow_density",
+                 "soil_moisture",
+                 "temperature",
+                 "evapotranspiration",
+                 "precipitation",
+                 "wind_speed", 
+                 "relative_humidity",
+                 "anseriformes", "predators"
+                 )
+
+case_crossover_df <- add_lagged_predictors(
+  df = case_crossover_df,
+  original_df = case_zones_unique,
+  vars = vars_to_lag,
+  max_lag = 4
+)
+
+# Verify lagged variables were added correctly
+cat("Columns in case_crossover_df:", ncol(case_crossover_df), "\n")
+cat("Rows in case_crossover_df:", nrow(case_crossover_df), "\n")
+
+# Check for missing values in lagged variables
+case_crossover_df %>%
+  select(ends_with("_Lag0")) %>%
+  summarise(across(everything(), ~sum(is.na(.)))) %>%
+  pivot_longer(everything(), names_to = "var", values_to = "n_missing") %>%
+  filter(n_missing > 0)
+
+## NOTHING IS MISSING
+```
+
+
+
+
+## Transform and Scale Variables
+```{r, transform variables}
+
+# Apply log1p only to skewed ones before scaling
+for (var in c("total_bird_abundance", "runoff", "precipitation",  "anseriformes", "predators")) {
+  for (lag in 0:4) {
+    col <- paste0(var, "_Lag", lag)
+    if (col %in% names(case_crossover_df)) {
+      case_crossover_df[[col]] <- log1p(case_crossover_df[[col]])
+    }
+  }
+}
+
+```
+
+```{r, scale}
+
+# Filter to 2022 lag variables
+
+vars_to_lag <- c("total_bird_abundance",
+                 "leaf_area_index",
+                 "longwave_radiation",
+                 "runoff",
+                 "shortwave_radiation",
+                 "snow_density",
+                 "soil_moisture",
+                 "temperature",
+                 "evapotranspiration",
+                 "precipitation",
+                 "wind_speed", 
+                 "relative_humidity",
+                 "anseriformes", "predators")
+
+# Scale all lags (Lag0 to Lag4 for each variable)
+for (var in vars_to_lag) {
+  for (lag in 0:4) {
+    lagged_col <- paste0(var, "_Lag", lag)
+    case_crossover_df[[lagged_col]] <- scale(case_crossover_df[[lagged_col]])
+  }
+}
+```
+
+## Check that no control weeks have cases
+
+```{r, validation check}
+
+# Check for overlap in final dataset
+case_weeks <- cases %>% select(zone_id, case_week)
+
+overlap_check <- case_crossover_df %>%
+  filter(case_control == "control") %>%
+  inner_join(case_weeks, by = c("zone_id", "week" = "case_week"))
+
+cat("Control weeks overlapping with case weeks:", nrow(overlap_check), "\n")  # should be 0
+```
+
+## Count number of cases and controls again
+
+```{r, count number of cases and controls again}
+
+
+# Cases and controls
+cat("Total cases (zone-weeks):", sum(case_crossover_df$outbreak_binary == 1), "\n")
+cat("Total controls (zone-weeks):", sum(case_crossover_df$outbreak_binary == 0), "\n")
+
+# Total outbreak events (sum of outbreak_count for case rows)
+total_outbreaks <- case_crossover_df %>%
+  filter(outbreak_binary == 1) %>%
+  left_join(
+    case_zones_unique %>% select(zone_id, week, outbreak_count),
+    by = c("zone_id", "week")
+  ) %>%
+  summarise(total = sum(outbreak_count, na.rm = TRUE)) %>%
+  pull(total)
+
+cat("Total outbreak events:", total_outbreaks, "\n")
+
+# Summary table
+cat("\nCase-control distribution:\n")
+table(case_crossover_df$case_control)
+
+# Controls per case
+cat("\nControls per case:\n")
+case_crossover_df %>%
+  filter(case_control == "control") %>%
+  count(stratum_id) %>%
+  count(n, name = "n_cases") %>%
+  rename(n_controls = n)
+
+```
+
+# Only remove strata where the sole outbreak is non-independent (outbreak_count == 1)
+```{r, remove non-independent}
+
+# Get strata that contain a flagged zone-week
+flagged_strata <- case_crossover_df %>%
+  filter(flag_nearby_500m == TRUE, case_control == "case") %>%
+  distinct(stratum_id, zone_id, week)
+
+# Join outbreak_count to determine if the zone-week has other independent outbreaks
+flagged_with_count <- flagged_strata %>%
+  left_join(
+    case_zones_unique %>% select(zone_id, week, outbreak_count),
+    by = c("zone_id", "week")
+  )
+
+cat("Flagged strata and their outbreak counts:\n")
+print(flagged_with_count)
+
+# Only remove strata where the sole outbreak is the non-independent one
+strata_to_remove <- flagged_with_count %>%
+  filter(outbreak_count == 1) %>%
+  distinct(stratum_id)
+
+cat("\nStrata to remove (outbreak_count == 1):", nrow(strata_to_remove), "\n")
+cat("Strata retained (outbreak_count > 1):", nrow(flagged_with_count) - nrow(strata_to_remove), "\n")
+
+# Remove only those strata
+case_crossover_df_ex <- case_crossover_df %>%
+  filter(!(stratum_id %in% strata_to_remove$stratum_id))
+
+cat("\nStrata removed:", nrow(strata_to_remove), "\n")
+cat("Rows removed:", nrow(case_crossover_df) - nrow(case_crossover_df_ex), "\n")
+
+# Cases and controls
+cat("Total cases (zone-weeks):", sum(case_crossover_df_ex$outbreak_binary == 1), "\n")
+cat("Total controls (zone-weeks):", sum(case_crossover_df_ex$outbreak_binary == 0), "\n")
+
+# Summary table
+cat("\nCase-control distribution after excluding non-independent:\n")
+table(case_crossover_df_ex$case_control)
+
+# Controls per case
+cat("\nControls per case after excluding non-independent:\n")
+case_crossover_df_ex %>%
+  filter(case_control == "control") %>%
+  count(stratum_id) %>%
+  count(n, name = "n_cases") %>%
+  rename(n_controls = n)
+```
+
+# 1km sensitivity
+```{r, remove non-independent 1km}
+
+# Get strata that contain a flagged zone-week (1km)
+flagged_strata_1km <- case_crossover_df %>%
+  filter(flag_nearby_1km == TRUE, case_control == "case") %>%
+  distinct(stratum_id, zone_id, week)
+
+# Join outbreak_count
+flagged_with_count_1km <- flagged_strata_1km %>%
+  left_join(
+    case_zones_unique %>% select(zone_id, week, outbreak_count),
+    by = c("zone_id", "week")
+  )
+
+cat("Flagged strata (1km) and their outbreak counts:\n")
+print(flagged_with_count_1km)
+
+# Only remove strata where outbreak_count == 1
+strata_to_remove_1km <- flagged_with_count_1km %>%
+  filter(outbreak_count == 1) %>%
+  distinct(stratum_id)
+
+cat("\nStrata to remove (1km, outbreak_count == 1):", nrow(strata_to_remove_1km), "\n")
+cat("Strata retained (1km, outbreak_count > 1):", nrow(flagged_with_count_1km) - nrow(strata_to_remove_1km), "\n")
+
+# Remove only those strata
+case_crossover_df_ex_1km <- case_crossover_df %>%
+  filter(!(stratum_id %in% strata_to_remove_1km$stratum_id))
+
+cat("\nStrata removed:", nrow(strata_to_remove_1km), "\n")
+cat("Rows removed:", nrow(case_crossover_df) - nrow(case_crossover_df_ex_1km), "\n")
+
+cat("Total cases (zone-weeks):", sum(case_crossover_df_ex_1km$outbreak_binary == 1), "\n")
+cat("Total controls (zone-weeks):", sum(case_crossover_df_ex_1km$outbreak_binary == 0), "\n")
+
+cat("\nCase-control distribution after excluding non-independent (1km):\n")
+table(case_crossover_df_ex_1km$case_control)
+
+cat("\nControls per case after excluding non-independent (1km):\n")
+case_crossover_df_ex_1km %>%
+  filter(case_control == "control") %>%
+  count(stratum_id) %>%
+  count(n, name = "n_cases") %>%
+  rename(n_controls = n)
+```
+
+# 200m sensitivity
+```{r, 200m sensitivity}
+flagged_strata_200m <- case_crossover_df %>%
+  filter(flag_nearby_200m == TRUE, case_control == "case") %>%
+  distinct(stratum_id, zone_id, week)
+
+flagged_with_count_200m <- flagged_strata_200m %>%
+  left_join(
+    case_zones_unique %>% select(zone_id, week, outbreak_count),
+    by = c("zone_id", "week")
+  )
+
+cat("Flagged strata (200m) and their outbreak counts:\n")
+print(flagged_with_count_200m)
+
+strata_to_remove_200m <- flagged_with_count_200m %>%
+  filter(outbreak_count == 1) %>%
+  distinct(stratum_id)
+
+case_crossover_df_ex_200m <- case_crossover_df %>%
+  filter(!(stratum_id %in% strata_to_remove_200m$stratum_id))
+
+cat("Strata removed (200m):", nrow(strata_to_remove_200m), "\n")
+cat("Total cases:", sum(case_crossover_df_ex_200m$outbreak_binary == 1), "\n")
+```
+
+# Export casecrossover df with exclusions (this is our main casecrossover dataframe)
+
+```{r, export casecrossover df}
+
+saveRDS(case_crossover_df_ex, file.path(objects_folder,"case_crossover_df.RDS"))
+write.csv(case_crossover_df_ex, file.path(processed_data, "case_crossover_df_ind_500m.csv"), row.names = FALSE)
+
+```
+
+### Export full casecrossover df (no exclusions)
+
+```{r, export casecrossover df}
+
+saveRDS(case_crossover_df, file.path(objects_folder,"full_case_crossover_df.RDS"))
+```
+
+
+```{r, export casecrossover df 1km sensitivity}
+saveRDS(case_crossover_df_ex_1km, file.path(objects_folder, "case_crossover_df_1km.RDS"))
+write.csv(case_crossover_df_ex_1km, file.path(processed_data, "case_crossover_df_ind_1km.csv"), row.names = FALSE)
+```
+
+
+```{r, export casecrossover df 200m sensitivity}
+saveRDS(case_crossover_df_ex_200m, file.path(objects_folder, "case_crossover_df_200m.RDS"))
+write.csv(case_crossover_df_ex_200m, file.path(processed_data, "case_crossover_df_ind_200m.csv"), row.names = FALSE)
+```
+

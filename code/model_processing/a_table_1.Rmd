@@ -1,0 +1,1027 @@
+---
+title: "Descriptive Statistics - Table 1"
+author: "Fintan Mooney"
+date: "2025-10-31"
+output:
+  word_document: default
+  html_document: default
+---
+# Table 1 for the HPAI case-crossover study — descriptive stats for case and control zones
+
+```{r include=FALSE}
+rm(list=ls())
+project.folder = paste0(print(here::here()),'/')
+source(paste0(project.folder,'create_folder_structure.R'))
+source(paste0(functions.folder,'script_initiate.R'))
+```
+
+```{r, read in timeseries df}
+
+fishnet_timeseries<- readRDS(file.path(objects_folder, "fishnet_timeseries.RDS"))
+
+```
+
+## Filter to remove cells not studied (did not include a spillover or a feedlot)
+
+```{r, filter to remove cells not studied}
+
+fishnet_timeseries_clean <- fishnet_timeseries %>%
+  filter(any_outbreak == 1 | feedlot_count > 0)
+
+```
+
+
+```{r, list columns}
+(colnames(fishnet_timeseries_clean))
+
+```
+## Subset to variables of interest
+
+```{r, subset variables}
+
+vars_subset <- c(
+  # --- Absolute environmental variables ---
+  "leaf_area_index",
+  "longwave_radiation",
+  "precipitation",
+  "relative_humidity",
+  "runoff",                 
+  "shortwave_radiation",
+  "snow_density",
+  "soil_moisture",
+  "temperature",
+  "anseriformes",
+  "predators",
+  "wind_speed",
+
+  # --- 25-year z-score anomalies ---
+  "leaf_area_index_z_25yr",
+  "longwave_radiation_z_25yr",
+  "precipitation_z_25yr",
+  "relative_humidity_z_25yr",
+  "runoff_z_25yr",
+  "shortwave_radiation_z_25yr",
+  "snow_density_z_25yr",
+  "soil_moisture_z_25yr",
+  "temperature_z_25yr",
+  "wind_speed_z_25yr",
+  
+    # --- 25-year mean  ---
+  "leaf_area_index_mean_25yr",
+  "longwave_radiation_mean_25yr",
+  "precipitation_mean_25yr",
+  "relative_humidity_mean_25yr",
+  "runoff_mean_25yr",
+  "shortwave_radiation_mean_25yr",
+  "snow_density_mean_25yr",
+  "soil_moisture_mean_25yr",
+  "temperature_mean_25yr",
+  "wind_speed_mean_25yr",
+
+  # --- ID, time, outbreak, and context ---
+  "zone_id",
+  "week",
+  "season",
+  "total_bird_abundance",
+  "any_outbreak",
+  "land_cover_mode",
+  "land_cover_label",
+  "outbreak_count",
+  "outbreak_binary",
+  "feedlot_count",
+  "au_count",
+  "birds_au"   
+)
+
+fishnet_subset <- fishnet_timeseries_clean %>%
+  select(any_of(vars_subset))  
+
+# Check
+
+glimpse(fishnet_subset)
+colnames(fishnet_subset)
+
+fishnet_subset %>%
+  select(where(is.numeric)) %>% # Select only numeric columns
+  summarise(across(everything(), list(mean = mean, sd = sd), na.rm = TRUE))
+```
+
+## Transform variables 
+
+```{r, transform variables}
+
+fishnet_t1 <- fishnet_subset %>%
+  mutate(
+    ## Temperature: Kelvin -> Celsius
+    temperature_C = temperature - 273.15,
+
+    ## Precipitation & Runoff: meters -> millimeters
+    precipitation_mm = precipitation * 1000,
+    runoff_mm        = runoff * 1000,
+
+    ## Radiation: convert from W/m² to MJ/m² (divide by 1e6)
+    longwave_radiation  = longwave_radiation  / 1e6,
+    shortwave_radiation = shortwave_radiation / 1e6,
+
+    ## Drop previous factor levels
+    land_cover_label = factor(droplevels(land_cover_label)),
+    
+    ## Make outbreak count categorical
+    
+    #outbreak_count_factor = factor(outbreak_count),
+
+    ## Grouping variable as labeled factor
+    any_outbreak = factor(any_outbreak,
+                          levels = c(0, 1),
+                          labels = c("Cells with no outbreak", "Cells with an outbreak"))
+  )
+
+fishnet_t1$land_cover_label <- forcats::fct_infreq(fishnet_t1$land_cover_label)
+
+
+# Check transformations
+fishnet_t1 %>%
+  summarise(
+    across(
+      c(temperature_C, precipitation_mm, runoff_mm,
+        shortwave_radiation, longwave_radiation),
+      list(mean = ~mean(.x, na.rm = TRUE), sd = ~sd(.x, na.rm = TRUE))
+    )
+  )
+
+```
+
+# Creeate Table 1
+
+```{r, table 1}
+
+# Categorical variable renderer: Percent only
+my.render.cat <- function(x) {
+  c("", sapply(stats.default(x), function(y) with(y,
+    sprintf("%0.0f%%", PCT))))
+}
+
+
+pvalue <- function(x, ...) {
+  # Construct vectors of data y, and groups (strata) g
+  y <- unlist(x)
+  g <- factor(rep(1:length(x), times = sapply(x, length)))
+  
+  if (is.numeric(y)) {
+    # For numeric variables, perform a standard 2-sample t-test
+    p <- t.test(y ~ g)$p.value
+  } else {
+    # For categorical variables, perform a chi-squared test of independence
+    p <- chisq.test(table(y, g))$p.value
+  }
+  
+  # Format the p-value (HTML-safe for <)
+  formatted_p <- sub("<", "&lt;", format.pval(p, digits = 3, eps = 0.001))
+  
+  # Two blank strings before the value moves it down two rows
+  c("", "", formatted_p)
+}
+
+rndr <- function(x, name, ...) {
+  if (!is.numeric(x)) return(render.categorical.default(x))
+  
+  # Choose rendering style based on variable name
+  if (name == "outbreak_count") {
+    what <- "Sum (Max)"
+  } else if (name %in% c(
+    "temperature_C", "shortwave_radiation", "longwave_radiation",
+    "relative_humidity", "wind_speed", "soil_moisture",
+    "runoff_mm", "precipitation_mm", "snow_density",
+    "leaf_area_index", "anseriformes", "predators",
+  "au_count",
+  "birds_au"   
+  )) {
+    what <- "Mean (SD) <br/>Median [Min, Max]"
+  } else {
+    what <- "Mean (SD)"
+  }
+  
+  parse.abbrev.render.code(c("",what))(x)
+}
+
+
+# ============================================================
+# Variable labels
+
+label(fishnet_t1$outbreak_count)        <- "Spillover Count"
+label(fishnet_t1$temperature_C)        <- "Temperature (°C)"
+label(fishnet_t1$shortwave_radiation)  <- "Shortwave Radiation (MJ/m²)"
+label(fishnet_t1$longwave_radiation)   <- "Longwave Radiation (MJ/m²)"
+label(fishnet_t1$relative_humidity)    <- "Relative Humidity (%)"
+label(fishnet_t1$wind_speed)           <- "Wind Speed (m/s)"
+label(fishnet_t1$soil_moisture)        <- "Soil Moisture (m³/m³)"
+label(fishnet_t1$runoff_mm)            <- "Surface & Sub-Surface Runoff (mm)"
+label(fishnet_t1$precipitation_mm)     <- "Precipitation (mm)"
+label(fishnet_t1$snow_density)         <- "Snow Density (kg/m³)"
+label(fishnet_t1$leaf_area_index)      <- "Leaf Area Index"
+label(fishnet_t1$anseriformes)         <- "Anseriformes Abundance (%)"
+label(fishnet_t1$predators)            <- "Predator Abundance (%)"
+label(fishnet_t1$au_count)              <- "Animal Unit Count"
+label(fishnet_t1$birds_au)            <- "Bird Unit Count"
+label(fishnet_t1$land_cover_label)     <- "Land Cover Type N (%)"
+
+# Generate Table 1 
+
+table_1 <- table1::table1(
+  ~ outbreak_count + temperature_C + shortwave_radiation + longwave_radiation +
+    relative_humidity + wind_speed +
+    soil_moisture + runoff_mm + precipitation_mm + snow_density + leaf_area_index +
+    anseriformes + predators + au_count +  birds_au + land_cover_label
+  | any_outbreak,
+  data = fishnet_t1,
+  render=rndr,
+  render.categorical = my.render.cat,
+  render.missing = NULL,
+  overall = FALSE,
+  extra.col = list(`P-value` = pvalue)
+)
+
+table_1
+```
+
+
+
+# Table 1 but stratified by season
+
+
+```{r, table 1 stratified by season}
+# 
+# # Subset to outbreak cells only
+# fishnet_outbreak <- fishnet_t1 %>%
+#   filter(any_outbreak == "Cells with an Outbreak") %>%
+#   mutate(season = factor(droplevels(season)))
+# 
+# # Generate Table 1 stratified by season
+# table_season <- table1::table1(
+#   ~ outbreak_count + temperature_C + shortwave_radiation + longwave_radiation +
+#     relative_humidity + wind_speed +
+#     soil_moisture + runoff_mm + precipitation_mm + snow_density +
+#     leaf_area_index + anseriformes + predators
+#   | season,                    # stratify by season
+#   data = fishnet_outbreak,
+#   render = rndr,
+#   render.categorical = my.render.cat,
+#   render.missing = NULL,
+#   overall = FALSE)
+# 
+# table_season
+# 
+# 
+
+
+
+```
+
+
+
+
+# Table 1 for CLimate Anomalies 
+
+
+```{r, table 1 for climate anomalies}
+
+# ============================================================
+# 25-year Z-score anomaly variables
+# ============================================================
+
+anomaly_vars <- c(
+  "leaf_area_index_z_25yr",
+  "longwave_radiation_z_25yr",
+  "precipitation_z_25yr",
+  "relative_humidity_z_25yr",
+  "runoff_z_25yr",
+  "shortwave_radiation_z_25yr",
+  "snow_density_z_25yr",
+  "soil_moisture_z_25yr",
+  "temperature_z_25yr",
+  "wind_speed_z_25yr"
+)
+
+# ============================================================
+# Variable labels (for clean table output)
+# ============================================================
+
+label(fishnet_t1$leaf_area_index_z_25yr)     <- "Leaf Area Index (Z-score)"
+label(fishnet_t1$longwave_radiation_z_25yr)  <- "Longwave Radiation (Z-score)"
+label(fishnet_t1$precipitation_z_25yr)       <- "Precipitation (Z-score)"
+label(fishnet_t1$relative_humidity_z_25yr)   <- "Relative Humidity (Z-score)"
+label(fishnet_t1$runoff_z_25yr)              <- "Surface & Sub-Surface Runoff (Z-score)"
+label(fishnet_t1$shortwave_radiation_z_25yr) <- "Shortwave Radiation (Z-score)"
+label(fishnet_t1$snow_density_z_25yr)        <- "Snow Density (Z-score)"
+label(fishnet_t1$soil_moisture_z_25yr)       <- "Soil Moisture (Z-score)"
+label(fishnet_t1$temperature_z_25yr)         <- "Temperature (Z-score)"
+label(fishnet_t1$wind_speed_z_25yr)          <- "Wind Speed (Z-score)"
+
+
+# ============================================================
+# Renderer for Z-score anomalies
+# ============================================================
+
+rndr_anom <- function(x, name, ...) {
+  if (!is.numeric(x)) return(render.categorical.default(x))
+  
+  # For anomalies, only show Mean (SD)
+  what <- "Mean (SD)"
+  parse.abbrev.render.code(c("", what))(x)
+}
+
+
+
+# Generate anomaly table
+
+table_anom <- table1::table1(
+  ~ outbreak_count + temperature_z_25yr + shortwave_radiation_z_25yr + longwave_radiation_z_25yr +
+    relative_humidity_z_25yr + wind_speed_z_25yr +
+    soil_moisture_z_25yr + runoff_z_25yr + precipitation_z_25yr + snow_density_z_25yr +
+    leaf_area_index_z_25yr | any_outbreak,
+  data = fishnet_t1,
+  render = rndr_anom,
+  render.categorical = my.render.cat,
+  render.missing = NULL,
+  overall = FALSE,
+  extra.col = list(`P-value` = pvalue)
+)
+
+table_anom
+
+
+
+
+```
+
+## Primary Table 1 Export
+
+```{r, primary table 1 export}
+
+
+# Read spillover summary computed in create_timeseries_df.Rmd
+spillover_summary <- readRDS(file.path(objects_folder, "spillover_summary.RDS"))
+
+total_spillovers <- spillover_summary$total
+n_flag_200m      <- spillover_summary$non_independent_200m
+n_flag_500m      <- spillover_summary$non_independent_500m
+n_flag_1km       <- spillover_summary$non_independent_1km
+n_independent    <- total_spillovers - n_flag_500m
+
+# Relevel so outbreak cells come first
+fishnet_t1 <- fishnet_t1 %>%
+  mutate(
+    any_outbreak = fct_relevel(any_outbreak, "Cells with an outbreak"),
+    land_cover_label = forcats::fct_lump_prop(land_cover_label, prop = 0.01, other_level = "Other")
+  )
+
+# Reorder land cover by frequency in outbreak cells
+outbreak_lc_order <- fishnet_t1 %>%
+  filter(any_outbreak == "Cells with an outbreak") %>%
+  count(land_cover_label, sort = TRUE) %>%
+  pull(land_cover_label)
+
+fishnet_t1 <- fishnet_t1 %>%
+  mutate(land_cover_label = factor(land_cover_label, levels = c(as.character(outbreak_lc_order), 
+                                                                 setdiff(levels(land_cover_label), outbreak_lc_order))))
+
+# Table 1: Outbreak vs No Outbreak
+table_1_gt <- fishnet_t1 %>%
+  select(
+    feedlot_count, au_count, birds_au,
+    temperature_C, shortwave_radiation, longwave_radiation,
+    relative_humidity, wind_speed, soil_moisture,
+    runoff_mm, precipitation_mm, snow_density,
+    leaf_area_index, anseriformes, predators,
+    land_cover_label, any_outbreak
+  ) %>%
+  tbl_summary(
+    by = any_outbreak,
+    type = list(
+      all_continuous() ~ "continuous2",
+      land_cover_label ~ "categorical"
+    ),
+    statistic = list(
+      all_continuous() ~ "{mean} [{min}, {max}]",
+      all_categorical() ~ "{n} ({p}%)"
+    ),
+    digits = list(
+      all_continuous() ~ c(mean = 1, min = 1, max = 1),
+      c(feedlot_count, au_count, birds_au) ~ c(mean = 0, min = 0, max = 0)
+    ),
+    label = list(
+      feedlot_count ~ "Feedlot Count (N)",
+      au_count ~ "Total Animal Units (AU)",
+      birds_au ~ "Poultry Animal Units (AU)",
+      temperature_C ~ "Temperature (°C)",
+      shortwave_radiation ~ "Shortwave Radiation (MJ/m²)",
+      longwave_radiation ~ "Longwave Radiation (MJ/m²)",
+      relative_humidity ~ "Relative Humidity (%)",
+      wind_speed ~ "Wind Speed (m/s)",
+      soil_moisture ~ "Soil Moisture (m³/m³)",
+      runoff_mm ~ "Surface & Sub-Surface Runoff (mm)",
+      precipitation_mm ~ "Precipitation (mm)",
+      snow_density ~ "Snow Density (kg/m³)",
+      leaf_area_index ~ "Leaf Area Index",
+      anseriformes ~ "Anseriformes Relative Abundance",
+      predators ~ "Predator Relative Abundance",
+      land_cover_label ~ "Land Cover Type (%)"
+    ),
+    missing = "no"
+  ) %>%
+  add_p(
+    test = list(
+      all_continuous() ~ "t.test",
+      all_categorical() ~ "chisq.test"
+    )
+  ) %>%
+  # Add spillover rows at the top
+  modify_table_body(~ .x %>%
+    add_row(
+      variable = "spillover_events",
+      var_type = "categorical",
+      var_label = "Spillover Events",
+      row_type = "label",
+      label = "Spillover Events",
+      stat_1 = "", stat_2 = "",
+      .before = 1
+    ) %>%
+    add_row(
+      variable = "spillover_events",
+      var_type = "categorical",
+      row_type = "level",
+      label = "    Total",
+      stat_1 = paste0(as.character(total_spillovers), " (102 cell-weeks)"),
+      stat_2 = "—",
+      .after = 1
+    ) %>%
+    add_row(
+      variable = "spillover_events",
+      var_type = "categorical",
+      row_type = "level",
+      label = "    Excluding within 200m & 4 weeks of prior event",
+      stat_1 = paste0(as.character(total_spillovers - n_flag_200m), " (101 cell-weeks)"),
+      stat_2 = "—",
+      .after = 2
+    ) %>%
+    add_row(
+      variable = "spillover_events",
+      var_type = "categorical",
+      row_type = "level",
+      label = "    Excluding within 500m & 4 weeks of prior event",
+      stat_1 = paste0(as.character(total_spillovers - n_flag_500m), " (101 cell-weeks)"),
+      stat_2 = "—",
+      .after = 3
+    ) %>%
+    add_row(
+      variable = "spillover_events",
+      var_type = "categorical",
+      row_type = "level",
+      label = "    Excluding within 1km & 4 weeks of prior event",
+      stat_1 = paste0(as.character(total_spillovers - n_flag_1km), " (95 cell-weeks)"),
+      stat_2 = "—",
+      .after = 4
+    )
+  ) %>%
+  modify_header(label ~ "**Variable**") %>%
+  modify_caption(" ") %>%
+  bold_labels()
+
+# Convert to flextable
+ft <- as_flex_table(table_1_gt) %>%
+  font(fontname = "Calibri", part = "all") %>%
+  fontsize(size = 11, part = "all") %>%
+  align(align = "left", j = 1, part = "all") %>%
+  align(align = "center", j = 2:ncol(as_flex_table(table_1_gt)$body$dataset), part = "all") %>%
+  set_table_properties(layout = "autofit", width = .8) %>%
+  set_table_properties(layout = "fixed") %>%
+  width(width = 0.9) %>%
+  line_spacing(space = 0.8, part = "all") %>%
+  autofit() %>%
+  add_footer_lines("AU = animal unit (1,000 lbs of live animal weight). Source: Minnesota Pollution Control Agency feedlot registry.")
+
+ft
+
+save_as_docx(ft, path = file.path(tables_folder, "Table1_Primary.docx"))
+
+```
+
+## Season Stratification Table 1 Export
+
+```{r, season strat table 1 export}
+
+# Compute season spillover counts from the modeling dataframe
+fishnet_timeseries_modeling <- readRDS(file.path(objects_folder, "fishnet_timeseries_modeling.RDS"))
+fishnet_timeseries_raw <- readRDS(file.path(objects_folder, "fishnet_timeseries.RDS"))
+
+# Independent events per season (from modeling df)
+season_indep_df <- fishnet_timeseries_modeling %>%
+  filter(outbreak_binary == 1) %>%
+  group_by(season) %>%
+  summarise(
+    independent_events = sum(outbreak_count, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# Total events per season (from raw df)
+season_total_df <- fishnet_timeseries_raw %>%
+  filter(outbreak_binary == 1) %>%
+  group_by(season) %>%
+  summarise(
+    total_events = sum(outbreak_count, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# Combine
+season_spill <- season_indep_df %>%
+  left_join(season_total_df, by = "season")
+
+# Subset: Only outbreak cells
+fishnet_outbreak <- fishnet_t1 %>%
+  filter(any_outbreak == "Cells with an outbreak") %>%
+  mutate(season = droplevels(factor(season)))
+
+# Get season levels in order
+season_levels <- levels(fishnet_outbreak$season)
+
+# Build season stat values
+season_total_vec <- setNames(as.character(season_spill$total_events), season_spill$season)
+season_indep_vec <- setNames(as.character(season_spill$independent_events), season_spill$season)
+
+# Table 2: Outbreak Cells Stratified by Season
+table_season_gt <- fishnet_outbreak %>%
+  select(
+    temperature_C, shortwave_radiation, longwave_radiation,
+    relative_humidity, wind_speed, soil_moisture,
+    runoff_mm, precipitation_mm, snow_density,
+    leaf_area_index, anseriformes, predators,
+    season
+  ) %>%
+  tbl_summary(
+    by = season,
+    type = list(
+      all_continuous() ~ "continuous2"
+    ),
+    statistic = list(
+      all_continuous() ~ "{mean} [{min}, {max}]",
+      all_categorical() ~ "{n} ({p}%)"
+    ),
+    digits = list(
+      all_continuous() ~ c(mean = 1, min = 1, max = 1),
+      c(soil_moisture, leaf_area_index, runoff_mm) ~ c(mean = 2, min = 2, max = 2),
+      c(anseriformes, predators) ~ c(mean = 1, min = 1, max = 1)    ),
+    label = list(
+      temperature_C ~ "Temperature (\u00B0C)",
+      shortwave_radiation ~ "Shortwave Radiation (MJ/m\u00B2)",
+      longwave_radiation ~ "Longwave Radiation (MJ/m\u00B2)",
+      relative_humidity ~ "Relative Humidity (%)",
+      wind_speed ~ "Wind Speed (m/s)",
+      soil_moisture ~ "Soil Moisture (m\u00B3/m\u00B3)",
+      runoff_mm ~ "Surface & Sub-Surface Runoff (mm)",
+      precipitation_mm ~ "Precipitation (mm)",
+      snow_density ~ "Snow Density (kg/m\u00B3)",
+      leaf_area_index ~ "Leaf Area Index",
+      anseriformes ~ "Anseriformes Relative Abundance",
+      predators ~ "Predator Relative Abundance"
+    ),
+    missing = "no"
+  ) %>%
+  modify_table_body(~ {
+    stat_cols <- grep("^stat_", names(.x), value = TRUE)
+    
+    total_row <- tibble(
+      variable = "spillover_events", var_type = "categorical",
+      var_label = "Spillover Events", row_type = "label",
+      label = "Spillover Events"
+    )
+    events_row <- tibble(
+      variable = "spillover_events", var_type = "categorical",
+      row_type = "level", label = "    Total Events"
+    )
+    indep_row <- tibble(
+      variable = "spillover_events", var_type = "categorical",
+      row_type = "level", label = "    Independent Events (>500m or >4 weeks)"
+    )
+    
+    for (i in seq_along(stat_cols)) {
+      s <- season_levels[i]
+      total_row[[stat_cols[i]]] <- ""
+      events_row[[stat_cols[i]]] <- ifelse(s %in% names(season_total_vec), season_total_vec[s], "0")
+      indep_row[[stat_cols[i]]] <- ifelse(s %in% names(season_indep_vec), season_indep_vec[s], "0")
+    }
+    
+    bind_rows(total_row, events_row, indep_row, .x)
+  }) %>%
+  modify_header(label ~ "**Variable**") %>%
+  modify_caption(" ") %>%
+  bold_labels()
+
+# Convert to flextable
+ft_season <- as_flex_table(table_season_gt) %>%
+  font(fontname = "Calibri", part = "all") %>%
+  fontsize(size = 10, part = "all") %>%
+  align(align = "left", j = 1, part = "all") %>%
+  align(align = "center", j = 2:ncol(as_flex_table(table_season_gt)$body$dataset), part = "all") %>%
+  set_table_properties(layout = "autofit", width = .8) %>%
+  set_table_properties(layout = "fixed") %>%
+  width(width = 0.9) %>%
+  line_spacing(space = 0.8, part = "all") %>%
+  autofit()
+
+save_as_docx(ft_season, path = file.path(tables_folder, "Table1_Season.docx"))
+```
+
+
+# Season stratifications compared to 25-year mean
+```{r, season stratifications comped to 25-year mean}
+
+# Transform the 25-yr mean columns to match current-variable units
+fishnet_outbreak <- fishnet_outbreak %>%
+  mutate(
+    temperature_mean_25yr_C            = temperature_mean_25yr - 273.15,
+    precipitation_mean_25yr_mm         = precipitation_mean_25yr * 1000,
+    runoff_mean_25yr_mm                = runoff_mean_25yr * 1000,
+    longwave_radiation_mean_25yr_MJm2  = longwave_radiation_mean_25yr / 1e6,
+    shortwave_radiation_mean_25yr_MJm2 = shortwave_radiation_mean_25yr / 1e6
+  )
+
+# Map current vars -> transformed 25-yr counterparts
+compare_map <- c(
+  temperature_C        = "temperature_mean_25yr_C",
+  shortwave_radiation  = "shortwave_radiation_mean_25yr_MJm2",
+  longwave_radiation   = "longwave_radiation_mean_25yr_MJm2",
+  relative_humidity    = "relative_humidity_mean_25yr",
+  wind_speed           = "wind_speed_mean_25yr",
+  soil_moisture        = "soil_moisture_mean_25yr",
+  runoff_mm            = "runoff_mean_25yr_mm",
+  precipitation_mm     = "precipitation_mean_25yr_mm",
+  snow_density         = "snow_density_mean_25yr",
+  leaf_area_index      = "leaf_area_index_mean_25yr"
+)
+
+var_labels <- c(
+  temperature_C       = "Temperature (\u00B0C)",
+  shortwave_radiation = "Shortwave Radiation (MJ/m\u00B2)",
+  longwave_radiation  = "Longwave Radiation (MJ/m\u00B2)",
+  relative_humidity   = "Relative Humidity (%)",
+  wind_speed          = "Wind Speed (m/s)",
+  soil_moisture       = "Soil Moisture (m\u00B3/m\u00B3)",
+  runoff_mm           = "Surface & Sub-Surface Runoff (mm)",
+  precipitation_mm    = "Precipitation (mm)",
+  snow_density        = "Snow Density (kg/m\u00B3)",
+  leaf_area_index     = "Leaf Area Index"
+)
+
+compare_df <- lapply(names(compare_map), function(cur_var) {
+  ref_var <- compare_map[[cur_var]]
+  fishnet_outbreak %>%
+    group_by(season) %>%
+    summarise(
+      current_mean = mean(.data[[cur_var]], na.rm = TRUE),
+      ref25_mean   = mean(.data[[ref_var]], na.rm = TRUE),
+      .groups = "drop"
+    ) %>%
+    mutate(
+      variable   = cur_var,
+      delta_mean = current_mean - ref25_mean
+    )
+}) %>%
+  bind_rows() %>%
+  mutate(
+    Variable = var_labels[variable],
+    Current_Mean = sprintf("%.1f", current_mean),
+    Mean_25yr    = sprintf("%.1f", ref25_mean),
+    Delta        = sprintf("%.1f", delta_mean)
+  ) %>%
+  select(Variable, season, Current_Mean, Mean_25yr, Delta) %>%
+  arrange(match(Variable, unname(var_labels[names(compare_map)])), season)
+
+compare_wide <- compare_df %>%
+  pivot_longer(cols = c(Current_Mean, Mean_25yr, Delta),
+               names_to = "stat", values_to = "value") %>%
+  unite("Season_Stat", season, stat, sep = " \u2014 ") %>%
+  pivot_wider(names_from = Season_Stat, values_from = value) %>%
+  arrange(match(Variable, unname(var_labels[names(compare_map)])))
+
+ft_compare_wide <- flextable(compare_wide) %>%
+  font(fontname = "Calibri", part = "all") %>%
+  fontsize(size = 10, part = "all") %>%
+  align(align = "center", part = "all") %>%
+  align(j = "Variable", align = "left", part = "all") %>%
+  autofit()
+
+save_as_docx(
+  "Table 2b. Outbreak Cells: Current vs 25-yr Means by Season" = ft_compare_wide,
+  path = file.path(tables_folder, "Table2b_Season_vs_25yr.docx")
+)
+```
+
+# Season stratification with model comparing absolute and 25yr mean
+
+## Prepare model
+```{r, prepare for modeling difference between absolute and 25yr mean}
+
+fishnet_outbreak <- fishnet_outbreak %>%
+  mutate(
+    temperature_mean_25yr_C            = temperature_mean_25yr - 273.15,
+    precipitation_mean_25yr_mm         = precipitation_mean_25yr * 1000,
+    runoff_mean_25yr_mm                = runoff_mean_25yr        * 1000,
+    longwave_radiation_mean_25yr_MJm2  = longwave_radiation_mean_25yr  / 1e6,
+    shortwave_radiation_mean_25yr_MJm2 = shortwave_radiation_mean_25yr / 1e6
+  )
+
+vars_abs <- c(
+  "temperature_C", "shortwave_radiation", "longwave_radiation",
+  "relative_humidity", "wind_speed", "soil_moisture",
+  "runoff_mm", "precipitation_mm", "snow_density", "leaf_area_index"
+)
+
+means_map <- c(
+  temperature_C       = "temperature_mean_25yr_C",
+  shortwave_radiation = "shortwave_radiation_mean_25yr_MJm2",
+  longwave_radiation  = "longwave_radiation_mean_25yr_MJm2",
+  relative_humidity   = "relative_humidity_mean_25yr",
+  wind_speed          = "wind_speed_mean_25yr",
+  soil_moisture       = "soil_moisture_mean_25yr",
+  runoff_mm           = "runoff_mean_25yr_mm",
+  precipitation_mm    = "precipitation_mean_25yr_mm",
+  snow_density        = "snow_density_mean_25yr",
+  leaf_area_index     = "leaf_area_index_mean_25yr"
+)
+
+missing_means <- setdiff(unname(means_map), names(fishnet_outbreak))
+if (length(missing_means)) {
+  stop("Missing 25yr mean columns after conversion: ",
+       paste(missing_means, collapse = ", "))
+}
+```
+
+## Now model...
+```{r, modeling difference between absolute and 25yr mean}
+
+emm_options(lmer.df = "asymptotic")
+
+fit_anomaly_once <- function(dat, abs_name, mean_name) {
+  stopifnot("week" %in% names(dat))
+  dd <- dat %>%
+    transmute(
+      zone_id, season, week,
+      .abs    = .data[[abs_name]],
+      .mean25 = .data[[mean_name]],
+      .anom   = .abs - .mean25
+    )
+
+  fit <- lmerTest::lmer(
+    .anom ~ season + (1|zone_id) + (1|week),
+    data = dd, REML = TRUE,
+    control = lme4::lmerControl(check.conv.singular = "ignore")
+  )
+
+  emm <- emmeans::emmeans(fit, ~ season)
+  broom::tidy(emm, conf.int = TRUE) %>%
+    transmute(
+      variable = abs_name,
+      season   = as.character(season),
+      estimate, conf.low, conf.high, p.value
+    )
+}
+
+emm_all <- purrr::map_dfr(
+  vars_abs,
+  ~fit_anomaly_once(fishnet_outbreak, .x, means_map[[.x]])
+)
+
+emm_all <- emm_all %>%
+  group_by(season) %>%
+  mutate(p.adj = p.adjust(p.value, method = "BH")) %>%
+  ungroup() %>%
+  mutate(
+    is_sig = p.adj < 0.05,
+    delta_ci = sprintf("%+.2f [%.2f, %.2f]", estimate, conf.low, conf.high)
+  )
+
+delta_wide <- emm_all %>%
+  select(variable, season, delta_ci, is_sig) %>%
+  pivot_wider(names_from = season, values_from = c(delta_ci, is_sig)) %>%
+  mutate(Row = "Mean difference from 25yr climatology (95% CI)") %>%
+  relocate(Row)
+```
+
+## Produce results
+```{r, produce results from model on difference between absolute and 25yr mean}
+
+label_map <- c(
+  temperature_C       = "Temperature (\u00B0C)",
+  shortwave_radiation = "Shortwave Radiation (MJ/m\u00B2)",
+  longwave_radiation  = "Longwave Radiation (MJ/m\u00B2)",
+  relative_humidity   = "Relative Humidity (%)",
+  wind_speed          = "Wind Speed (m/s)",
+  soil_moisture       = "Soil Moisture (m\u00B3/m\u00B3)",
+  runoff_mm           = "Surface & Sub-Surface Runoff (mm)",
+  precipitation_mm    = "Precipitation (mm)",
+  snow_density        = "Snow Density (kg/m\u00B3)",
+  leaf_area_index     = "Leaf Area Index"
+)
+
+means_long <- purrr::map_dfr(vars_abs, function(v) {
+  fishnet_outbreak %>%
+    transmute(
+      variable = v,
+      season   = as.character(season),
+      value    = .data[[v]]
+    ) %>%
+    group_by(variable, season) %>%
+    summarise(mean_2022 = mean(value, na.rm = TRUE), .groups = "drop")
+})
+
+means_wide <- means_long %>%
+  mutate(mean_fmt = sprintf("%.1f", mean_2022)) %>%
+  select(variable, season, mean_fmt) %>%
+  pivot_wider(names_from = season, values_from = mean_fmt) %>%
+  mutate(Row = "Mean [Min, Max]") %>%
+  relocate(Row)
+
+# Spillover rows
+spillover_total_row <- tibble(
+  variable = "spillover", Row = "Spillover Event Count",
+  Winter = season_total_vec["Winter"], Spring = season_total_vec["Spring"],
+  Summer = season_total_vec["Summer"], Fall = season_total_vec["Fall"]
+)
+
+spillover_indep_row <- tibble(
+  variable = "spillover", Row = "Independent Events (>500m or >4 weeks)",
+  Winter = season_indep_vec["Winter"], Spring = season_indep_vec["Spring"],
+  Summer = season_indep_vec["Summer"], Fall = season_indep_vec["Fall"]
+)
+
+# Extract delta text columns only (drop is_sig columns for the table text)
+delta_text <- delta_wide %>%
+  select(variable, Row, 
+         Winter = delta_ci_Winter, Spring = delta_ci_Spring, 
+         Summer = delta_ci_Summer, Fall = delta_ci_Fall)
+
+# Build the display table
+tbl_mat <- bind_rows(
+  spillover_total_row, spillover_indep_row,
+  means_wide, delta_text
+) %>%
+  arrange(
+    factor(variable, levels = c("spillover", vars_abs)),
+    match(Row, c("Spillover Event Count", "Independent Events (>500m or >4 weeks)",
+                 "Mean [Min, Max]", "Mean difference from 25yr climatology (95% CI)"))
+  ) %>%
+  mutate(Variable = case_when(
+    variable == "spillover" & Row == "Spillover Event Count" ~ "Spillover Events",
+    variable == "spillover" ~ "",
+    variable %in% names(label_map) ~ label_map[variable],
+    TRUE ~ variable
+  )) %>%
+  select(Variable, Row, Winter, Spring, Summer, Fall)
+
+# Build significance index matrix for bolding
+# For each delta row, check if the corresponding is_sig is TRUE
+sig_rows <- delta_wide %>%
+  arrange(factor(variable, levels = vars_abs))
+
+# Find row indices in tbl_mat that are delta rows
+delta_row_indices <- which(tbl_mat$Row == "Mean difference from 25yr climatology (95% CI)")
+
+ft_tbl <- flextable(tbl_mat) |>
+  set_header_labels(
+    Variable = "Variable",
+    Row = "",
+    Winter = "Winter",
+    Spring = "Spring",
+    Summer = "Summer",
+    Fall = "Fall"
+  ) |>
+  add_footer_row(
+    values = "Mean differences [95% CIs] between 2022 conditions and 25-year climatological means (1997-2021) were computed from linear mixed-effects models with a fixed effect for season, random intercepts for cell and week, estimated via REML. BH-adjusted significant differences (p < 0.05) are shown in bold. Seasons follow meteorological definitions: winter (Dec-Feb), spring (Mar-May), summer (Jun-Aug), fall (Sep-Nov).",
+    colwidths = 6
+  ) |>
+  bold(i = ~ Row %in% c("Spillover Event Count", "Independent Events (>500m or >4 weeks)", "Mean [Min, Max]"), bold = TRUE, part = "body") |>
+  color(i = ~ Row == "Mean difference from 25yr climatology (95% CI)", color = "#555555", part = "body") |>
+  align(j = 2:6, align = "center", part = "all") |>
+  align(j = 1, align = "left", part = "all") |>
+  font(fontname = "Calibri", part = "all") |>
+  fontsize(size = 10, part = "all") |>
+  line_spacing(space = 0.8, part = "all") |>
+  autofit()
+
+# Bold significant cells individually
+for (k in seq_along(delta_row_indices)) {
+  row_idx <- delta_row_indices[k]
+  var_name <- vars_abs[k]
+  
+  # Get significance flags for this variable
+  sig_row <- sig_rows %>% filter(variable == var_name)
+  
+  if (nrow(sig_row) == 1) {
+    if (isTRUE(sig_row$is_sig_Winter))  ft_tbl <- bold(ft_tbl, i = row_idx, j = "Winter", bold = TRUE)
+    if (isTRUE(sig_row$is_sig_Spring))  ft_tbl <- bold(ft_tbl, i = row_idx, j = "Spring", bold = TRUE)
+    if (isTRUE(sig_row$is_sig_Summer))  ft_tbl <- bold(ft_tbl, i = row_idx, j = "Summer", bold = TRUE)
+    if (isTRUE(sig_row$is_sig_Fall))    ft_tbl <- bold(ft_tbl, i = row_idx, j = "Fall", bold = TRUE)
+  }
+}
+
+ft_tbl
+
+save_as_docx(ft_tbl, path = file.path(tables_folder, "Table_Season_w25yr_comp.docx"))
+```
+
+
+# Quick Statistics 
+
+## How many case and control cells?
+
+```{r, quick statistics}
+
+vars <- c(
+  "leaf_area_index","longwave_radiation","precipitation","relative_humidity",
+  "runoff","shortwave_radiation","snow_density","soil_moisture","temperature",
+  "anseriformes","predators","wind_speed",
+  "any_outbreak",          # binary (0/1)
+  "outbreak_count"         # numeric count per row
+)
+
+zone_summary <- fishnet_subset %>%
+  group_by(zone_id) %>%
+  summarise(
+    # Means & SDs for all listed variables
+    across(all_of(vars),
+           list(mean = ~mean(.x, na.rm = TRUE),
+                sd   = ~sd(.x,   na.rm = TRUE)),
+           .names = "{.col}_{.fn}"),
+
+    # Zone-level outbreak summaries
+    any_outbreak_any    = as.integer(any(any_outbreak == 1, na.rm = TRUE)), # ever had 1?
+    outbreak_count_total = sum(outbreak_count, na.rm = TRUE),               # total across time
+
+    n_obs = n(),
+    .groups = "drop"
+  )
+
+zone_summary
+
+zone_outbreak_counts <- zone_summary %>%
+  count(any_outbreak_any, name = "n_zone_ids") %>%
+  mutate(any_outbreak_any = ifelse(any_outbreak_any == 1, "has_outbreak", "no_outbreak"))
+
+zone_outbreak_counts
+
+## 76 have outbreak and 2,070 do not
+
+# Overall
+mean(fishnet_t1$snow_density == 100, na.rm = TRUE)
+
+# By season (or whatever grouping you're using)
+fishnet_t1 %>%
+  group_by(season) %>%
+  summarise(
+    n = n(),
+    pct_100 = mean(snow_density == 100, na.rm = TRUE),
+    min = min(snow_density, na.rm = TRUE),
+    max = max(snow_density, na.rm = TRUE)
+  )
+```
+## Other checks
+
+```{r, other checks}
+
+
+# counts at each object
+cat("fishnet_timeseries:", nrow(fishnet_timeseries), "\n")
+cat("fishnet_timeseries_clean:", nrow(fishnet_timeseries_clean), "\n")
+cat("fishnet_subset:", nrow(fishnet_subset), "\n")
+cat("fishnet_t1:", nrow(fishnet_t1), "\n")
+
+# confirm what the 'unit' is
+cat("unique zone_id:", dplyr::n_distinct(fishnet_t1$zone_id), "\n")
+cat("unique zone_id-week:", dplyr::n_distinct(paste(fishnet_t1$zone_id, fishnet_t1$week)), "\n")
+
+# full season distribution INCLUDING missing
+table(fishnet_t1$season, useNA = "ifany")
+
+# how many season are NA?
+sum(is.na(fishnet_t1$season))
+
+# if you expect only 2 seasons, see what the "other" values are
+sort(unique(fishnet_t1$season))
+
+vars_in_table1 <- c(
+  "outbreak_count", "temperature_C", "shortwave_radiation", "longwave_radiation",
+  "relative_humidity", "wind_speed", "soil_moisture", "runoff_mm", "precipitation_mm",
+  "snow_density", "leaf_area_index", "anseriformes", "predators", "au_count", "birds_au",
+  "land_cover_label", "any_outbreak", "season", "zone_id", "week"
+)
+
+cc_n <- fishnet_t1 |>
+  dplyr::select(dplyr::all_of(vars_in_table1)) |>
+  stats::complete.cases() |>
+  sum()
+
+cat("Complete-case rows for table vars:", cc_n, "\n")
+
+na_counts <- sapply(fishnet_t1[, vars_in_table1], function(x) sum(is.na(x)))
+sort(na_counts, decreasing = TRUE)
+```
