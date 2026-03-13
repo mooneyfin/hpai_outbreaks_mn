@@ -15,7 +15,7 @@ Case-crossover study examining how weekly meteorological conditions and wild bir
 
 ## 1. Data
 
-All raw and large processed data files are archived on Zenodo. The key analysis-ready dataframes and fitted model objects are included in this repository as RDS files.
+Raw and large processed data files are **not included in this GitHub repository**. They are archived on Zenodo (see DOI below). The key analysis-ready dataframes and fitted model objects are included in this repository as RDS files so that downstream analyses can be reproduced without the full data archive.
 
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18983407.svg)](https://doi.org/10.5281/zenodo.18983407)
 
@@ -27,7 +27,7 @@ External input datasets (available on Zenodo):
 * **eBird Status & Trends** — Weekly species-level bird abundance estimates. Includes `mn-outbreak-weekly-bird-estimate-2022-012926.csv` (aggregated by outbreak) and `mn-outbreak-weekly-bird-estimate-2022-011626.csv` (earlier version). Source: [Cornell Lab of Ornithology](https://science.ebird.org/en/status-and-trends)
 * **Feedlot locations** — Registered feedlot facilities in Minnesota. Source: [Minnesota Pollution Control Agency](https://www.pca.state.mn.us/)
 * **Land cover** — National Land Cover Database classifications. Source: [USGS EROS](https://www.usgs.gov/centers/eros/science/national-land-cover-database)
-* **HPAI spillover events** — Georeferenced farm locations of confirmed HPAI detections (**confidential**, not included). See `data/confidential/README.md` for access details.
+* **HPAI spillover events** — Georeferenced farm locations of confirmed HPAI detections (**confidential — not included in this repository or on Zenodo**). Access must be requested directly from [USDA APHIS](https://www.aphis.usda.gov/livestock-poultry-disease/avian/avian-influenza).
 
 ### 1b. Intermediate
 
