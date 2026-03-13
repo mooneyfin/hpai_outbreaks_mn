@@ -9,7 +9,8 @@ list.of.packages = c(
   'ggplot2', 'patchwork', 'corrplot', 'cowplot', 'viridis',
   'gtsummary', 'flextable', 'officer', 'kableExtra', 'gt', 'table1',
   'car', 'boot', 'broom', 'broom.mixed', 'gratia', 'ggeffects',
-  'lme4', 'lmerTest', 'emmeans', 'clubSandwich'
+  'lme4', 'lmerTest', 'emmeans', 'clubSandwich',
+  'e1071'
 )
 
 # Install anything missing

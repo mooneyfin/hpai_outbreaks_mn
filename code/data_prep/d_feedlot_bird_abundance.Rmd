@@ -1,0 +1,90 @@
+---
+title: "feedlot-bird-abundance"
+author: "Rishi Kowalski, ScM"
+date: "2025-06-30"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+rm(list=ls())
+project.folder = paste0(print(here::here()),'/')
+source(paste0(project.folder,'create_folder_structure.R'))
+source(paste0(functions.folder,'script_initiate.R'))
+
+# Additional packages for bird abundance extraction
+extra_pkgs <- c('terra', 'ebirdst', 'gWQS', 'lwqs', 'geosphere', 'RColorBrewer', 'parallel', 'MMWRweek')
+new_extra <- extra_pkgs[!(extra_pkgs %in% installed.packages()[,"Package"])]
+if(length(new_extra)) install.packages(new_extra, repos = "https://cloud.r-project.org")
+lapply(extra_pkgs, require, character.only = TRUE)
+```
+
+```{r setup-raster-list}
+#Bird Top 15 Anseriforms in MN
+#Initialize list of rasters - 15 anseriformes and 10 non-anseriform HPAI detections
+#Top 15 Anseriforms identified in MN via iNaturalist List: https://www.inaturalist.org/guides/14807?taxon=6888
+mn_anseri_15 <- c("mallar3", "cangoo", "wooduc", "buwtea", "commer", "rinduc", "comgol", "norsho", "buffle", "lessca", "rebmer", "gnwtea", "gadwal", "ambduc", "rudduc")
+
+
+##### Abundance #####
+#Anseriforms, n = 15
+mallar3_abd_3km <- load_raster("mallar3" , product = "abundance", resolution = "3km")
+cangoo_abd_3km <- load_raster("cangoo", product = "abundance", resolution = "3km")
+wooduc_abd_3km <- load_raster("wooduc", product = "abundance", resolution = "3km")
+buwtea_abd_3km <- load_raster("buwtea", product = "abundance", resolution = "3km")
+commer_abd_3km <- load_raster("commer", product = "abundance", resolution = "3km")
+rinduc_abd_3km <- load_raster("rinduc", product = "abundance", resolution = "3km")
+comgol_abd_3km <- load_raster("comgol", product = "abundance", resolution = "3km")
+norsho_abd_3km <- load_raster("norsho", product = "abundance", resolution = "3km")
+buffle_abd_3km <- load_raster("buffle", product = "abundance", resolution = "3km")
+lessca_abd_3km <- load_raster("lessca", product = "abundance", resolution = "3km")
+rebmer_abd_3km <- load_raster("rebmer", product = "abundance", resolution = "3km")
+gnwtea_abd_3km <- load_raster("gnwtea", product = "abundance", resolution = "3km")
+gadwal_abd_3km <- load_raster("gadwal", product = "abundance", resolution = "3km")
+ambduc_abd_3km <- load_raster("ambduc", product = "abundance", resolution = "3km")
+rudduc_abd_3km <- load_raster("rudduc", product = "abundance", resolution = "3km")
+
+#Non-Anseriform HPAI Detections, n = 6
+rethaw_abd_3km <- load_raster("rethaw", product = "abundance", resolution = "3km")
+truswa_abd_3km <- load_raster("truswa", product = "abundance", resolution = "3km")
+grhowl_abd_3km <- load_raster("grhowl", product = "abundance", resolution = "3km")
+amwpel_abd_3km <- load_raster("amwpel", product = "abundance", resolution = "3km")
+baleag_abd_3km <- load_raster("baleag", product = "abundance", resolution = "3km")
+brdowl_abd_3km <- load_raster("brdowl", product = "abundance", resolution = "3km")
+
+spec_rast_list <- list(mallar3_abd_3km, cangoo_abd_3km, wooduc_abd_3km, buwtea_abd_3km, commer_abd_3km, rinduc_abd_3km, comgol_abd_3km, norsho_abd_3km, buffle_abd_3km, lessca_abd_3km, rebmer_abd_3km, gnwtea_abd_3km, gadwal_abd_3km, ambduc_abd_3km, rudduc_abd_3km, rethaw_abd_3km, truswa_abd_3km, grhowl_abd_3km, amwpel_abd_3km, baleag_abd_3km, brdowl_abd_3km)
+names(spec_rast_list) <- c("mallar3", "cangoo", "wooduc", "buwtea", "commer", "rinduc", "comgol", "norsho", "buffle", "lessca", "rebmer", "gnwtea", "gadwal", "ambduc", "rudduc", "rethaw", "truswa", "grhowl", "amwpel", "baleag", "brdowl")
+```
+
+```{r get-unique-mn-feedlots}
+
+# Feedlot file 1
+f1 <- vect(paste0(processed_data, "feedlots_timeseries_10km_simple_first.shp"))
+
+# Feedlot locations
+fdlt_loc <- unique(f1[, c("feedlot_id", "zone_id", "lat", "long")]) # n = 38035
+
+fdlt_loc <- project(fdlt_loc, spec_rast_list[[1]])
+
+# Extract bird abdundance estimates at feedlot location
+all_fdlot_extr <- lapply(spec_rast_list, function(x) terra::extract(x, fdlt_loc))
+
+# Add IDs, species names
+adjExtr <- function(df, index) {
+  df$feedlot_id <- fdlt_loc$feedlot_id
+  df$zone_id <- fdlt_loc$zone_id
+  df$species <- names(spec_rast_list)[index]
+  df <- df[, -1]
+  names(df)[1:52] <- paste0("week_", 1:52)
+  return(df)
+}
+
+all_fdlot_extr <- lapply(1:length(all_fdlot_extr), function(x) adjExtr(df = all_fdlot_extr[[x]], x))
+
+# Bind all 
+all_fdlot_extr_df <- do.call("rbind", all_fdlot_extr)
+
+all_fdlot_extr_df <- all_fdlot_extr_df[, c("feedlot_id", "zone_id", "species", paste0("week_", 1:52))]
+
+write.csv(all_fdlot_extr_df, paste0(bird_abundance_data, "all-mn-feedlot-species-abundance-070125.csv"), row.names = F)
+```
+

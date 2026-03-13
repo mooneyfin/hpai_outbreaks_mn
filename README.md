@@ -6,25 +6,25 @@
 
 ## Project Description
 
-Case-crossover study examining how weekly meteorological conditions and wild bird abundance are associated with HPAI spillover into poultry farms across Minnesota during 2022. We use distributed lag nonlinear models (DLNMs) within a conditional logistic regression framework applied to a 10 km gridded panel of 5,404 spatial zones observed over 52 weeks.
+Case-crossover study examining how weekly meteorological conditions and wild bird abundance are associated with HPAI spillover into poultry farms across Minnesota during 2022. We use distributed lag nonlinear models (DLNMs) within a conditional logistic regression framework applied to 10 km grids over 52 weeks.
 
-* Paper: [GeoHealth, forthcoming]
+* Paper: *Submitted to GeoHealth*
 * Repository: [https://github.com/sparklabnyc/hpai_outbreaks_mn](https://github.com/sparklabnyc/hpai_outbreaks_mn)
 
 ---
 
 ## 1. Data
 
-All raw and large processed data files are archived on Zenodo. The key analysis-ready dataframes and fitted model objects are included in this repository as RDS files so reviewers can run the analysis scripts directly.
+All raw and large processed data files are archived on Zenodo. The key analysis-ready dataframes and fitted model objects are included in this repository as RDS files.
 
-[![DOI](https://zenodo.org/badge/DOI/XXXXX.svg)](https://doi.org/XXXXX)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18983407.svg)](https://doi.org/10.5281/zenodo.18983407)
 
 ### 1a. Raw
 
 External input datasets (available on Zenodo):
 
 * **ERA5-Land climate reanalysis** — Weekly meteorological variables (temperature, precipitation, wind, etc.) for Minnesota, 1997–2022. Extracted via Google Earth Engine to the 10 km fishnet grid. Source: [Copernicus Climate Data Store](https://cds.climate.copernicus.eu/)
-* **eBird Status & Trends** — Weekly species-level bird abundance estimates. Source: [Cornell Lab of Ornithology](https://science.ebird.org/en/status-and-trends)
+* **eBird Status & Trends** — Weekly species-level bird abundance estimates. Includes `mn-outbreak-weekly-bird-estimate-2022-012926.csv` (aggregated by outbreak) and `mn-outbreak-weekly-bird-estimate-2022-011626.csv` (earlier version). Source: [Cornell Lab of Ornithology](https://science.ebird.org/en/status-and-trends)
 * **Feedlot locations** — Registered feedlot facilities in Minnesota. Source: [Minnesota Pollution Control Agency](https://www.pca.state.mn.us/)
 * **Land cover** — National Land Cover Database classifications. Source: [USGS EROS](https://www.usgs.gov/centers/eros/science/national-land-cover-database)
 * **HPAI spillover events** — Georeferenced farm locations of confirmed HPAI detections (**confidential**, not included). See `data/confidential/README.md` for access details.
@@ -37,6 +37,9 @@ Processed spatial and tabular files in `data/processed/`:
 * `Fishnet_Timeseries_10km.gpkg` — Full 10 km grid with temporal data
 * `mn_fishnet_processed.gpkg` / `.csv` — Processed fishnet with joined covariates
 * `case_crossover_df_ind*.csv` — Case-crossover datasets at various spatial thresholds
+* `mn-hpai-cumulative-lag-case-lag3-control-012926.csv` — Cumulative bird abundance by outbreak, case period lag 3 / control lag +4–+7
+* `mn-hpai-cumulative-lag-case-lag4-control-012926.csv` — Cumulative bird abundance by outbreak, case period lag 4 / control lag +4–+8
+* `wqs-dataset-guide.csv` — Guide to WQS dataset lag structures
 
 ### 1c. Support
 
@@ -54,6 +57,9 @@ Pre-built R objects in `data/objects/` — these are tracked on GitHub so the an
 * `timeseries_clean.rds` — Clean panel timeseries
 * `fishnet_timeseries.RDS` — Full historical timeseries panel (Zenodo only, ~194 MB)
 * `fishnet_timeseries_modeling.RDS` — Modeling-ready version (Zenodo only, ~194 MB)
+
+**WQS Results** (`data/objects/`):
+* `wqs-model-results-012926.xlsx` — WQS mixture model results (bird species weights and significance)
 
 **Fitted Models** (`data/objects/models/`):
 * `casecrossover_model.RDS` — Primary conditional logistic regression model
@@ -75,6 +81,7 @@ These scripts require the confidential spillover data and cannot be run by revie
 * **b_create_timeseries_df.Rmd** — Builds historical climate baselines (10/15/20/25-yr), calculates anomaly z-scores, flags non-independent outbreaks
 * **c_create_casscrossover_df.Rmd** — Constructs case-crossover dataset with lagged predictors (0–4 weeks), applies spatial independence exclusions
 * **independent_case_confrimation.R** — Validates case independence assumptions
+* **d_feedlot_bird_abundance.Rmd** — Extracts eBird species-level abundance at feedlot locations using 3 km rasters (21 species: 15 Anseriformes + 6 non-Anseriformes). Produces `all-mn-feedlot-species-abundance-070125.csv`. Author: Rishi Kowalski
 
 ### Models (`code/models/`)
 
@@ -128,6 +135,7 @@ Exploratory analyses not part of the main pipeline:
 | Item | Script |
 |---|---|
 | **Figure S1** | `code/data_exploration/mn-ebird-mixture-analysis.Rmd` |
+| **Figure S1 (case-ctrl bar/box)** | `code/data_exploration/mn-ebird-mixture-analysis.Rmd` — `mn-case-ctrl-bar-*.png`, `mn-case-ctrl-box-*.png` |
 | **Figure S2** | Graphical abstract (not produced by code) |
 | **Figure S3** | `code/models/a_casecrossover_model.rmd` |
 | **Figure S4** | `code/models/c_season_sensitivity.rmd` |
@@ -188,10 +196,6 @@ hpai_outbreaks_mn/
 
 ## How to Run
 
-```bash
-git clone https://github.com/sparklabnyc/hpai_outbreaks_mn.git
-cd hpai_outbreaks_mn
-```
 
 1. Download the Zenodo data archive and extract into `data/`, preserving directory structure
 2. Open `hpai_outbreaks_mn.Rproj` in RStudio
@@ -232,7 +236,7 @@ The data preparation scripts (`code/data_prep/`) require the confidential spillo
 
 ## Citation
 
-Mooney, F. M., Kowalski, R., Gennings, C., Warren, J. L., Lehman, K. A., DeFelice, N., & Pei, S. (2026). Associations between Meteorological Conditions, Wild Bird Abundance, and Spillover of Highly Pathogenic Avian Influenza into Poultry Farms: A Case-Crossover Study in Minnesota, 2022. *GeoHealth*.
+Mooney, F. M., Kowalski, R., Gennings, C., Warren, J. L., Lehman, K. A., DeFelice, N., & Pei, S. (2026). Associations between Meteorological Conditions, Wild Bird Abundance, and Spillover of Highly Pathogenic Avian Influenza into Poultry Farms: A Case-Crossover Study in Minnesota, 2022.*Pending Submission*
 
 ---
 

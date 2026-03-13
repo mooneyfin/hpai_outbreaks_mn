@@ -157,9 +157,7 @@ ggplot2::ggsave(
 ## Plot All Effects from 25yr Model
 
 ```{r, 25yr plot}
-# ============================================================
-# HPAI Outbreak Risk Model —  Nonlinear Anomalies + Season + Spatial
-# ============================================================
+# -- HPAI Outbreak Risk Model — Nonlinear Anomalies + Season + Spatial --
 
 # Confirm model object
 
@@ -356,9 +354,7 @@ gam.check(model_10yr)
 
 
 ```{r, 10yr plot}
-# ============================================================
-# HPAI Outbreak Risk Model —  Nonlinear Anomalies + Season + Spatial
-# ============================================================
+# -- HPAI Outbreak Risk Model — Nonlinear Anomalies + Season + Spatial --
 
 # Publication theme
 

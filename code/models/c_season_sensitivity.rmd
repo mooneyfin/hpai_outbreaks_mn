@@ -1262,7 +1262,7 @@ feedlot_cells <- df_used |>
 feedlot_control_cells <- intersect(feedlot_cells, control_cells)
 n_feedlot_control_cells <- length(feedlot_control_cells)
 
-# Optional: sanity checks
+# Sanity checks
 cat("Control cells (never positive): ", n_control_cells, "\n", sep = "")
 cat("Feedlot cells (ever feedlot): ", length(feedlot_cells), "\n", sep = "")
 cat("Feedlot control cells (feedlot, never positive): ", n_feedlot_control_cells, "\n", sep = "")

@@ -566,9 +566,7 @@ mtext("Odds Ratio (95% CI)", side = 2, outer = TRUE, line = -1, cex = 1.2)
 dev.off()
 
 
-# =====================================================
-# Lag-Specific Odds Ratio Table (Reduced Case-Crossover Model)
-# =====================================================
+# -- Lag-Specific Odds Ratio Table (Reduced Case-Crossover Model) --
 
 # Helper Function
 

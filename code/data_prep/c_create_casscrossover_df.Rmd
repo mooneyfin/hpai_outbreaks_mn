@@ -303,7 +303,6 @@ plots <- lapply(vars_to_check, function(var) {
 # Display plots in a grid (adjust number of columns if needed)
 wrap_plots(plots, ncol = )
 
-library(e1071)
 # Subset to variables
 numeric_vars <- case_crossover_df %>%
   select(all_of(vars_to_check))

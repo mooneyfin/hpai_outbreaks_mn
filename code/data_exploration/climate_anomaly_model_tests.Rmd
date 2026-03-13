@@ -210,9 +210,7 @@ summary(model_2_refined_v3_month_spline)
 ## Example Plot
 
 ```{r, example plot}
-# ============================================================
-# HPAI Outbreak Risk Model — Refined Nonlinear Anomalies + Season + Spatial
-# ============================================================
+# -- HPAI Outbreak Risk Model — Refined Nonlinear Anomalies + Season + Spatial --
 
 # Confirm model object
 
@@ -397,9 +395,7 @@ gam.check(model_10yr)
 
 
 ```{r, example plot for 10yr}
-# ============================================================
-# HPAI Outbreak Risk Model — Refined Nonlinear Anomalies + Season + Spatial
-# ============================================================
+# -- HPAI Outbreak Risk Model — Refined Nonlinear Anomalies + Season + Spatial --
 
 # Publication theme
 

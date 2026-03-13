@@ -239,9 +239,7 @@ cp_slice_predator_adj  <- crosspred(cb_predators, model_8lag_crude_poly, cen = 0
 ```
 
 ```{r, cumulative OR summary table}
-# ============================================================
-# Cumulative OR Summary Table
-# ============================================================
+# -- Cumulative OR Summary Table --
 
 cumulative_summary <- tibble(
   Predictor = c("Anseriformes (Crude)", "Predators (Crude)",
@@ -286,9 +284,7 @@ cumulative_summary
 
 ```{r, cumlative and slices plots}
 
-# ============================================================
-# Cumulative and Slices Plots (Crude + Adjusted)
-# ============================================================
+# -- Cumulative and Slices Plots (Crude + Adjusted) --
 
 plot_cumulative <- function(cp, title) {
   plot(cp, type = "cumulative", var = 0.5, ci = "area",
@@ -412,9 +408,7 @@ dev.off()
 
 ```{r, lag specific odds ratio table}
 
-# ============================================================
-# Lag-Specific Odds Ratio Table (0–8 weeks)
-# ============================================================
+# -- Lag-Specific Odds Ratio Table (0–8 weeks) --
 
 extract_lag_ORs_wide <- function(cp_obj, varname, varval = "0.5", lags = 0:8) {
   lag_labels <- paste0("lag", lags)

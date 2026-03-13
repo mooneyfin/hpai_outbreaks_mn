@@ -57,8 +57,14 @@ data/objects/dataframes/fishnet_timeseries_modeling.RDS
 !data/processed/
 !data/processed/.keep
 
-# Root-level output (not tracked individually)
+# Archive folder (old script versions, not part of pipeline)
+code/Archive/
+
+# Empty placeholder folders (not tracked)
 output/
+reports/
+code/analysis/
+code/model_prep/
 
 # Manuscript / supporting docs (not part of the analysis repo)
 *.pdf

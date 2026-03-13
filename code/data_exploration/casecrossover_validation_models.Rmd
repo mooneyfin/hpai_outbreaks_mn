@@ -145,9 +145,7 @@ cb_wind_speed <- crossbasis(
 
 ```{r, correlation of variables}
 
-# ============================================================
-# Correlation Matrix of Base (Lag 0) Predictors
-# ============================================================
+# -- Correlation matrix of base (Lag 0) predictors --
 
 # Include all environmental + bird variables currently used
 vars <- c(
@@ -176,11 +174,7 @@ cor_matrix <- round(cor_matrix, 2)
 # Print nicely
 print(cor_matrix)
 
-# ============================================================
-# Optional: visualize as a correlation heatmap
-# ============================================================
-if (!requireNamespace("corrplot", quietly = TRUE)) install.packages("corrplot")
-library(corrplot)
+# -- Correlation heatmap --
 
 corrplot(
   cor_matrix,
@@ -200,8 +194,6 @@ title("Correlation Matrix of Lag-0 Environmental & Bird Predictors", line = -1)
 
 
 ```{r, leave one case out validation}
-library(clogitL1)
-library(dplyr)
 
 ## ---- 1. Helper to rename each crossbasis block ----
 rename_cb <- function(cb, prefix) {
@@ -281,9 +273,7 @@ summary_vars <- coef_table |>
 summary_vars
 
 
-# ============================================================
-# Correlation Matrix of Base (Lag 0) Predictors
-# ============================================================
+# -- Correlation Matrix of Base (Lag 0) Predictors --
 
 # Include all environmental + bird variables currently used
 vars <- c(
@@ -312,11 +302,7 @@ cor_matrix <- round(cor_matrix, 2)
 # Print nicely
 print(cor_matrix)
 
-# ============================================================
-# Optional: visualize as a correlation heatmap
-# ============================================================
-if (!requireNamespace("corrplot", quietly = TRUE)) install.packages("corrplot")
-library(corrplot)
+# -- Correlation heatmap --
 
 corrplot(
   cor_matrix,
@@ -355,9 +341,7 @@ final_model <- clogit(
 
 ```{r, report results}
 
-# =====================================================
-# Crosspred Objects (Reduced Final Model)
-# =====================================================
+# -- Crosspred Objects (Reduced Final Model) --
 
 # -- Cumulative effects --
 cp_runoff    <- crosspred(cb_runoff,       final_model, cen = 0, at = 0.5, cumul = TRUE)
@@ -377,9 +361,7 @@ cp_slice_leaf     <- crosspred(cb_leaf_area_index, final_model, cen = 0, at = 0.
 cp_slice_longwave <- crosspred(cb_longwave_radiation, final_model, cen = 0, at = 0.5)
 cp_slice_bird     <- crosspred(cb_total_bird_abundance, final_model, cen = 0, at = 0.5)
 
-# =====================================================
-# Cumulative OR Summary Table
-# =====================================================
+# -- Cumulative OR Summary Table --
 cumulative_summary <- tibble(
   Predictor = c(
     "Surface Runoff", 
@@ -433,9 +415,7 @@ cumulative_summary <- tibble(
     data_row.padding = px(6)
   )
 
-# =====================================================
-# Plotting Helpers
-# =====================================================
+# -- Plotting Helpers --
 plot_cumulative <- function(cp, title) {
   plot(cp,
        type = "cumulative", var = 0.5, ci = "area",
@@ -456,9 +436,7 @@ plot_slices <- function(cp, title) {
   abline(h = 1, lty = 2, col = "gray40", lwd = 1)
 }
 
-# =====================================================
-# Save Plots
-# =====================================================
+# -- Save Plots --
 
 # --- Cumulative plots ---
 png(file.path(figures_folder, "figure_cumulative_ORs_casecrossover_val.png"),

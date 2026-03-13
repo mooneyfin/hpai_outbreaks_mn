@@ -205,8 +205,7 @@ rndr <- function(x, name, ...) {
 }
 
 
-# ============================================================
-# Variable labels
+# -- Variable labels --
 
 label(fishnet_t1$outbreak_count)        <- "Spillover Count"
 label(fishnet_t1$temperature_C)        <- "Temperature (°C)"
@@ -285,9 +284,7 @@ table_1
 
 ```{r, table 1 for climate anomalies}
 
-# ============================================================
-# 25-year Z-score anomaly variables
-# ============================================================
+# -- 25-year Z-score anomaly variables --
 
 anomaly_vars <- c(
   "leaf_area_index_z_25yr",
@@ -302,9 +299,7 @@ anomaly_vars <- c(
   "wind_speed_z_25yr"
 )
 
-# ============================================================
-# Variable labels (for clean table output)
-# ============================================================
+# -- Variable labels (for clean table output) --
 
 label(fishnet_t1$leaf_area_index_z_25yr)     <- "Leaf Area Index (Z-score)"
 label(fishnet_t1$longwave_radiation_z_25yr)  <- "Longwave Radiation (Z-score)"
@@ -318,9 +313,7 @@ label(fishnet_t1$temperature_z_25yr)         <- "Temperature (Z-score)"
 label(fishnet_t1$wind_speed_z_25yr)          <- "Wind Speed (Z-score)"
 
 
-# ============================================================
-# Renderer for Z-score anomalies
-# ============================================================
+# -- Renderer for Z-score anomalies --
 
 rndr_anom <- function(x, name, ...) {
   if (!is.numeric(x)) return(render.categorical.default(x))
