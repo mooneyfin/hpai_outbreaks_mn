@@ -15,7 +15,7 @@ Case-crossover study examining how weekly meteorological conditions and wild bir
 
 ## 1. Data
 
-Raw and large processed data files are **not included in this GitHub repository**. They are archived on Zenodo (see DOI below). The key analysis-ready dataframes and fitted model objects are included in this repository as RDS files so that downstream analyses can be reproduced without the full data archive.
+Raw and large processed data files are **not included in this GitHub repository**. They are archived on Zenodo (see DOI below). The key analysis-ready dataframes and fitted model objects are included in this repository as RDS files to run analyses.
 
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18983407.svg)](https://doi.org/10.5281/zenodo.18983407)
 
@@ -27,7 +27,7 @@ External input datasets (available on Zenodo):
 * **eBird Status & Trends** — Weekly species-level bird abundance estimates. Includes `mn-outbreak-weekly-bird-estimate-2022-012926.csv` (aggregated by outbreak) and `mn-outbreak-weekly-bird-estimate-2022-011626.csv` (earlier version). Source: [Cornell Lab of Ornithology](https://science.ebird.org/en/status-and-trends)
 * **Feedlot locations** — Registered feedlot facilities in Minnesota. Source: [Minnesota Pollution Control Agency](https://www.pca.state.mn.us/)
 * **Land cover** — National Land Cover Database classifications. Source: [USGS EROS](https://www.usgs.gov/centers/eros/science/national-land-cover-database)
-* **HPAI spillover events** — Georeferenced farm locations of confirmed HPAI detections (**confidential — not included in this repository or on Zenodo**). Access must be requested directly from [USDA APHIS](https://www.aphis.usda.gov/livestock-poultry-disease/avian/avian-influenza).
+* **HPAI spillover events** — Georeferenced farm locations of confirmed HPAI detections (**confidential — not included in this repository or on Zenodo**). 
 
 ### 1b. Intermediate
 
@@ -48,7 +48,7 @@ Processed spatial and tabular files in `data/processed/`:
 
 ### 1d. Summary (Analysis-Ready Objects)
 
-Pre-built R objects in `data/objects/` — these are tracked on GitHub so the analysis pipeline can be run immediately:
+Pre-built R objects in `data/objects/` —
 
 **Dataframes** (`data/objects/dataframes/`):
 * `case_crossover_df.RDS` — Primary case-crossover dataset (4-week lag)
@@ -75,7 +75,7 @@ Each script sources `create_folder_structure.R` and then `code/functions/script_
 
 ### Data Preparation (`code/data_prep/`)
 
-These scripts require the confidential spillover data and cannot be run by reviewers. Their outputs are provided as RDS files.
+These scripts require the confidential spillover data and cannot be run. Their outputs are provided as RDS files.
 
 * **a_join_data.Rmd** — Joins spillover events, feedlots, bird abundance, meteorological data, and land cover into the 10 km weekly fishnet panel
 * **b_create_timeseries_df.Rmd** — Builds historical climate baselines (10/15/20/25-yr), calculates anomaly z-scores, flags non-independent outbreaks
@@ -113,7 +113,6 @@ Exploratory analyses not part of the main pipeline:
 ### Other
 
 * **code/data_acquisition/era5_land_gee.js** — Google Earth Engine script for ERA5-Land extraction
-* **code/Archive/** — Earlier script versions (not part of pipeline)
 
 ---
 
@@ -176,7 +175,6 @@ hpai_outbreaks_mn/
 │   ├── data_acquisition/   # GEE scripts for ERA5-Land extraction
 │   ├── functions/          # script_initiate.R, functions.R
 │   ├── packages/           # packages_to_load.R
-│   └── Archive/            # Earlier script versions
 ├── data/
 │   ├── confidential/       # HPAI spillover locations (restricted)
 │   ├── raw/                # External input data (on Zenodo)
@@ -201,7 +199,7 @@ hpai_outbreaks_mn/
 2. Open `hpai_outbreaks_mn.Rproj` in RStudio
 3. Run any script in `code/models/` or `code/model_processing/` — each script sources `create_folder_structure.R` automatically, which sets up all paths and loads packages
 
-The data preparation scripts (`code/data_prep/`) require the confidential spillover data and cannot be run without it. All downstream analysis scripts work with the pre-built RDS objects provided in the repo.
+The data preparation scripts (`code/data_prep/`) require the confidential spillover data and cannot be run without it. 
 
 ---
 
