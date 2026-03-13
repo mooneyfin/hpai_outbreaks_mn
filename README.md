@@ -9,7 +9,7 @@
 Case-crossover study examining how weekly meteorological conditions and wild bird abundance are associated with HPAI spillover into poultry farms across Minnesota during 2022. We use distributed lag nonlinear models (DLNMs) within a conditional logistic regression framework applied to 10 km grids over 52 weeks.
 
 * Paper: *Submitted to GeoHealth*
-* Repository: [https://github.com/sparklabnyc/hpai_outbreaks_mn](https://github.com/sparklabnyc/hpai_outbreaks_mn)
+* Repository: [https://github.com/mooneyfin/hpai_outbreaks_mn](https://github.com/mooneyfin/hpai_outbreaks_mn)
 
 ---
 
