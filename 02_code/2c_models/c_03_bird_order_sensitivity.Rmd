@@ -1,0 +1,475 @@
+---
+title: "Bird Order Sensitivity Analysis"
+author: "Fintan Mooney"
+date: "2025-10-15"
+output: html_document
+---
+
+# Sensitivity analysis replacing total bird abundance with order-level abundance (e.g., Anseriformes, Charadriiformes)... testing whether specific bird orders drive HPAI outbreak risk differently!
+
+```{r include=FALSE}
+rm(list=ls())
+project.folder = paste0(print(here::here()),'/')
+source(paste0(project.folder,'create_folder_structure.R'))
+source(paste0(functions.folder,'script_initiate.R'))
+```
+
+## Read in casecrossover dataset that has the 56-day lag window
+
+```{r, read in casecrossover dataset with 56-day lag window}
+# 56-day (8-week) lag window is appropriate for bird-order analysis because
+# Anseriformes migration windows are longer than the 28-day primary lag span.
+case_crossover_df_56lag <- readRDS(file.path(objects_folder, "case_crossover_df_56lag.RDS"))
+```
+
+## Crossbasis
+
+## Analyzing cumulative and lag specific odds ratios from case-crossover with 8 lags 
+
+```{r, 8 lag test}
+
+## Crossbasis for 8-lag
+
+# Finalized Crossbasis Terms for Climate and Bird Predictors
+
+# Leaf Area Index
+cb_leaf_area_index <- crossbasis(
+  x = as.matrix(case_crossover_df_56lag[, paste0("leaf_area_index_Lag", 0:56)]),
+  lag = c(0, 56),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 6)
+)
+
+# Longwave Radiation
+cb_longwave_radiation <- crossbasis(
+  x = as.matrix(case_crossover_df_56lag[, paste0("longwave_radiation_Lag", 0:56)]),
+  lag = c(0, 56),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 6)
+)
+
+# Precipitation
+cb_precipitation <- crossbasis(
+  x = as.matrix(case_crossover_df_56lag[, paste0("precipitation_Lag", 0:56)]),
+  lag = c(0, 56),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 6)
+)
+
+# Relative Humidity
+cb_relative_humidity <- crossbasis(
+  x = as.matrix(case_crossover_df_56lag[, paste0("relative_humidity_Lag", 0:56)]),
+  lag = c(0, 56),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 6)
+)
+
+# Runoff
+cb_runoff <- crossbasis(
+  x = as.matrix(case_crossover_df_56lag[, paste0("runoff_Lag", 0:56)]),
+  lag = c(0, 56),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 6)
+)
+
+# Shortwave Radiation
+cb_shortwave_radiation <- crossbasis(
+  x = as.matrix(case_crossover_df_56lag[, paste0("shortwave_radiation_Lag", 0:56)]),
+  lag = c(0, 56),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 6)
+)
+
+# Snow Density
+cb_snow_density <- crossbasis(
+  x = as.matrix(case_crossover_df_56lag[, paste0("snow_density_Lag", 0:56)]),
+  lag = c(0, 56),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 6)
+)
+
+# Soil Moisture
+cb_soil_moisture <- crossbasis(
+  x = as.matrix(case_crossover_df_56lag[, paste0("soil_moisture_Lag", 0:56)]),
+  lag = c(0, 56),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 6)
+)
+
+# Temperature
+cb_temperature <- crossbasis(
+  x = as.matrix(case_crossover_df_56lag[, paste0("temperature_Lag", 0:56)]),
+  lag = c(0, 56),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 6)
+)
+
+
+# Total Bird Abundance
+cb_total_bird_abundance <- crossbasis(
+  x = as.matrix(case_crossover_df_56lag[, paste0("total_bird_abundance_Lag", 0:56)]),
+  lag = c(0, 56),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 6)
+)
+
+# Wind Speed
+cb_wind_speed <- crossbasis(
+  x = as.matrix(case_crossover_df_56lag[, paste0("wind_speed_Lag", 0:56)]),
+  lag = c(0, 56),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 6)
+)
+
+
+
+## BIRD ORDER CROSSBASIS - WHAT WE ARE TESTING
+
+### Poly
+
+#### Anseriformes:
+cb_anseri <- crossbasis(
+    x = as.matrix(case_crossover_df_56lag[, paste0("anseriformes_Lag", 0:56)]),
+    lag = c(0, 56),
+    argvar = list(fun = "lin"),
+  arglag = list(fun = "poly", degree = 2)
+  )
+ 
+#### Predator:
+cb_predators <- crossbasis(
+x = as.matrix(case_crossover_df_56lag[, paste0("predators_Lag", 0:56)]),
+  lag = c(0, 56),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "poly", degree = 2)
+)
+
+## Natural Spline
+
+#### Anseriformes:
+cb_anseri_ns <- crossbasis(
+    x = as.matrix(case_crossover_df_56lag[, paste0("anseriformes_Lag", 0:56)]),
+    lag = c(0, 56),
+    argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 6)
+  )
+ 
+#### Predator:
+cb_predators_ns <- crossbasis(
+x = as.matrix(case_crossover_df_56lag[, paste0("predators_Lag", 0:56)]),
+  lag = c(0, 56),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 6)
+)
+
+
+```
+
+
+# Fit Models
+
+```{r, fit models}
+
+## Adjusted Models
+model_8lag_poly <- clogit(
+  outbreak_binary ~ 
+    cb_anseri + cb_predators + cb_soil_moisture + cb_temperature +
+    cb_precipitation + cb_wind_speed + cb_total_bird_abundance +
+    strata(stratum_id),
+  method = "efron",
+  data = case_crossover_df_56lag
+)
+
+model_8lag_ns <- clogit(
+  outbreak_binary ~ 
+    cb_anseri_ns + cb_predators_ns + cb_soil_moisture + cb_temperature +
+    cb_precipitation + cb_wind_speed + cb_total_bird_abundance +
+    strata(stratum_id),
+  method = "efron",
+  data = case_crossover_df_56lag
+)
+
+AIC(model_8lag_poly, model_8lag_ns)
+
+## NS has improved fit, slightly 
+
+## Crude Models
+
+model_8lag_crude_poly <- clogit(
+  outbreak_binary ~ 
+    cb_anseri + cb_predators + 
+    strata(stratum_id),
+  method = "efron",
+  data = case_crossover_df_56lag
+)
+
+model_8lag_crude_ns <- clogit(
+  outbreak_binary ~ 
+    cb_anseri_ns + cb_predators_ns + 
+    strata(stratum_id),
+  method = "efron",
+  data = case_crossover_df_56lag
+)
+
+AIC(model_8lag_crude_poly, model_8lag_crude_ns)
+
+## Polynomial wins
+```
+
+
+
+
+## Report Results of the sensitivity analysis on stratification of total bird abundance by predators and anseriforms
+
+```{r, crosspred objects}
+
+# --- Crude model
+cp_anseri_crude    <- crosspred(cb_anseri,    model_8lag_crude_poly,    cen = 0, at = 0.5, cumul = TRUE)
+cp_predator_crude  <- crosspred(cb_predators, model_8lag_crude_poly,    cen = 0, at = 0.5, cumul = TRUE)
+
+cp_slice_anseri_crude    <- crosspred(cb_anseri,    model_8lag_crude_poly,    cen = 0, at = 0.5)
+cp_slice_predator_crude  <- crosspred(cb_predators, model_8lag_crude_poly,    cen = 0, at = 0.5)
+
+# --- Adjusted model
+cp_anseri_adj      <- crosspred(cb_anseri,    model_8lag_crude_poly, cen = 0, at = 0.5, cumul = TRUE)
+cp_predator_adj    <- crosspred(cb_predators, model_8lag_crude_poly, cen = 0, at = 0.5, cumul = TRUE)
+
+cp_slice_anseri_adj    <- crosspred(cb_anseri,    model_8lag_crude_poly, cen = 0, at = 0.5)
+cp_slice_predator_adj  <- crosspred(cb_predators, model_8lag_crude_poly, cen = 0, at = 0.5)
+
+
+```
+
+```{r, cumulative OR summary table}
+# -- Cumulative OR Summary Table --
+
+cumulative_summary <- tibble(
+  Predictor = c("Anseriformes (Crude)", "Predators (Crude)",
+                "Anseriformes (Adjusted)", "Predators (Adjusted)"),
+  OR = c(
+    cp_anseri_crude$allRRfit["0.5"],
+    cp_predator_crude$allRRfit["0.5"],
+    cp_anseri_adj$allRRfit["0.5"],
+    cp_predator_adj$allRRfit["0.5"]
+  ),
+  CI_low = c(
+    cp_anseri_crude$allRRlow["0.5"],
+    cp_predator_crude$allRRlow["0.5"],
+    cp_anseri_adj$allRRlow["0.5"],
+    cp_predator_adj$allRRlow["0.5"]
+  ),
+  CI_high = c(
+    cp_anseri_crude$allRRhigh["0.5"],
+    cp_predator_crude$allRRhigh["0.5"],
+    cp_anseri_adj$allRRhigh["0.5"],
+    cp_predator_adj$allRRhigh["0.5"]
+  )
+) %>%
+  mutate(`OR (95% CI)` = sprintf("%.2f (%.2f, %.2f)", OR, CI_low, CI_high)) %>%
+  select(Predictor, `OR (95% CI)`) %>%
+  gt() %>%
+  tab_header(
+    title = md("**Case-Crossover Models (8-lag): Cumulative Odds Ratios**"),
+    subtitle = "Per 0.5 SD Increase (Crude vs Adjusted)"
+  ) %>%
+  cols_label(`OR (95% CI)` = "Odds Ratio (95% Confidence Interval)") %>%
+  tab_options(
+    table.font.size = 14,
+    heading.title.font.size = 16,
+    heading.subtitle.font.size = 14,
+    data_row.padding = px(6)
+  )
+
+cumulative_summary
+
+```
+
+```{r, cumlative and slices plots}
+
+# -- Cumulative and Slices Plots (Crude + Adjusted) --
+
+plot_cumulative <- function(cp, title) {
+  plot(cp, type = "cumulative", var = 0.5, ci = "area",
+       col = "black", ci.arg = list(col = rgb(0,0,0,0.1), border = NA),
+       lwd = 1.7, main = title, xlab = "", ylab = "", las = 1)
+  abline(h = 1, lty = 2, col = "gray40", lwd = 1)
+}
+
+plot_slices <- function(cp, title) {
+  plot(cp, type = "slices", var = 0.5, ci = "area",
+       col = "black", ci.arg = list(col = rgb(0,0,0,0.1), border = NA),
+       lwd = 1.3, main = title, xlab = "", ylab = "", las = 1)
+  abline(h = 1, lty = 2, col = "gray40", lwd = 1)
+}
+
+# ----------------------------
+# Save Cumulative Plot
+# ----------------------------
+png(file.path(figures_folder, "figure_cumulative_ORs_anseri_predators.png"),
+    width = 9, height = 6, units = "in", res = 300)
+
+par(
+  mfrow = c(2, 2),
+  mar = c(4.2, 4.2, 2.5, 1),
+  oma = c(3, 4, 0, 1),   
+  cex.main = 1.2,
+  cex.lab = 1.2,
+  cex.axis = 1.1,
+  tcl = -0.3, mgp = c(2.5, 0.7, 0)
+)
+
+plot_cumulative(cp_anseri_crude,   "Anseriformes (Crude)")
+plot_cumulative(cp_predator_crude, "Predators (Crude)")
+plot_cumulative(cp_anseri_adj,     "Anseriformes (Adjusted)")
+plot_cumulative(cp_predator_adj,   "Predators (Adjusted)")
+
+mtext("Lag (days)", side = 1, outer = TRUE, line = 0, cex = 1.2)
+mtext("Odds Ratio (95% CI)", side = 2, outer = TRUE, line = 0, cex = 1.2)
+
+dev.off()
+
+# ----------------------------
+# Save Slices Plot
+# ----------------------------
+png(file.path(figures_folder, "figure_slice_ORs_anseri_predators.png"),
+    width = 9, height = 6, units = "in", res = 300)
+
+par(
+  mfrow = c(2, 2),
+  mar = c(4.2, 4.2, 2.5, 1),
+  oma = c(3, 4, 0, 1),   
+  cex.main = 1.2,
+  cex.lab = 1.2,
+  cex.axis = 1.1,
+  tcl = -0.3, mgp = c(2.5, 0.7, 0)
+)
+
+plot_slices(cp_slice_anseri_crude,   "Anseriformes (Crude)")
+plot_slices(cp_slice_predator_crude, "Predators (Crude)")
+plot_slices(cp_slice_anseri_adj,     "Anseriformes (Adjusted)")
+plot_slices(cp_slice_predator_adj,   "Predators (Adjusted)")
+
+mtext("Lag (days)", side = 1, outer = TRUE, line = 0, cex = 1.2)
+mtext("Odds Ratio (95% CI)", side = 2, outer = TRUE, line = 0, cex = 1.2)
+
+dev.off()
+
+
+```
+
+## Just the unadjusted plots now
+
+```{r, unadjusted plots}
+
+plot_cumulative <- function(cp, title, y_min = 0, y_max = 7) {
+  plot(cp, type = "cumulative", var = 0.5, ci = "area",
+       col = "black", ci.arg = list(col = rgb(0,0,0,0.1), border = NA),
+       lwd = 1.7, main = title, xlab = "", ylab = "", las = 1,
+       ylim = c(y_min, y_max), yaxt = "n")
+  axis(2, at = seq(y_min, y_max, by = 1), las = 1)
+  abline(h = 1, lty = 2, col = "gray40", lwd = 1)
+}
+
+plot_slices <- function(cp, title, y_min = 0, y_max = 7) {
+  plot(cp, type = "slices", var = 0.5, ci = "area",
+       col = "black", ci.arg = list(col = rgb(0,0,0,0.1), border = NA),
+       lwd = 1.3, main = title, xlab = "", ylab = "", las = 1,
+       ylim = c(y_min, y_max), yaxt = "n")
+  axis(2, at = seq(y_min, y_max, by = 1), las = 1)
+  abline(h = 1, lty = 2, col = "gray40", lwd = 1)
+}
+
+
+png(file.path(figures_folder, "figure_unadjusted_slice_cumulative_anseri_predators.png"),
+    width = 10, height = 8, units = "in", res = 300)
+
+par(
+  mfrow = c(2, 2),            # 2 rows (Anseriformes, Predators) x 2 cols (Slice, Cumulative)
+  mar = c(4.2, 4.2, 2.5, 1),
+  oma = c(3, 4, 0, 1),
+  cex.main = 1.2,
+  cex.lab = 1.2,
+  cex.axis = 1.1,
+  tcl = -0.3, mgp = c(2.5, 0.7, 0)
+)
+
+# Row 1: Anseriformes (UNADJUSTED)
+plot_slices(   cp_slice_anseri_crude,   "Anseriformes — Lag Specific")
+plot_cumulative(cp_anseri_crude,        "Anseriformes — Cumulative")
+
+# Row 2: Predators (UNADJUSTED)
+plot_slices(   cp_slice_predator_crude, "Predators — Lag-Specific")
+plot_cumulative(cp_predator_crude,      "Predators — Cumulative")
+
+mtext("Lag (days)", side = 1, outer = TRUE, line = 0, cex = 1.2)
+mtext("Odds Ratio (95% CI)", side = 2, outer = TRUE, line = 0, cex = 1.2)
+
+dev.off()
+
+```
+
+```{r, lag specific odds ratio table}
+
+# -- Lag-Specific Odds Ratio Table (0–8 weeks) --
+
+extract_lag_ORs_wide <- function(cp_obj, varname, varval = "0.5", lags = 0:8) {
+  lag_labels <- paste0("lag", lags)
+  or   <- cp_obj$matRRfit[varval, lag_labels]
+  low  <- cp_obj$matRRlow[varval, lag_labels]
+  high <- cp_obj$matRRhigh[varval, lag_labels]
+  tibble(
+    Predictor = varname,
+    !!!setNames(as.list(or),   paste0("OR_Lag", lags)),
+    !!!setNames(as.list(low),  paste0("Low_Lag", lags)),
+    !!!setNames(as.list(high), paste0("High_Lag", lags)),
+    !!!setNames(as.list(sprintf("%.2f (%.2f, %.2f)", or, low, high)), paste0("Lag ", lags))
+  )
+}
+
+# Combine Anseriformes + Predators (Crude + Adjusted)
+table_lag_ORs <- bind_rows(
+  extract_lag_ORs_wide(cp_slice_anseri_crude,   "Anseriformes (Crude)"),
+  extract_lag_ORs_wide(cp_slice_predator_crude, "Predators (Crude)"),
+  extract_lag_ORs_wide(cp_slice_anseri_adj,     "Anseriformes (Adjusted)"),
+  extract_lag_ORs_wide(cp_slice_predator_adj,   "Predators (Adjusted)")
+)
+
+# Identify significant lags (CI entirely above/below 1)
+lags <- 0:8
+highlight_matrix <- sapply(lags, function(i) {
+  table_lag_ORs[[paste0("Low_Lag", i)]] > 1 | table_lag_ORs[[paste0("High_Lag", i)]] < 1
+})
+colnames(highlight_matrix) <- paste0("Lag ", lags)
+
+# Build flextable for export
+ft <- table_lag_ORs %>%
+  select(Predictor, paste0("Lag ", lags)) %>%
+  flextable() %>%
+  set_header_labels(Predictor = "Predictor") %>%
+  add_header_row(values = c("Predictor", "Odds Ratio (95% CI)"),
+                 colwidths = c(1, length(lags))) %>%
+  fontsize(size = 11, part = "all") %>%
+  autofit() %>%
+  align(align = "center", part = "all") %>%
+  theme_booktabs()
+
+for (i in lags) {
+  ft <- bold(ft, i = which(highlight_matrix[, paste0("Lag ", i)]),
+             j = paste0("Lag ", i))
+}
+
+# Export Word table
+doc <- read_docx() %>%
+  body_add_flextable(ft) %>%
+  body_add_par(
+    "Table: Lag-Specific Odds Ratios for Anseriformes and Predator Bird Abundance in 8-week Case-Crossover Models (2022). Crude models include only the respective abundance; adjusted models include environmental covariates. Odds ratios are per 0.5 SD increase; statistically significant values are shown in bold.",
+    style = "Normal"
+  )
+
+print(doc, target = file.path(tables_folder,
+  "Table_LagSpecific_OR_Anseri_Predators_8lag.docx"))
+
+ft
+
+```
+
+## We still get very 

@@ -1,0 +1,462 @@
+---
+title: "Join Data Sources (Daily Resolution)"
+author: "Fintan Mooney"
+date: "2026-05-12"
+output: html_document
+---
+
+# NOTE: This script requires confidential HPAI spillover point-location data
+# (not publicly available). The processed grid-cell level output is provided
+# in data/ and downstream analyses can be run without this file.
+
+# Joins USDA spillover events (by date_confirmed) to 10x10km grid cells covering
+# Minnesota at DAILY resolution for Nov 15 2021 – Dec 31 2022!
+# Brings in daily ERA5-Land met, linearly-interpolated daily eBird abundance,
+# MPCA feedlots, and USGS landcover.
+# Produces the base zone × date panel used to build the daily timeseries and
+# time-stratified case-crossover datasets.
+
+# Major revision (May 2026): all temporal operations moved from weekly to daily
+# to address GeoHealth reviewer comments. Wild bird abundance is linearly
+# interpolated within each zone between weekly eBird Status & Trends midpoints
+# to produce a smooth daily series. The Nov–Dec 2021 leading window is required
+# so that DLNM lag 0–28 windows for early-2022 cases stay fully observed.
+
+```{r 0a-initiate, include=FALSE}
+# 0a. Declare root directory, folder locations, and load packages + helpers
+rm(list = ls())
+project.folder = paste0(print(here::here()), '/')
+source(paste0(project.folder, 'create_folder_structure.R'))
+source(paste0(functions.folder, 'script_initiate.R'))
+```
+
+## 1. Load 10 km fishnet geometry
+
+```{r 1a-load-fishnet}
+# 1a. Single feature per zone — geometry only (one-to-many join key)
+fishnet_geom <- st_read(paste0(spatial_data, "/fishnet_10km_timeseries.gpkg")) %>%
+  distinct(zone_id, geom)
+```
+
+## 2. Build the zone × date scaffold (Nov 15 2021 – Dec 31 2022)
+
+```{r 2a-build-scaffold}
+# 2a. Full crossing of zones × days. The Nov–Dec 2021 leading window is
+#     required so the DLNM lag 0–28 windows for early-2022 cases stay fully
+#     observed (see 02_code/2a_data_prep/a_00_era5_land_gee.js (or a_00_era5_land_rgee.R)).
+study_start <- as.Date("2021-11-15")
+study_end   <- as.Date("2022-12-31")
+
+date_seq <- seq(study_start, study_end, by = "day")
+
+zone_ids <- fishnet_geom %>% st_drop_geometry() %>% pull(zone_id) %>% unique()
+
+# Full crossing — one row per zone per day
+daily_fishnet <- expand.grid(
+  zone_id = zone_ids,
+  date    = date_seq,
+  stringsAsFactors = FALSE
+) %>%
+  mutate(
+    year       = lubridate::year(date),
+    month      = lubridate::month(date),
+    iso_week   = lubridate::isoweek(date),
+    iso_year   = lubridate::isoyear(date),
+    dow        = lubridate::wday(date, label = TRUE, week_start = 1),
+    doy        = lubridate::yday(date)
+  ) %>%
+  as.data.table()
+
+setkey(daily_fishnet, zone_id, date)
+
+cat("Daily fishnet scaffold:\n")
+cat("  Zones:", length(zone_ids), "\n")
+cat("  Days :", length(date_seq), "\n")
+cat("  Rows :", nrow(daily_fishnet), "\n")
+
+```
+
+## 3. Load and join spillover events (by date_confirmed)
+
+```{r 3a-spillover-data}
+
+spillover_file <- file.path(spillover_data, "hpai-outbreaks-clean-placeholder-032124.csv")
+if (!file.exists(spillover_file)) {
+  stop("This script needs the confidential spillover data (hpai-outbreaks-clean-placeholder-032124.csv). See 01_data/1b_outcome_data/README.md for how to get it.")
+}
+spillover_raw <- read_csv(spillover_file)
+
+# Filter to MN 2022 (case window — leading 2021 days are zero-outbreak by design)
+spillover_mn <- spillover_raw %>%
+  filter(state == "MN",
+         dplyr::between(date_confirmed, as.Date("2022-01-01"), as.Date("2022-12-31")))
+
+# If date_observed / date_sampled exist, attach for downstream sensitivity analysis;
+# date_confirmed remains the primary stratum date for consistency with the submitted
+# manuscript and prior USDA APHIS-based HPAI literature.
+date_cols_present <- intersect(c("date_observed", "date_sampled", "date_analyzed"),
+                               names(spillover_mn))
+if (length(date_cols_present) > 0) {
+  cat("Earlier-date columns present (kept for sensitivity):", paste(date_cols_present, collapse = ", "), "\n")
+}
+
+# Convert to sf and join to fishnet
+spillover_sf <- spillover_mn %>%
+  st_as_sf(coords = c("lon", "lat"), crs = 4326) %>%
+  st_transform(crs = st_crs(fishnet_geom))
+
+outbreaks_in_cells <- st_join(spillover_sf, fishnet_geom, join = st_within) %>%
+  st_drop_geometry()
+
+# Aggregate by zone × date
+outbreak_daily <- outbreaks_in_cells %>%
+  group_by(zone_id, date = date_confirmed) %>%
+  summarise(
+    outbreak_count = n(),
+    outbreak_id    = paste(outbreak_id, collapse = ", "),
+    .groups = "drop"
+  ) %>%
+  mutate(outbreak_binary = 1L) %>%
+  as.data.table()
+
+# Zone-level summaries (time-invariant tags)
+any_outbreak_zones <- outbreak_daily[, .(any_outbreak = 1L), by = zone_id]
+outbreak_dates_by_zone <- outbreak_daily[
+  , .(outbreak_date = paste(sort(unique(as.character(date))), collapse = ", ")),
+  by = zone_id
+]
+
+# Merge into daily scaffold
+setkey(outbreak_daily, zone_id, date)
+daily_fishnet <- merge(daily_fishnet, outbreak_daily,
+                       by = c("zone_id", "date"), all.x = TRUE)
+daily_fishnet <- merge(daily_fishnet, any_outbreak_zones, by = "zone_id", all.x = TRUE)
+daily_fishnet <- merge(daily_fishnet, outbreak_dates_by_zone, by = "zone_id", all.x = TRUE)
+
+daily_fishnet[, `:=`(
+  outbreak_count  = fcoalesce(outbreak_count, 0L),
+  outbreak_binary = fcoalesce(outbreak_binary, 0L),
+  any_outbreak    = fcoalesce(any_outbreak, 0L),
+  outbreak_id     = fcoalesce(outbreak_id, NA_character_),
+  outbreak_date   = fcoalesce(outbreak_date, NA_character_)
+)]
+
+cat("\nSpillover join:\n")
+cat("  Events in MN 2022:", nrow(spillover_mn), "\n")
+cat("  Case zone-DAYS   :", uniqueN(outbreak_daily, by = c("zone_id", "date")), "\n")
+cat("  Unique case zones:", uniqueN(outbreak_daily, by = "zone_id"), "\n")
+
+```
+
+## 4. Load DAILY ERA5-Land meteorological data
+
+```{r 4a-load-met-daily}
+
+# 2022 daily + Nov–Dec 2021 trailing daily (produced by 02_code/2a_data_prep/a_00_era5_land_gee.js (or a_00_era5_land_rgee.R))
+met_files <- c(
+  file.path(env_data, "mn_daily_era5land_2021_novdec.csv"),
+  file.path(env_data, "mn_daily_era5land_2022.csv")
+)
+missing <- met_files[!file.exists(met_files)]
+if (length(missing) > 0) {
+  stop("Missing daily met file(s):\n  ",
+       paste(missing, collapse = "\n  "),
+       "\nRun 02_code/2a_data_prep/a_00_era5_land_gee.js (or a_00_era5_land_rgee.R) first.")
+}
+
+met_daily <- rbindlist(lapply(met_files, fread))
+
+# Parse the date column (GEE exports as YYYYMMdd integers)
+met_daily[, date := as.Date(as.character(date), format = "%Y%m%d")]
+
+# Snow density: ERA5-Land returns ~99.9999 when no snow is present (default fill);
+# this is a known artefact. Set to 0 for cells with no snow.
+met_daily[, snow_density := fifelse(snow_density <= 100, 0, snow_density)]
+
+# Rename runoff_sum → runoff for downstream code consistency
+if ("runoff_sum" %in% names(met_daily)) setnames(met_daily, "runoff_sum", "runoff")
+
+# Met columns to retain
+met_cols <- c("temperature", "dewpoint", "relative_humidity", "wind_speed",
+              "soil_moisture", "snow_density", "precipitation", "runoff",
+              "evapotranspiration", "leaf_area_index", "shortwave_radiation",
+              "longwave_radiation", "surface_pressure")
+met_daily <- met_daily[, c("zone_id", "date", ..met_cols)]
+setkey(met_daily, zone_id, date)
+
+daily_fishnet <- merge(daily_fishnet, met_daily, by = c("zone_id", "date"), all.x = TRUE)
+
+cat("\nMet join:\n")
+cat("  Rows with any NA met var:",
+    sum(daily_fishnet[, rowSums(is.na(.SD)), .SDcols = met_cols] > 0), "\n")
+
+```
+
+## 5. Load weekly eBird and linearly interpolate to daily within each zone
+
+```{r 5a-bird-abundance-interpolation}
+
+# eBird Status & Trends weekly outbreak-level estimates
+bird_outbreak <- read_csv(file.path(bird_abundance_data,
+                                    "mn-outbreak-weekly-bird-estimate-2022-012926.csv"))
+
+# Species groupings used throughout the manuscript
+anseriformes <- c(
+  "mallar3", "cangoo", "wooduc", "rinduc", "comgol", "norsho",
+  "buffle", "lessca", "rebmer", "gnwtea", "gadwal", "ambduc",
+  "rudduc", "rethaw", "truswa", "commer"
+)
+predators <- c("buwtea", "grhowl", "amwpel", "baleag", "brdowl")
+
+# Pivot wide and sum within group per (outbreak_id, mmwr_week)
+bird_wide <- bird_outbreak %>%
+  pivot_wider(
+    id_cols = c(outbreak_id, mmwr_week, week, week_outbreak),
+    names_from = species_name,
+    values_from = c(abd_avg, abd_sum),
+    names_glue = "{.value}_{species_name}"
+  ) %>%
+  mutate(
+    total_bird_abundance = rowSums(across(starts_with("abd_avg_") &
+                                          !matches("anseriformes|predators")), na.rm = TRUE),
+    anseriformes = rowSums(across(all_of(paste0("abd_avg_", anseriformes))), na.rm = TRUE),
+    predators    = rowSums(across(all_of(paste0("abd_avg_", predators))),    na.rm = TRUE)
+  ) %>%
+  select(outbreak_id, mmwr_week, total_bird_abundance, anseriformes, predators)
+
+# Map outbreak_id → zone_id (so we can collapse multi-outbreak zones to one zone-week)
+zone_outbreak_map <- outbreaks_in_cells %>%
+  select(outbreak_id, zone_id) %>%
+  distinct()
+
+bird_zone_week <- bird_wide %>%
+  inner_join(zone_outbreak_map, by = "outbreak_id") %>%
+  group_by(zone_id, mmwr_week) %>%
+  summarise(
+    total_bird_abundance = mean(total_bird_abundance, na.rm = TRUE),
+    anseriformes         = mean(anseriformes,         na.rm = TRUE),
+    predators            = mean(predators,            na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  as.data.table()
+
+# Negative-control zones (feedlot zones with no outbreak) — feedlot-level weekly bird series
+bird_neg_path <- file.path(bird_abundance_data, "all-mn-feedlot-species-abundance-070125.csv")
+bird_neg_raw  <- fread(bird_neg_path)
+
+week_cols <- setdiff(names(bird_neg_raw), c("zone_id", "species"))
+bird_neg_long <- melt(
+  bird_neg_raw,
+  id.vars = c("zone_id", "species"),
+  measure.vars = week_cols,
+  variable.name = "mmwr_week",
+  value.name = "abundance"
+)
+bird_neg_long[, mmwr_week := as.integer(gsub("week_", "", mmwr_week))]
+bird_neg_long[, group := fifelse(species %in% anseriformes, "anseriformes",
+                          fifelse(species %in% predators, "predators", "other"))]
+
+# Average across feedlot pixels within zone × week × species, then sum across species in group
+bird_neg_zone_week <- bird_neg_long[
+  , .(abundance = mean(abundance, na.rm = TRUE)),
+  by = .(zone_id, mmwr_week, species, group)
+]
+bird_neg_group <- bird_neg_zone_week[
+  , .(value = sum(abundance, na.rm = TRUE)),
+  by = .(zone_id, mmwr_week, group)
+]
+bird_neg_wide <- dcast(bird_neg_group, zone_id + mmwr_week ~ group,
+                      value.var = "value", fill = 0)
+if (!"anseriformes" %in% names(bird_neg_wide)) bird_neg_wide[, anseriformes := 0]
+if (!"predators"    %in% names(bird_neg_wide)) bird_neg_wide[, predators    := 0]
+
+bird_neg_total <- bird_neg_zone_week[
+  , .(total_bird_abundance = sum(abundance, na.rm = TRUE)),
+  by = .(zone_id, mmwr_week)
+]
+bird_neg_wide <- merge(bird_neg_wide, bird_neg_total, by = c("zone_id", "mmwr_week"), all = TRUE)
+bird_neg_wide[is.na(total_bird_abundance), total_bird_abundance := 0]
+bird_neg_wide[is.na(anseriformes), anseriformes := 0]
+bird_neg_wide[is.na(predators),    predators    := 0]
+
+# Combine case-zone weekly bird and negative-control weekly bird into one zone-week series.
+# Case zones get their outbreak-derived weekly values; negative-control zones get feedlot-derived.
+case_zone_ids <- unique(bird_zone_week$zone_id)
+bird_zone_week_all <- rbind(
+  bird_zone_week[, .(zone_id, mmwr_week, total_bird_abundance, anseriformes, predators)],
+  bird_neg_wide[!zone_id %in% case_zone_ids,
+                .(zone_id, mmwr_week, total_bird_abundance, anseriformes, predators)]
+)
+setkey(bird_zone_week_all, zone_id, mmwr_week)
+
+# Anchor each weekly value at the mid-point of its MMWR week within 2022
+# (MMWR week 1 of 2022 starts Sun 2022-01-02; midpoint = +3 days)
+mmwr_anchor <- function(week, year = 2022) {
+  jan1 <- as.Date(paste0(year, "-01-01"))
+  wday1 <- as.integer(format(jan1, "%w"))  # 0 = Sun
+  # MMWR week 1 = week containing Jan 4; week starts on Sunday
+  mmwr_start <- jan1 - wday1
+  mmwr_start + 7 * (week - 1) + 3
+}
+
+bird_zone_week_all[, anchor_date := mmwr_anchor(mmwr_week, 2022)]
+
+# Linear interpolation within each zone: anchor weekly values at midpoint, then
+# interpolate to daily across the full study window. Use approx() with rule = 2
+# so days before the first or after the last anchor receive the nearest weekly
+# value (clamped endpoints). This produces a smooth daily series that exactly
+# passes through the weekly midpoints.
+interpolate_bird_daily <- function(anchors_df, target_dates) {
+  vars <- c("total_bird_abundance", "anseriformes", "predators")
+  out <- data.frame(date = target_dates)
+  for (v in vars) {
+    if (nrow(anchors_df) >= 2) {
+      f <- stats::approxfun(anchors_df$anchor_date, anchors_df[[v]],
+                            method = "linear", rule = 2)
+      out[[v]] <- f(target_dates)
+    } else if (nrow(anchors_df) == 1) {
+      out[[v]] <- rep(anchors_df[[v]][1], length(target_dates))
+    } else {
+      out[[v]] <- NA_real_
+    }
+  }
+  out
+}
+
+bird_daily_list <- lapply(split(bird_zone_week_all, bird_zone_week_all$zone_id), function(g) {
+  anchors <- as.data.frame(g[order(anchor_date)])
+  daily   <- interpolate_bird_daily(anchors, date_seq)
+  daily$zone_id <- g$zone_id[1]
+  daily
+})
+bird_daily <- rbindlist(bird_daily_list)
+setcolorder(bird_daily, c("zone_id", "date", "total_bird_abundance",
+                          "anseriformes", "predators"))
+setkey(bird_daily, zone_id, date)
+
+cat("\nBird interpolation:\n")
+cat("  Zones with weekly bird data:", uniqueN(bird_zone_week_all, by = "zone_id"), "\n")
+cat("  Daily bird rows produced  :", nrow(bird_daily), "\n")
+
+# Merge into daily fishnet
+daily_fishnet <- merge(daily_fishnet, bird_daily, by = c("zone_id", "date"), all.x = TRUE)
+
+# Zones with no eBird coverage at all → zero by definition
+daily_fishnet[is.na(total_bird_abundance), total_bird_abundance := 0]
+daily_fishnet[is.na(anseriformes),         anseriformes         := 0]
+daily_fishnet[is.na(predators),            predators            := 0]
+
+# Tag zones with consistently zero abundance (for diagnostic mapping)
+zone_zero_summary <- daily_fishnet[, .(total_abundance = sum(total_bird_abundance, na.rm = TRUE)),
+                                   by = zone_id]
+zone_ids_all_zero <- zone_zero_summary[total_abundance == 0, zone_id]
+daily_fishnet[, bird_zero := fifelse(zone_id %in% zone_ids_all_zero, "No Birds", "Has Birds")]
+
+```
+
+## 6. Feedlot covariates (time-invariant)
+
+```{r 6a-feedlots}
+
+feedlots <- st_read(file.path(feedlot_data, "feedlots.shp")) %>%
+  st_transform(crs = st_crs(fishnet_geom))
+
+feedlots_clean <- feedlots %>%
+  mutate(
+    cafo_flag  = ifelse(!is.na(cafo_flag) & cafo_flag != "N", 1L, 0L),
+    near_river = ifelse(!is.na(river_stre) & river_stre != "N", 1L, 0L)
+  )
+
+feedlots_in_cells <- st_join(feedlots_clean, fishnet_geom, join = st_within) %>%
+  st_drop_geometry()
+
+feedlot_summary <- feedlots_in_cells %>%
+  group_by(zone_id) %>%
+  summarise(
+    feedlot_count = n(),
+    au_count      = sum(au_count, na.rm = TRUE),
+    birds_au      = sum(birds_au, na.rm = TRUE),
+    cafo_flag     = max(cafo_flag, na.rm = TRUE),
+    near_river    = max(near_river, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  as.data.table()
+
+daily_fishnet <- merge(daily_fishnet, feedlot_summary, by = "zone_id", all.x = TRUE)
+daily_fishnet[, `:=`(
+  feedlot_count = fcoalesce(feedlot_count, 0L),
+  au_count      = fcoalesce(au_count,      0),
+  birds_au      = fcoalesce(birds_au,      0),
+  cafo_flag     = fcoalesce(cafo_flag,     0L),
+  near_river    = fcoalesce(near_river,    0L)
+)]
+
+```
+
+## 7. Land cover (time-invariant)
+
+```{r 7a-landcover}
+
+land_cover <- st_read(file.path(spatial_data, "fishnet_landcover.gpkg"))
+
+land_cover_clean <- land_cover %>%
+  st_drop_geometry() %>%
+  select(zone_id, land_cover_mode, land_cover_label, lat, lon)
+
+daily_fishnet <- merge(daily_fishnet, land_cover_clean, by = "zone_id", all.x = TRUE)
+
+# Re-level so coefficients are interpretable
+daily_fishnet[, land_cover_label := relevel(
+  factor(land_cover_label), ref = "Developed, Medium Intensity"
+)]
+
+daily_fishnet[, farm_possible := fifelse(
+  land_cover_label %in% c("Cultivated Crops", "Pasture/Hay", "Emergent Herbaceous Wetlands"),
+  1L, 0L
+)]
+
+```
+
+## 8. Sort + final NA check
+
+```{r 8a-final-checks}
+
+setkey(daily_fishnet, zone_id, date)
+
+na_summary <- daily_fishnet[, lapply(.SD, function(x) sum(is.na(x)))]
+cat("\nNA counts by column (non-zero only):\n")
+print(t(na_summary[, .SD, .SDcols = which(na_summary != 0)]))
+cat("\n(Expected NAs only for outbreak_id / outbreak_date on non-case days.)\n")
+
+```
+
+## 9. Export daily zone × date panel
+
+```{r 9a-export}
+
+saveRDS(daily_fishnet, file.path(objects_folder, "mn_fishnet_daily_processed.rds"))
+
+# Also write CSV for downstream non-R consumers (Python map script, etc.)
+fwrite(daily_fishnet, file.path(processed_data, "mn_fishnet_daily_processed.csv"))
+
+# Spatial export — single feature per zone with time-invariant covariates
+fishnet_spatial <- fishnet_geom %>%
+  left_join(
+    daily_fishnet[, .(any_outbreak = max(any_outbreak),
+                      feedlot_count = first(feedlot_count),
+                      bird_zero = first(bird_zero),
+                      land_cover_label = first(as.character(land_cover_label))),
+                  by = zone_id],
+    by = "zone_id"
+  )
+saveRDS(fishnet_spatial, file.path(objects_folder, "mn_fishnet_daily_processed_sf.rds"))
+st_write(fishnet_spatial, file.path(processed_data, "mn_fishnet_daily_processed.gpkg"),
+         delete_dsn = TRUE)
+
+cat("\nExports written:\n")
+cat("  ", file.path(objects_folder, "mn_fishnet_daily_processed.rds"), "\n")
+cat("  ", file.path(processed_data, "mn_fishnet_daily_processed.csv"), "\n")
+cat("  ", file.path(objects_folder, "mn_fishnet_daily_processed_sf.rds"), "\n")
+cat("  ", file.path(processed_data, "mn_fishnet_daily_processed.gpkg"), "\n")
+
+```

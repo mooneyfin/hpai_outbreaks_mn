@@ -1,0 +1,1787 @@
+---
+title: "Seasonal Stratification Sensitivity"
+author: "Fintan Mooney"
+date: "2025-10-07"
+output: html_document
+---
+# Sensitivity analysis stratifying the case-crossover model by season... testing whether HPAI outbreak risk factors differ across spring, summer, fall, and winter!
+
+```{r include=FALSE}
+rm(list=ls())
+project.folder = paste0(print(here::here()),'/')
+source(paste0(project.folder,'create_folder_structure.R'))
+source(paste0(functions.folder,'script_initiate.R'))
+```
+
+## Import casecrossover df
+
+```{r, import casecrossover df}
+
+case_crossover_df <- readRDS(file.path(objects_folder, "case_crossover_df.RDS"))
+
+```
+
+## Investigate distribution of outbreaks by season (month)
+
+```{r, investigate distribution of outbreaks by season}
+
+# Outbreak counts by month with adjusted seasonal vertical lines
+
+
+# Summarize total outbreaks per month
+outbreak_by_month <- case_crossover_df |>
+  dplyr::group_by(month) |>
+  dplyr::summarise(outbreaks = sum(outbreak_binary, na.rm = TRUE)) |>
+  # Ensure all 12 months are represented
+  dplyr::right_join(tibble(month = 1:12), by = "month") |>
+  dplyr::mutate(outbreaks = dplyr::coalesce(outbreaks, 0))
+
+# Define vertical line positions 
+season_markers <- data.frame(
+  month = c(3, 6, 9, 12) - 0.5,  # shift lines back by 0.5 month
+  season = c("Spring", "Summer", "Fall", "Winter")
+)
+
+# Build plot
+p_outbreaks_month <- ggplot(outbreak_by_month, aes(x = month, y = outbreaks)) +
+  # Bars
+  geom_col(fill = "grey50", color = "black", width = 0.8) +
+
+  # Numeric labels above bars
+  geom_text(aes(label = outbreaks),
+            vjust = -0.3, size = 3.3, fontface = "bold") +
+
+  # Red vertical dashed lines for seasons
+  geom_vline(
+    data = season_markers,
+    aes(xintercept = month),
+    color = "red3",
+    linetype = "dashed",
+    linewidth = 0.6
+  ) +
+
+  # Vertical rotated season labels
+  geom_text(
+    data = season_markers,
+    aes(x = month, y = max(outbreak_by_month$outbreaks) * 1.05, label = season),
+    color = "red4",
+    angle = 90,
+    vjust = 1.5,
+    hjust = 1,
+    size = 3.5,
+    fontface = "bold"
+  ) +
+
+  # Axes and labels
+  scale_x_continuous(
+    breaks = 1:12,
+    labels = month.abb,
+    expand = c(0, 0)
+  ) +
+  scale_y_continuous(
+    expand = expansion(mult = c(0, 0.1))
+  ) +
+  labs(
+    title = "Monthly Distribution of HPAI Outbreaks",
+    x = "Month",
+    y = "Number of Outbreaks"
+  ) +
+  theme_bw(base_size = 12) +
+  theme(
+    panel.grid = element_blank(),
+    plot.title = element_text(face = "bold", size = 13),
+    axis.title = element_text(size = 11),
+    axis.text.x = element_text(size = 9)
+  )
+
+# Save
+
+# PNG version
+ggsave(
+  filename = file.path(figures_folder, "figure_outbreaks_by_month.png"),
+  plot = p_outbreaks_month,
+  width = 8, height = 5, dpi = 600
+)
+
+
+# Manuscript version - by week with calendar season markers
+# Daily case-crossover df → derive ISO week from `date` and aggregate.
+case_crossover_df <- case_crossover_df %>%
+  mutate(week = lubridate::isoweek(date))
+outbreak_by_week <- case_crossover_df |>
+  dplyr::group_by(week) |>
+  dplyr::summarise(outbreaks = sum(outbreak_binary, na.rm = TRUE)) |>
+  dplyr::right_join(tibble(week = 1:52), by = "week") |>
+  dplyr::mutate(outbreaks = dplyr::coalesce(outbreaks, 0))
+
+# Define vertical line positions for calendar seasons (week ~9, ~22, ~35, ~48)
+# March 1 ≈ week 9, June 1 ≈ week 22, Sept 1 ≈ week 35, Dec 1 ≈ week 48
+season_markers <- data.frame(
+  week = c(9, 22, 35, 48),
+  season = c("Spring", "Summer", "Fall", "Winter")
+)
+
+# Build plot
+p_outbreaks_week <- ggplot(outbreak_by_week, aes(x = week, y = outbreaks)) +
+  # Bars
+  geom_col(fill = "grey50", color = "black", width = 0.8) +
+  # Red vertical dashed lines for seasons
+  geom_vline(
+    data = season_markers,
+    aes(xintercept = week),
+    color = "red3",
+    linetype = "dashed",
+    linewidth = 0.6
+  ) +
+  # Vertical rotated season labels
+  geom_text(
+    data = season_markers,
+    aes(x = week, y = max(outbreak_by_week$outbreaks) * 1.05, label = season),
+    color = "red4",
+    angle = 90,
+    vjust = 1.5,
+    hjust = 1,
+    size = 3.5,
+    fontface = "bold"
+  ) +
+  # Axes and labels
+  scale_x_continuous(
+    breaks = seq(2, 52, by = 2),
+    expand = c(0, 0)
+  ) +
+  scale_y_continuous(
+    breaks = seq(0, max(outbreak_by_week$outbreaks) + 2, by = 2),
+    expand = expansion(mult = c(0, 0.1))
+  ) +
+  labs(
+    title = NULL,
+    x = "Week",
+    y = "Number of Spillover Events"
+  ) +
+  theme_bw(base_size = 12) +
+  theme(
+    panel.grid = element_blank(),
+    axis.title = element_text(size = 11),
+    axis.text.x = element_text(size = 9)
+  )
+
+p_outbreaks_week
+
+# Save
+ggsave(
+  filename = file.path(figures_folder, "figure_outbreaks_by_week_manuscript.png"),
+  plot = p_outbreaks_week,
+  width = 10, height = 5, dpi = 600
+)
+```
+
+## Due to convergence issues (little number of outbreaks when stratifying by season), we will remove the winter and summer data
+
+## We can filter by astronomical or by calander month for season; we chose to filter to calander month in order to pick up the exact migratory periods of wild birds (the fall period would blend into summer if we used astronomical)
+
+```{r, create astronomical seasons}
+
+# Approximate week boundaries for astronomical seasons in 2022:
+# Spring: March 20 = ~week 12
+# Summer: June 21 = ~week 25
+# Fall: Sept 22 = ~week 39
+# Winter: Dec 21 = ~week 51
+
+# case_crossover_df <- case_crossover_df %>%
+#   mutate(
+#     season = case_when(
+#       week >= 12 & week < 25 ~ "Spring",
+#       week >= 25 & week < 39 ~ "Summer",
+#       week >= 39 & week < 51 ~ "Fall",
+#       TRUE ~ "Winter"
+#     ),
+# 
+#     spring_astro = as.integer(season == "Spring"),
+#     fall_astro = as.integer(season == "Fall"),
+#     spring_fall_astro = as.integer(season %in% c("Spring", "Fall"))
+#   )
+
+
+```
+
+# Outbreak counts by week with astronomical season markers
+```{r, astronomical distribution}
+# # Summarize total outbreaks per week
+# outbreak_by_week <- case_crossover_df |>
+#   dplyr::group_by(week) |>
+#   dplyr::summarise(outbreaks = sum(outbreak_binary, na.rm = TRUE)) |>
+#   # Ensure all 52 weeks are represented
+#   dplyr::right_join(tibble(week = 1:52), by = "week") |>
+#   dplyr::mutate(outbreaks = dplyr::coalesce(outbreaks, 0))
+# 
+# # Define vertical line positions for astronomical seasons
+# season_markers <- data.frame(
+#   week = c(12, 25, 39, 51),
+#   season = c("Spring", "Summer", "Fall", "Winter")
+# )
+# 
+# # Build plot
+# p_outbreaks_week <- ggplot(outbreak_by_week, aes(x = week, y = outbreaks)) +
+#   # Bars
+#   geom_col(fill = "grey50", color = "black", width = 0.8) +
+#   # Red vertical dashed lines for astronomical seasons
+#   geom_vline(
+#     data = season_markers,
+#     aes(xintercept = week),
+#     color = "red3",
+#     linetype = "dashed",
+#     linewidth = 0.6
+#   ) +
+#   # Vertical rotated season labels
+#   geom_text(
+#     data = season_markers,
+#     aes(x = week, y = max(outbreak_by_week$outbreaks) * 1.05, label = season),
+#     color = "red4",
+#     angle = 90,
+#     vjust = 1.5,
+#     hjust = 1,
+#     size = 3.5,
+#     fontface = "bold"
+#   ) +
+#   # Axes and labels
+#   scale_x_continuous(
+#     breaks = seq(2, 52, by = 2),
+#     expand = c(0, 0)
+#   ) +
+#   scale_y_continuous(
+#     breaks = seq(0, max(outbreak_by_week$outbreaks) + 2, by = 2),
+#     expand = expansion(mult = c(0, 0.1))
+#   ) +
+#   labs(
+#     title = NULL,
+#     x = "Week",
+#     y = "Number of Outbreaks"
+#   ) +
+#   theme_bw(base_size = 12) +
+#   theme(
+#     panel.grid = element_blank(),
+#     plot.title = element_text(face = "bold", size = 13),
+#     axis.title = element_text(size = 11),
+#     axis.text.x = element_text(size = 9)
+#   )
+# 
+# p_outbreaks_week
+# 
+# # Save
+# ggsave(
+#   filename = file.path(figures_folder, "figure_outbreaks_by_week_astro.png"),
+#   plot = p_outbreaks_week,
+#   width = 10, height = 5, dpi = 600
+# )
+```
+
+## Split the datasets
+
+```{r, split into fall and spring}
+
+# Check case counts per season
+case_crossover_df %>%
+  filter(outbreak_binary == 1) %>%
+  count(season)
+
+# case_spring <- case_crossover_df %>%
+#   filter(spring_astro == 1)
+# 
+# case_springfall <- case_crossover_df %>%
+#   filter(spring_fall_astro == 1)
+
+case_spring <- case_crossover_df %>%
+  filter(spring== 1)
+
+case_springfall <- case_crossover_df %>%
+  filter(spring_fall == 1)
+
+sum(case_spring$outbreak_binary)
+sum(case_springfall$outbreak_binary)
+
+# count cells by season
+
+case_crossover_df %>%
+count(season) %>%
+  print()
+```
+
+## Case-Crossover Models on dataframe stratfied to only spring and fall
+
+### Crossbasis 
+
+```{r, crossbasis spring fall}
+
+# Leaf Area Index: ns(df = 3), ns(df = 2)
+cb_springfall_leaf_area_index <- crossbasis(
+  x = as.matrix(case_springfall[, paste0("leaf_area_index_Lag", 0:28)]),
+  lag = c(0, 28),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 4)
+)
+
+# Precipitation: ns(df = 3), ns(df = 2)
+cb_springfall_precipitation <- crossbasis(
+  x = as.matrix(case_springfall[, paste0("precipitation_Lag", 0:28)]),
+  lag = c(0, 28),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 4)
+)
+
+# Relative Humidity: ns(df = 3), poly(degree = 2)
+cb_springfall_relative_humidity <- crossbasis(
+  x = as.matrix(case_springfall[, paste0("relative_humidity_Lag", 0:28)]),
+  lag = c(0, 28),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 4)
+)
+
+
+
+# Runoff: ns(df = 2), poly(degree = 2)
+cb_springfall_runoff <- crossbasis(
+  x = as.matrix(case_springfall[, paste0("runoff_Lag", 0:28)]),
+  lag = c(0, 28),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 4)
+)
+
+# Shortwave Radiation: ns(df = 3), poly(degree = 4)
+cb_springfall_shortwave_radiation <- crossbasis(
+  x = as.matrix(case_springfall[, paste0("shortwave_radiation_Lag", 0:28)]),
+  lag = c(0, 28),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 4)
+)
+
+# Longwave Radiation: ns(df = 3), ns(df = 2)
+cb_springfall_longwave_radiation <- crossbasis(
+  x = as.matrix(case_springfall[, paste0("shortwave_radiation_Lag", 0:28)]),
+  lag = c(0, 28),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 4)
+)
+
+# Snow Density: ns(df = 2), poly(degree = 3)
+cb_springfall_snow_density <- crossbasis(
+  x = as.matrix(case_springfall[, paste0("snow_density_Lag", 0:28)]),
+  lag = c(0, 28),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 4)
+)
+
+# Soil Moisture: linear exposure, ns(df = 2)
+cb_springfall_soil_moisture <- crossbasis(
+  x = as.matrix(case_springfall[, paste0("soil_moisture_Lag", 0:28)]),
+  lag = c(0, 28),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 4)
+)
+
+# Temperature: ns(df = 3), poly(degree = 3)
+cb_springfall_temperature <- crossbasis(
+  x = as.matrix(case_springfall[, paste0("temperature_Lag", 0:28)]),
+  lag = c(0, 28),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 4)
+)
+
+# Bird Abundance: ns(df = 3), ns(df = 2)
+cb_springfall_total_bird_abundance <- crossbasis(
+  x = as.matrix(case_springfall[, paste0("total_bird_abundance_Lag", 0:28)]),
+  lag = c(0, 28),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 4)
+)
+
+# Wind Speed: ns(df = 2), poly(degree = 4)
+cb_springfall_wind_speed <- crossbasis(
+  x = as.matrix(case_springfall[, paste0("wind_speed_Lag", 0:28)]),
+  lag = c(0, 28),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 4)
+)
+
+
+
+
+
+
+```
+
+### Spring-Fall Final Model
+
+```{r, spring fall model}
+
+springfall_model <- clogit(
+  outbreak_binary ~ 
+    cb_springfall_runoff +            
+    cb_springfall_snow_density +           
+    cb_springfall_soil_moisture +          
+    cb_springfall_temperature +           
+    cb_springfall_precipitation +         
+    cb_springfall_wind_speed +             
+    cb_springfall_total_bird_abundance +   
+    strata(stratum_id),
+  method = "efron",
+  data = case_springfall
+)
+
+summary(springfall_model)
+
+```
+
+### Spring-Fall Crosspred Objects
+
+```{r, spring fall crosspred}
+center_runoff <- mean(case_springfall$runoff, na.rm = TRUE)
+center_snow   <- mean(case_springfall$snow_density, na.rm = TRUE)
+center_soil   <- mean(case_springfall$soil_moisture, na.rm = TRUE)
+center_temp   <- mean(case_springfall$temperature, na.rm = TRUE)
+center_precip <- mean(case_springfall$precipitation, na.rm = TRUE)
+center_wind   <- mean(case_springfall$wind_speed, na.rm = TRUE)
+center_bird   <- mean(case_springfall$total_bird_abundance, na.rm = TRUE)
+
+
+cp_springfall_runoff       <- crosspred(cb_springfall_runoff, springfall_model, center_runoff, at = 0.5, cumul = TRUE)
+cp_springfall_snow         <- crosspred(cb_springfall_snow_density, springfall_model, center_snow , at = 0.5, cumul = TRUE)
+cp_springfall_soil         <- crosspred(cb_springfall_soil_moisture, springfall_model, center_soil , at = 0.5, cumul = TRUE)
+cp_springfall_temp         <- crosspred(cb_springfall_temperature, springfall_model, center_temp    , at = 0.5, cumul = TRUE)
+cp_springfall_precip       <- crosspred(cb_springfall_precipitation, springfall_model, center_precip, at = 0.5, cumul = TRUE)
+cp_springfall_wind         <- crosspred(cb_springfall_wind_speed, springfall_model, center_wind, at = 0.5, cumul = TRUE)
+cp_springfall_bird         <- crosspred(cb_springfall_total_bird_abundance, springfall_model, center_bird  , at = 0.5, cumul = TRUE)
+
+cp_springfall_slice_runoff <- crosspred(cb_springfall_runoff, springfall_model, center_runoff, at = 0.5)
+cp_springfall_slice_snow   <- crosspred(cb_springfall_snow_density, springfall_model, center_snow, at = 0.5)
+cp_springfall_slice_soil   <- crosspred(cb_springfall_soil_moisture, springfall_model, center_soil, at = 0.5)
+cp_springfall_slice_temp   <- crosspred(cb_springfall_temperature, springfall_model, center_temp, at = 0.5)
+cp_springfall_slice_precip <- crosspred(cb_springfall_precipitation, springfall_model,  center_precip, at = 0.5)
+cp_springfall_slice_wind   <- crosspred(cb_springfall_wind_speed, springfall_model, center_wind, at = 0.5)
+cp_springfall_slice_bird   <- crosspred(cb_springfall_total_bird_abundance, springfall_model, center_bird, at = 0.5)
+
+```
+
+### Results from Spring-Fall Model
+
+```{r, cumulative odds ratios spring fall}
+# ----------------------------
+# Cumulative OR Summary Table
+# ----------------------------
+cumulative_summary <- tibble(
+  Predictor = c("Runoff", "Snow Density", "Soil Moisture", "Temperature",
+                "Precipitation", "Wind Speed", "Total Bird Abundance"),
+      OR = c(
+        cp_springfall_runoff$allRRfit["0.5"],
+        cp_springfall_snow$allRRfit["0.5"],
+        cp_springfall_soil$allRRfit["0.5"],
+        cp_springfall_temp$allRRfit["0.5"],
+        cp_springfall_precip$allRRfit["0.5"],
+        cp_springfall_wind$allRRfit["0.5"],
+        cp_springfall_bird$allRRfit["0.5"]
+      ),
+      CI_low = c(
+        cp_springfall_runoff$allRRlow["0.5"],
+        cp_springfall_snow$allRRlow["0.5"],
+        cp_springfall_soil$allRRlow["0.5"],
+        cp_springfall_temp$allRRlow["0.5"],
+        cp_springfall_precip$allRRlow["0.5"],
+        cp_springfall_wind$allRRlow["0.5"],
+        cp_springfall_bird$allRRlow["0.5"]
+      ),
+      CI_high = c(
+        cp_springfall_runoff$allRRhigh["0.5"],
+        cp_springfall_snow$allRRhigh["0.5"],
+        cp_springfall_soil$allRRhigh["0.5"],
+        cp_springfall_temp$allRRhigh["0.5"],
+        cp_springfall_precip$allRRhigh["0.5"],
+        cp_springfall_wind$allRRhigh["0.5"],
+        cp_springfall_bird$allRRhigh["0.5"]
+      )
+) %>%
+  mutate(`OR (95% CI)` = sprintf("%.2f (%.2f, %.2f)", OR, CI_low, CI_high)) %>%
+  select(Predictor, `OR (95% CI)`) %>%
+  gt() %>%
+  tab_header(
+    title = md("**Case-Crossover Model: Cumulative Odds Ratios**"),
+    subtitle = "Per 0.5 SD Increase"
+  ) %>%
+  cols_label(`OR (95% CI)` = "Odds Ratio (95% Confidence Interval)") %>%
+  tab_options(
+    table.font.size = 14,
+    heading.title.font.size = 16,
+    heading.subtitle.font.size = 14,
+    data_row.padding = px(6)
+  )
+
+cumulative_summary
+
+
+
+# ----------------------------
+# Plotting Functions
+# ----------------------------
+plot_cumulative <- function(cp, title) {
+  plot(cp, type = "cumulative", var = 0.5, ci = "area",
+       col = "black", ci.arg = list(col = rgb(0,0,0,0.1), border = NA),
+       lwd = 1.7, main = title, xlab = "", ylab = "", las = 1)
+  abline(h = 1, lty = 2, col = "gray40", lwd = 1)
+}
+
+plot_slices <- function(cp, title) {
+  plot(cp, type = "slices", var = 0.5, ci = "area",
+       col = "black", ci.arg = list(col = rgb(0,0,0,0.1), border = NA),
+       lwd = 1.3, main = title, xlab = "", ylab = "", las = 1)
+  abline(h = 1, lty = 2, col = "gray40", lwd = 1)
+}
+
+# ----------------------------
+# Save Cumulative Plot
+# ----------------------------
+png(file.path(figures_folder,"figure_cumulative_ORs_casecrossover_springfall.png"), width = 11, height = 7, units = "in", res = 300)
+
+par(
+  mfrow = c(2, 4),
+  mar = c(4.2, 4.2, 2.5, 1),
+  oma = c(3, 4, 0, 1),
+  cex.main = 1.2,
+  cex.lab = 1.2,
+  cex.axis = 1.1,
+  tcl = -0.3, mgp = c(2.5, 0.7, 0)
+)
+
+plot_cumulative(cp_springfall_runoff, "Runoff")
+plot_cumulative(cp_springfall_snow, "Snow Density")
+plot_cumulative(cp_springfall_soil, "Soil Moisture")
+plot_cumulative(cp_springfall_temp, "Temperature")
+plot_cumulative(cp_springfall_precip, "Precipitation")
+plot_cumulative(cp_springfall_wind, "Wind Speed")
+plot_cumulative(cp_springfall_bird, "Total Bird Abundance")
+
+mtext("Lag (days)", side = 1, outer = TRUE, line = 1, cex = 1.2)
+mtext("Odds Ratio (95% CI)", side = 2, outer = TRUE, line = 1.5, cex = 1.2)
+
+dev.off()
+
+
+# ----------------------------
+# Save Slices Plot
+# ----------------------------
+png(file.path(figures_folder,"figure_slice_ORs_casecrossover_springfall.png"), width = 11, height = 7, units = "in", res = 300)
+
+par(
+  mfrow = c(2, 4),
+  mar = c(4.2, 4.2, 2.5, 1),
+  oma = c(3, 4, 0, 1),
+  cex.main = 1.2,
+  cex.lab = 1.2,
+  cex.axis = 1.1,
+  tcl = -0.3, mgp = c(2.5, 0.7, 0)
+)
+
+plot_slices(cp_springfall_slice_runoff, "Runoff")
+plot_slices(cp_springfall_slice_snow, "Snow Density")
+plot_slices(cp_springfall_slice_soil, "Soil Moisture")
+plot_slices(cp_springfall_slice_temp, "Temperature")
+plot_slices(cp_springfall_slice_precip, "Precipitation")
+plot_slices(cp_springfall_slice_wind, "Wind Speed")
+plot_slices(cp_springfall_slice_bird, "Total Bird Abundance")
+
+mtext("Lag (days)", side = 1, outer = TRUE, line = 1, cex = 1.2)
+mtext("Odds Ratio (95% CI)", side = 2, outer = TRUE, line = 1.5, cex = 1.2)
+
+dev.off()
+
+
+# Lag-Specific Odds Ratios — Season-Adjusted Timeseries Model
+
+extract_lag_ORs_wide <- function(cp_obj, varname, varval = "0.5", lags = 0:4) {
+  lag_labels <- paste0("lag", lags)
+  or   <- cp_obj$matRRfit[varval, lag_labels]
+  low  <- cp_obj$matRRlow[varval, lag_labels]
+  high <- cp_obj$matRRhigh[varval, lag_labels]
+
+  tibble(
+    Predictor = varname,
+    !!!setNames(as.list(or),   paste0("OR_Lag", lags)),
+    !!!setNames(as.list(low),  paste0("Low_Lag", lags)),
+    !!!setNames(as.list(high), paste0("High_Lag", lags)),
+    !!!setNames(as.list(sprintf("%.2f (%.2f, %.2f)", or, low, high)), paste0("Lag ", lags))
+  )
+}
+
+table_lag_ORs <- bind_rows(
+  extract_lag_ORs_wide(cp_springfall_slice_runoff, "Runoff"),
+  extract_lag_ORs_wide(cp_springfall_slice_soil,   "Soil Moisture"),
+  extract_lag_ORs_wide(cp_springfall_slice_temp,   "Temperature"),
+  extract_lag_ORs_wide(cp_springfall_slice_precip, "Precipitation"),
+  extract_lag_ORs_wide(cp_springfall_slice_snow,   "Snow Density"),
+  extract_lag_ORs_wide(cp_springfall_slice_wind,   "Wind Speed"),
+  extract_lag_ORs_wide(cp_springfall_slice_bird,   "Total Bird Abundance")
+)
+
+lags <- c(0, 7, 14, 21, 28)  # weekly anchor lags (daily resolution)
+highlight_matrix <- sapply(lags, function(i) {
+  table_lag_ORs[[paste0("Low_Lag", i)]] > 1 | table_lag_ORs[[paste0("High_Lag", i)]] < 1
+})
+colnames(highlight_matrix) <- paste0("Lag ", lags)
+
+# Build Flextable
+
+ft <- table_lag_ORs %>%
+  select(Predictor, paste0("Lag ", lags)) %>%
+  flextable() %>%
+  set_header_labels(Predictor = "Predictor") %>%
+  add_header_row(
+    values = c("Predictor", "Odds Ratio (95% CI)"),
+    colwidths = c(1, length(lags))
+  ) %>%
+  fontsize(size = 11, part = "all") %>%
+  autofit() %>%
+  align(align = "center", part = "all") %>%
+  theme_booktabs()
+
+# Bold significant lag cells
+for (i in lags) {
+  ft <- bold(ft, i = which(highlight_matrix[, paste0("Lag ", i)]),
+             j = paste0("Lag ", i))
+}
+
+# Export to Word
+doc <- read_docx() %>%
+  body_add_flextable(ft) %>%
+  body_add_par(
+    "Table: Lag-specific odds ratios from the case-crossover stratified to Fall and Spring with DLNM crossbasis functions. Estimates represent odds ratios (95% CI) per 0.5 standard deviation increase in each environmental predictor. Statistically significant lags are shown in bold.",
+    style = "Normal"
+  )
+
+print(doc, target = file.path(tables_folder, "Table_LagSpecific_OR_Casecrossover_Springfall.docx"))
+
+ft
+
+
+```
+
+
+## Case-Crossover Models on dataframe stratfied to only spring 
+
+### Crossbasis 
+
+```{r, crossbasis spring}
+
+# Leaf Area Index: ns(df = 3), ns(df = 1)
+cb_spring_leaf_area_index <- crossbasis(
+  x = as.matrix(case_spring[, paste0("leaf_area_index_Lag", 0:28)]),
+  lag = c(0, 28),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "poly", degree = 1)
+)
+
+# Precipitation: ns(df = 3), ns(df = 1)
+cb_spring_precipitation <- crossbasis(
+  x = as.matrix(case_spring[, paste0("precipitation_Lag", 0:28)]),
+  lag = c(0, 28),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "poly", degree = 1)
+)
+
+# Relative Humidity: ns(df = 3), poly(degree = 2)
+cb_spring_relative_humidity <- crossbasis(
+  x = as.matrix(case_spring[, paste0("relative_humidity_Lag", 0:28)]),
+  lag = c(0, 28),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "poly", degree = 1)
+)
+
+
+
+# Runoff: ns(df = 1), poly(degree = 2)
+cb_spring_runoff <- crossbasis(
+  x = as.matrix(case_spring[, paste0("runoff_Lag", 0:28)]),
+  lag = c(0, 28),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "poly", degree = 1)
+)
+
+# Shortwave Radiation: ns(df = 3), poly(degree = 4)
+cb_spring_shortwave_radiation <- crossbasis(
+  x = as.matrix(case_spring[, paste0("shortwave_radiation_Lag", 0:28)]),
+  lag = c(0, 28),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "poly", degree = 1)
+)
+
+# Longwave Radiation: ns(df = 3), ns(df = 1)
+cb_spring_longwave_radiation <- crossbasis(
+  x = as.matrix(case_spring[, paste0("shortwave_radiation_Lag", 0:28)]),
+  lag = c(0, 28),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "poly", degree = 1)
+)
+
+# Snow Density: ns(df = 1), poly(degree = 3)
+cb_spring_snow_density <- crossbasis(
+  x = as.matrix(case_spring[, paste0("snow_density_Lag", 0:28)]),
+  lag = c(0, 28),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "poly", degree = 1)
+)
+
+# Soil Moisture: linear exposure, ns(df = 1)
+cb_spring_soil_moisture <- crossbasis(
+  x = as.matrix(case_spring[, paste0("soil_moisture_Lag", 0:28)]),
+  lag = c(0, 28),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "poly", degree = 1)
+)
+
+# Temperature: ns(df = 3), poly(degree = 3)
+cb_spring_temperature <- crossbasis(
+  x = as.matrix(case_spring[, paste0("temperature_Lag", 0:28)]),
+  lag = c(0, 28),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "poly", degree = 1)
+)
+
+# Bird Abundance: ns(df = 3), ns(df = 1)
+cb_spring_total_bird_abundance <- crossbasis(
+  x = as.matrix(case_spring[, paste0("total_bird_abundance_Lag", 0:28)]),
+  lag = c(0, 28),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "poly", degree = 1)
+)
+
+# Wind Speed: ns(df = 1), poly(degree = 4)
+cb_spring_wind_speed <- crossbasis(
+  x = as.matrix(case_spring[, paste0("wind_speed_Lag", 0:28)]),
+  lag = c(0, 28),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "poly", degree = 1)
+)
+
+
+
+
+
+
+```
+
+### Spring Model (will not converge)
+
+```{r, spring model}
+
+spring_model <- clogit(
+  outbreak_binary ~ 
+    cb_spring_runoff +            
+    cb_spring_snow_density +           
+    cb_spring_soil_moisture +          
+    cb_spring_temperature +           
+    cb_spring_precipitation +         
+    cb_spring_wind_speed +             
+    cb_spring_total_bird_abundance +   
+    strata(stratum_id),
+  method = "efron",
+  data = case_spring
+)
+
+summary(spring_model)
+
+```
+
+```{r, spring crosspred}
+center_runoff <- mean(case_spring$runoff, na.rm = TRUE)
+center_snow   <- mean(case_spring$snow_density, na.rm = TRUE)
+center_soil   <- mean(case_spring$soil_moisture, na.rm = TRUE)
+center_temp   <- mean(case_spring$temperature, na.rm = TRUE)
+center_precip <- mean(case_spring$precipitation, na.rm = TRUE)
+center_wind   <- mean(case_spring$wind_speed, na.rm = TRUE)
+center_bird   <- mean(case_spring$total_bird_abundance, na.rm = TRUE)
+
+
+cp_spring_runoff       <- crosspred(cb_spring_runoff, spring_model, center_runoff, at = 0.5, cumul = TRUE)
+cp_spring_snow         <- crosspred(cb_spring_snow_density, spring_model, center_snow , at = 0.5, cumul = TRUE)
+cp_spring_soil         <- crosspred(cb_spring_soil_moisture, spring_model, center_soil , at = 0.5, cumul = TRUE)
+cp_spring_temp         <- crosspred(cb_spring_temperature, spring_model, center_temp    , at = 0.5, cumul = TRUE)
+cp_spring_precip       <- crosspred(cb_spring_precipitation, spring_model, center_precip, at = 0.5, cumul = TRUE)
+cp_spring_wind         <- crosspred(cb_spring_wind_speed, spring_model, center_wind, at = 0.5, cumul = TRUE)
+cp_spring_bird         <- crosspred(cb_spring_total_bird_abundance, spring_model, center_bird  , at = 0.5, cumul = TRUE)
+
+cp_spring_slice_runoff <- crosspred(cb_spring_runoff, spring_model, center_runoff, at = 0.5)
+cp_spring_slice_snow   <- crosspred(cb_spring_snow_density, spring_model, center_snow, at = 0.5)
+cp_spring_slice_soil   <- crosspred(cb_spring_soil_moisture, spring_model, center_soil, at = 0.5)
+cp_spring_slice_temp   <- crosspred(cb_spring_temperature, spring_model, center_temp, at = 0.5)
+cp_spring_slice_precip <- crosspred(cb_spring_precipitation, spring_model,  center_precip, at = 0.5)
+cp_spring_slice_wind   <- crosspred(cb_spring_wind_speed, spring_model, center_wind, at = 0.5)
+cp_spring_slice_bird   <- crosspred(cb_spring_total_bird_abundance, spring_model, center_bird, at = 0.5)
+
+```
+
+### Results from Spring Model (will not converge)
+
+```{r, cumulative odds ratios spring fall}
+# # ----------------------------
+# # Cumulative OR Summary Table
+# # ----------------------------
+# cumulative_summary <- tibble(
+#   Predictor = c("Runoff", "Snow Density", "Soil Moisture", "Temperature",
+#                 "Precipitation", "Wind Speed", "Total Bird Abundance"),
+#       OR = c(
+#         cp_spring_runoff$allRRfit["0.5"],
+#         cp_spring_snow$allRRfit["0.5"],
+#         cp_spring_soil$allRRfit["0.5"],
+#         cp_spring_temp$allRRfit["0.5"],
+#         cp_spring_precip$allRRfit["0.5"],
+#         cp_spring_wind$allRRfit["0.5"],
+#         cp_spring_bird$allRRfit["0.5"]
+#       ),
+#       CI_low = c(
+#         cp_spring_runoff$allRRlow["0.5"],
+#         cp_spring_snow$allRRlow["0.5"],
+#         cp_spring_soil$allRRlow["0.5"],
+#         cp_spring_temp$allRRlow["0.5"],
+#         cp_spring_precip$allRRlow["0.5"],
+#         cp_spring_wind$allRRlow["0.5"],
+#         cp_spring_bird$allRRlow["0.5"]
+#       ),
+#       CI_high = c(
+#         cp_spring_runoff$allRRhigh["0.5"],
+#         cp_spring_snow$allRRhigh["0.5"],
+#         cp_spring_soil$allRRhigh["0.5"],
+#         cp_spring_temp$allRRhigh["0.5"],
+#         cp_spring_precip$allRRhigh["0.5"],
+#         cp_spring_wind$allRRhigh["0.5"],
+#         cp_spring_bird$allRRhigh["0.5"]
+#       )
+# ) %>%
+#   mutate(`OR (95% CI)` = sprintf("%.2f (%.2f, %.2f)", OR, CI_low, CI_high)) %>%
+#   select(Predictor, `OR (95% CI)`) %>%
+#   gt() %>%
+#   tab_header(
+#     title = md("**Case-Crossover Model: Cumulative Odds Ratios**"),
+#     subtitle = "Per 0.5 SD Increase"
+#   ) %>%
+#   cols_label(`OR (95% CI)` = "Odds Ratio (95% Confidence Interval)") %>%
+#   tab_options(
+#     table.font.size = 14,
+#     heading.title.font.size = 16,
+#     heading.subtitle.font.size = 14,
+#     data_row.padding = px(6)
+#   )
+# 
+# cumulative_summary
+# 
+# # ----------------------------
+# # Plotting Functions
+# # ----------------------------
+# plot_cumulative <- function(cp, title) {
+#   plot(cp, type = "cumulative", var = 0.5, ci = "area",
+#        col = "black", ci.arg = list(col = rgb(0,0,0,0.1), border = NA),
+#        lwd = 1.5, main = title, xlab = "", ylab = "", las = 1)
+#   abline(h = 1, lty = 2, col = "gray40")
+# }
+# 
+# plot_slices <- function(cp, title) {
+#   plot(cp, type = "slices", var = 0.5, ci = "area",
+#        col = "black", ci.arg = list(col = rgb(0,0,0,0.1), border = NA),
+#        lwd = 1.3, main = title, xlab = "Lag ", ylab = "", las = 1)
+#   abline(h = 1, lty = 2, col = "gray40")
+# }
+# 
+# # ----------------------------
+# # Save Cumulative Plot
+# # ----------------------------
+# png(file.path(figures_folder,"figure_cumulative_ORs_casecrossover_spring.png"), width = 11, height = 7, units = "in", res = 300)
+# 
+# par(
+#   mfrow = c(2, 4),
+#   mar = c(4.2, 4.2, 2.5, 1),
+#   oma = c(3, 4, 0, 1),
+#   cex.main = 1.2,
+#   cex.lab = 1.2,
+#   cex.axis = 1.1,
+#   tcl = -0.3, mgp = c(2.5, 0.7, 0)
+# )
+# 
+# plot_cumulative(cp_spring_runoff, "Runoff")
+# plot_cumulative(cp_spring_snow, "Snow Density")
+# plot_cumulative(cp_spring_soil, "Soil Moisture")
+# plot_cumulative(cp_spring_temp, "Temperature")
+# plot_cumulative(cp_spring_precip, "Precipitation")
+# plot_cumulative(cp_spring_wind, "Wind Speed")
+# plot_cumulative(cp_spring_bird, "Total Bird Abundance")
+# 
+# mtext("Lag (days)", side = 1, outer = TRUE, line = 0, cex = 1.2)
+# mtext("Odds Ratio (95% CI)", side = 2, outer = TRUE, line = 0, cex = 1.2)
+# 
+# # ----------------------------
+# # Save Slices Plot
+# # ----------------------------
+# png(file.path(figures_folder,"figure_slice_ORs_casecrossover_spring.png"), width = 11, height = 7, units = "in", res = 300)
+# 
+# par(
+#   mfrow = c(2, 4),
+#   mar = c(4.2, 4.2, 2.5, 1),
+#   oma = c(3, 4, 0, 1),
+#   cex.main = 1.2,
+#   cex.lab = 1.2,
+#   cex.axis = 1.1,
+#   tcl = -0.3, mgp = c(2.5, 0.7, 0)
+# )
+# 
+# plot_slices(cp_spring_slice_runoff, "Runoff")
+# plot_slices(cp_spring_slice_snow, "Snow Density")
+# plot_slices(cp_spring_slice_soil, "Soil Moisture")
+# plot_slices(cp_spring_slice_temp, "Temperature")
+# plot_slices(cp_spring_slice_precip, "Precipitation")
+# plot_slices(cp_spring_slice_wind, "Wind Speed")
+# plot_slices(cp_spring_slice_bird, "Total Bird Abundance")
+# 
+# dev.off()
+# 
+# mtext("Lag (days)", side = 1, outer = TRUE, line = 0, cex = 1.2)
+# mtext("Odds Ratio (95% CI)", side = 2, outer = TRUE, line = 0, cex = 1.2)
+# 
+# 
+# # Lag-Specific Odds Ratios — Season-Adjusted Timeseries Model
+# 
+# extract_lag_ORs_wide <- function(cp_obj, varname, varval = "0.5", lags = 0:4) {
+#   lag_labels <- paste0("lag", lags)
+#   or   <- cp_obj$matRRfit[varval, lag_labels]
+#   low  <- cp_obj$matRRlow[varval, lag_labels]
+#   high <- cp_obj$matRRhigh[varval, lag_labels]
+# 
+#   tibble(
+#     Predictor = varname,
+#     !!!setNames(as.list(or),   paste0("OR_Lag", lags)),
+#     !!!setNames(as.list(low),  paste0("Low_Lag", lags)),
+#     !!!setNames(as.list(high), paste0("High_Lag", lags)),
+#     !!!setNames(as.list(sprintf("%.2f (%.2f, %.2f)", or, low, high)), paste0("Lag ", lags))
+#   )
+# }
+# 
+# table_lag_ORs <- bind_rows(
+#   extract_lag_ORs_wide(cp_spring_slice_runoff, "Runoff"),
+#   extract_lag_ORs_wide(cp_spring_slice_soil,   "Soil Moisture"),
+#   extract_lag_ORs_wide(cp_spring_slice_temp,   "Temperature"),
+#   extract_lag_ORs_wide(cp_spring_slice_precip, "Precipitation"),
+#   extract_lag_ORs_wide(cp_spring_slice_snow,   "Snow Density"),
+#   extract_lag_ORs_wide(cp_spring_slice_wind,   "Wind Speed"),
+#   extract_lag_ORs_wide(cp_spring_slice_bird,   "Total Bird Abundance")
+# )
+# 
+# lags <- c(0, 7, 14, 21, 28)  # weekly anchor lags (daily resolution)
+# highlight_matrix <- sapply(lags, function(i) {
+#   table_lag_ORs[[paste0("Low_Lag", i)]] > 1 | table_lag_ORs[[paste0("High_Lag", i)]] < 1
+# })
+# colnames(highlight_matrix) <- paste0("Lag ", lags)
+# 
+# # Build Flextable
+# 
+# ft <- table_lag_ORs %>%
+#   select(Predictor, paste0("Lag ", lags)) %>%
+#   flextable() %>%
+#   set_header_labels(Predictor = "Predictor") %>%
+#   add_header_row(
+#     values = c("Predictor", "Odds Ratio (95% CI)"),
+#     colwidths = c(1, length(lags))
+#   ) %>%
+#   fontsize(size = 11, part = "all") %>%
+#   autofit() %>%
+#   align(align = "center", part = "all") %>%
+#   theme_booktabs()
+# 
+# # Bold significant lag cells
+# for (i in lags) {
+#   ft <- bold(ft, i = which(highlight_matrix[, paste0("Lag ", i)]),
+#              j = paste0("Lag ", i))
+# }
+# 
+# # Export to Word
+# doc <- read_docx() %>%
+#   body_add_flextable(ft) %>%
+#   body_add_par(
+#     "Table: Lag-specific odds ratios from the case-crossover stratified to Spring with DLNM crossbasis functions. Estimates represent odds ratios (95% CI) per 0.5 standard deviation increase in each environmental predictor. Statistically significant lags are shown in bold.",
+#     style = "Normal"
+#   )
+# 
+# print(doc, target = file.path(tables_folder, "Table_LagSpecific_OR_Casecrossover_spring.docx"))
+# 
+# ft
+```
+
+
+## Timeseries 
+
+### Read in Timeseries 
+
+```{r, import timeseries dataframe}
+
+# Daily modeling timeseries (May 2026 revision) — used for the descriptive
+# seasonal-rate plots later in this script.
+fishnet_timeseries_clean <- readRDS(file.path(objects_folder, "fishnet_timeseries_daily_modeling.RDS"))
+
+
+```
+
+### Prepare for modeling
+
+```{r, prepare}
+
+
+timeseries_clean <- fishnet_timeseries_clean %>%
+  arrange(zone_id, date)
+
+timeseries_clean$season <- factor(timeseries_clean$season,
+                                  levels = c("Fall", "Spring", "Winter", "Summer"))
+
+timeseries_clean %>%
+  group_by(zone_id) %>%
+  summarise(
+    has_feedlot = max(feedlot_count, na.rm = TRUE) > 0,
+    has_outbreak = max(any_outbreak, na.rm = TRUE) > 0
+  ) %>%
+  count(has_feedlot, has_outbreak)
+
+# Identify zones to keep: has a feedlot OR had an outbreak
+zones_to_keep <- timeseries_clean %>%
+  group_by(zone_id) %>%
+  summarise(
+    has_feedlot = max(feedlot_count, na.rm = TRUE) > 0,
+    has_outbreak = max(any_outbreak, na.rm = TRUE) > 0
+  ) %>%
+  filter(has_feedlot | has_outbreak) %>%
+  pull(zone_id)
+
+timeseries_clean <- timeseries_clean %>%
+  filter(zone_id %in% zones_to_keep)
+
+cat("Zones retained:", length(zones_to_keep), "\n")
+cat("Zones removed:", 3334 - length(zones_to_keep), "\n")
+
+```
+
+### Checks
+
+```{r, timeseries checks}
+
+# count cells by season
+
+timeseries_clean %>%
+count(season) %>%
+  print()
+
+case_cells <- timeseries_clean %>%
+  filter(any_outbreak == 1)
+
+case_cells %>%
+count(season) %>%
+  print()
+
+```
+
+
+## Scale
+
+```{r, scale}
+
+# Variables to log1p transform
+log_vars <- c("total_bird_abundance", "runoff", "precipitation")
+
+# Apply log1p transformation only if column exists
+timeseries_clean <- timeseries_clean %>%
+  mutate(across(all_of(log_vars), ~ log1p(.), .names = "{.col}"))
+
+# All variables to scale 
+vars_to_scale <- c(
+  "total_bird_abundance", "leaf_area_index", "longwave_radiation", "runoff",
+  "shortwave_radiation", "snow_density", "soil_moisture", 
+  "temperature", "evapotranspiration", "precipitation", "wind_speed",
+  "relative_humidity"
+)
+
+# Apply z-score scaling
+timeseries_clean <- timeseries_clean %>%
+  mutate(across(all_of(vars_to_scale), scale, .names = "{.col}"))
+
+
+```
+
+### Crossbasis terms (timeseries)
+
+```{r, crossbasis ns}
+
+
+# Crossbasis terms for selected variables using Lag0–Lag4
+
+cb_relative_humidity <- crossbasis(
+  timeseries_clean$relative_humidity,
+  lag = 4,
+  argvar = list(fun = "ns", df = 2),
+  arglag = list(fun = "ns", df = 4)
+)
+
+cb_evap <- crossbasis(
+  timeseries_clean$evapotranspiration,
+  lag = 4,
+  argvar = list(fun = "ns", df = 2),
+  arglag = list(fun = "ns", df = 4)
+)
+
+cb_leaf_area_index <- crossbasis(
+  timeseries_clean$leaf_area_index,
+  lag = 4,
+  argvar = list(fun = "ns", df = 2),
+  arglag = list(fun = "ns", df = 4)
+)
+
+cb_runoff <- crossbasis(
+  timeseries_clean$runoff,
+  lag = 4,
+  argvar = list(fun = "ns", df = 2),
+  arglag = list(fun = "ns", df = 4)
+)
+
+cb_shortwave_radiation <- crossbasis(
+  timeseries_clean$shortwave_radiation,
+  lag = 4,
+  argvar = list(fun = "ns", df = 2),
+  arglag = list(fun = "ns", df = 4)
+)
+
+cb_longwave_radiation <- crossbasis(
+  timeseries_clean$longwave_radiation,
+  lag = 4,
+  argvar = list(fun = "ns", df = 2),
+  arglag = list(fun = "ns", df = 4)
+)
+
+cb_snow_density <- crossbasis(
+  timeseries_clean$snow_density,
+  lag = 4,
+  argvar = list(fun = "ns", df = 2),
+  arglag = list(fun = "ns", df = 4)
+)
+
+cb_soil_moisture <- crossbasis(
+  timeseries_clean$soil_moisture,
+  lag = 4,
+  argvar = list(fun = "ns", df = 2),
+  arglag = list(fun = "ns", df = 4)
+)
+
+cb_temperature <- crossbasis(
+  timeseries_clean$temperature,
+  lag = 4,
+  argvar = list(fun = "ns", df = 2),
+  arglag = list(fun = "ns", df = 4)
+)
+
+cb_precipitation <- crossbasis(
+  timeseries_clean$precipitation,
+  lag = 4,
+  argvar = list(fun = "ns", df = 2),
+  arglag = list(fun = "ns", df = 4)
+)
+
+cb_wind_speed <- crossbasis(
+  timeseries_clean$wind_speed,
+  lag = 4,
+  argvar = list(fun = "ns", df = 2),
+  arglag = list(fun = "ns", df = 4)
+)
+
+cb_bird_abundance <- crossbasis(
+  timeseries_clean$total_bird_abundance,
+  lag = 4,
+  argvar = list(fun = "ns", df = 2),
+  arglag = list(fun = "ns", df = 4)
+)
+
+
+```
+
+
+## Model with Seasonal Fixed Effects
+
+
+```{r, season fixed effect model}
+
+season_timeseries_model <- bam(outbreak_binary ~
+                   cb_precipitation +
+                   cb_snow_density + 
+                   cb_runoff +
+                   cb_soil_moisture +
+                   cb_bird_abundance +
+                   cb_wind_speed +
+                   cb_temperature +
+                     s(lat, lon, bs ="ds", k =200) +
+                    season, # fixed effect
+                    family = nb(),
+                    data = timeseries_clean,
+                    method = "fREML",
+                    discrete = TRUE)
+
+summary(season_timeseries_model)
+
+# Check number of cells analyzed 
+# model frame = rows actually used (after NA dropping etc.)
+mf <- model.frame(season_timeseries_model)
+
+# get the original row indices used by bam()
+idx <- as.integer(rownames(mf))
+
+df_used <- timeseries_clean[idx, ]
+
+# outcome
+y <- df_used$outbreak_binary
+
+# cell-weeks
+pos_cell_weeks <- sum(y == 1, na.rm = TRUE)
+neg_cell_weeks <- sum(y == 0, na.rm = TRUE)
+
+# cells
+case_cells <- unique(df_used$zone_id[y == 1])
+n_case_cells <- length(case_cells)
+
+all_cells <- unique(df_used$zone_id)
+control_cells <- setdiff(all_cells, case_cells)
+n_control_cells <- length(control_cells)
+
+cat("=== Counts (rows used in bam()) ===\n")
+cat("Positive cell-weeks: ", pos_cell_weeks, "\n", sep = "")
+cat("Negative cell-weeks: ", neg_cell_weeks, "\n", sep = "")
+cat("Case cells (ever positive): ", n_case_cells, "\n", sep = "")
+cat("Control cells (never positive): ", n_control_cells, "\n", sep = "")
+cat("Total unique cells: ", length(all_cells), "\n", sep = "")
+
+# --- feedlot cells (ever have feedlot_count > 0 in any week) ---
+feedlot_cells <- df_used |>
+  dplyr::group_by(zone_id) |>
+  dplyr::summarise(has_feedlot = any(feedlot_count > 0, na.rm = TRUE), .groups = "drop") |>
+  dplyr::filter(has_feedlot) |>
+  dplyr::pull(zone_id)
+
+# --- feedlot control cells = feedlot_cells that are also never-positive cells ---
+feedlot_control_cells <- intersect(feedlot_cells, control_cells)
+n_feedlot_control_cells <- length(feedlot_control_cells)
+
+# Sanity checks
+cat("Control cells (never positive): ", n_control_cells, "\n", sep = "")
+cat("Feedlot cells (ever feedlot): ", length(feedlot_cells), "\n", sep = "")
+cat("Feedlot control cells (feedlot, never positive): ", n_feedlot_control_cells, "\n", sep = "")
+
+```
+
+
+```{r, crosspred season timeseries model}
+
+
+## Center values for each variable
+center_precip <- mean(timeseries_clean$precipitation, na.rm = TRUE)
+center_snow     <- mean(timeseries_clean$snow_density, na.rm = TRUE)
+center_runoff <- mean(timeseries_clean$runoff, na.rm = TRUE)
+center_soil   <- mean(timeseries_clean$soil_moisture, na.rm = TRUE)
+center_bird   <- mean(timeseries_clean$total_bird_abundance, na.rm = TRUE)
+center_wind   <- mean(timeseries_clean$wind_speed, na.rm = TRUE)
+center_temp   <- mean(timeseries_clean$temperature, na.rm = TRUE)
+
+## Cumulative ORs (per 0.5 SD increase)
+cp_runoff   <- crosspred(cb_runoff,   season_timeseries_model, cen = center_runoff, at = 0.5, cumul = TRUE)
+cp_soil     <- crosspred(cb_soil_moisture, season_timeseries_model, cen = center_soil, at = 0.5, cumul = TRUE)
+cp_temp     <- crosspred(cb_temperature, season_timeseries_model, cen = center_temp, at = 0.5, cumul = TRUE)
+cp_precip   <- crosspred(cb_precipitation, season_timeseries_model, cen = center_precip, at = 0.5, cumul = TRUE)
+cp_snow       <- crosspred(cb_snow_density, season_timeseries_model, cen = center_snow, at = 0.5, cumul = TRUE)
+cp_wind     <- crosspred(cb_wind_speed, season_timeseries_model, cen = center_wind, at = 0.5, cumul = TRUE)
+cp_bird     <- crosspred(cb_bird_abundance, season_timeseries_model, cen = center_bird, at = 0.5, cumul = TRUE)
+
+## Slice (lag-specific)
+cp_runoff_slice   <- crosspred(cb_runoff,   season_timeseries_model, cen = center_runoff, at = 0.5)
+cp_soil_slice     <- crosspred(cb_soil_moisture, season_timeseries_model, cen = center_soil, at = 0.5)
+cp_temp_slice     <- crosspred(cb_temperature, season_timeseries_model, cen = center_temp, at = 0.5)
+cp_precip_slice   <- crosspred(cb_precipitation, season_timeseries_model, cen = center_precip, at = 0.5)
+cp_snow_slice       <- crosspred(cb_snow_density, season_timeseries_model, cen = center_snow, at = 0.5)
+cp_wind_slice     <- crosspred(cb_wind_speed, season_timeseries_model, cen = center_wind, at = 0.5)
+cp_bird_slice     <- crosspred(cb_bird_abundance, season_timeseries_model, cen = center_bird, at = 0.5)
+
+```
+
+### Results from Timeseries Model with Seasonal Fixed Effects
+
+
+```{r, results season timeseries model}
+
+cumulative_summary <- tibble(
+  Predictor = c("Runoff", "Soil Moisture", "Temperature",
+                "Precipitation", "Snow Density", "Wind Speed", "Total Bird Abundance"),
+  OR = c(
+    cp_runoff$allRRfit["0.5"],
+    cp_soil$allRRfit["0.5"],
+    cp_temp$allRRfit["0.5"],
+    cp_precip$allRRfit["0.5"],
+    cp_snow$allRRfit["0.5"],
+    cp_wind$allRRfit["0.5"],
+    cp_bird$allRRfit["0.5"]
+  ),
+  CI_low = c(
+    cp_runoff$allRRlow["0.5"],
+    cp_soil$allRRlow["0.5"],
+    cp_temp$allRRlow["0.5"],
+    cp_precip$allRRlow["0.5"],
+    cp_snow$allRRlow["0.5"],
+    cp_wind$allRRlow["0.5"],
+    cp_bird$allRRlow["0.5"]
+  ),
+  CI_high = c(
+    cp_runoff$allRRhigh["0.5"],
+    cp_soil$allRRhigh["0.5"],
+    cp_temp$allRRhigh["0.5"],
+    cp_precip$allRRhigh["0.5"],
+    cp_snow$allRRhigh["0.5"],
+    cp_wind$allRRhigh["0.5"],
+    cp_bird$allRRhigh["0.5"]
+  )
+) %>%
+  mutate(`OR (95% CI)` = sprintf("%.2f (%.2f, %.2f)", OR, CI_low, CI_high)) %>%
+  select(Predictor, `OR (95% CI)`) %>%
+  gt() %>%
+  tab_header(
+    title = md("**Adjusted Timeseries Model: Cumulative Odds Ratios**"),
+    subtitle = "Per 0.5 SD Increase, Adjusted for Season"
+  ) %>%
+  cols_label(`OR (95% CI)` = "Odds Ratio (95% Confidence Interval)") %>%
+  tab_options(
+    table.font.size = 14,
+    heading.title.font.size = 16,
+    heading.subtitle.font.size = 14,
+    data_row.padding = px(6)
+  )
+
+cumulative_summary
+
+plot_cumulative <- function(cp, title) {
+  plot(cp, type = "cumulative", var = 0.5, ci = "area",
+       col = "black", ci.arg = list(col = rgb(0,0,0,0.1), border = NA),
+       lwd = 1.5, main = title, xlab = "", ylab = "", las = 1)
+  abline(h = 1, lty = 2, col = "gray40")
+}
+
+plot_slices <- function(cp, title) {
+  plot(cp, type = "slices", var = 0.5, ci = "area",
+       col = "black", ci.arg = list(col = rgb(0,0,0,0.1), border = NA),
+       lwd = 1.3, main = title, xlab = "", ylab = "", las = 1)
+  abline(h = 1, lty = 2, col = "gray40")
+}
+
+png(file.path(figures_folder, "figure_cumulative_ORs_season_fixed_efffect.png"),
+    width = 11, height = 7, units = "in", res = 300)
+
+par(
+  mfrow = c(2, 4),
+  mar = c(4.2, 4.2, 2.5, 1),
+  oma = c(3, 4, 0, 1),
+  cex.main = 1.2,
+  cex.lab = 1.2,
+  cex.axis = 1.1,
+  tcl = -0.3, mgp = c(2.5, 0.7, 0)
+)
+
+
+plot_cumulative(cp_runoff, "Runoff")
+plot_cumulative(cp_soil,   "Soil Moisture")
+plot_cumulative(cp_temp,   "Temperature")
+plot_cumulative(cp_precip, "Precipitation")
+plot_cumulative(cp_snow,     "Snow Density")
+plot_cumulative(cp_wind,   "Wind Speed")
+plot_cumulative(cp_bird,   "Total Bird Abundance")
+
+mtext("Lag (days)", side = 1, outer = TRUE, line = 0, cex = 1.2)
+mtext("Odds Ratio (95% CI)", side = 2, outer = TRUE, line = 0, cex = 1.2)
+
+dev.off()
+
+png(file.path(figures_folder, "figure_slice_ORs_season_fixed_efffect.png"),
+    width = 11, height = 7, units = "in", res = 300)
+
+par(
+  mfrow = c(2, 4),
+  mar = c(4.2, 4.2, 2.5, 1),
+  oma = c(3, 4, 0, 1),
+  cex.main = 1.2,
+  cex.lab = 1.2,
+  cex.axis = 1.1,
+  tcl = -0.3, mgp = c(2.5, 0.7, 0)
+)
+
+
+plot_slices(cp_runoff_slice, "Runoff")
+plot_slices(cp_soil_slice,   "Soil Moisture")
+plot_slices(cp_temp_slice,   "Temperature")
+plot_slices(cp_precip_slice, "Precipitation")
+plot_slices(cp_snow_slice,     "Snow Density")
+plot_slices(cp_wind_slice,   "Wind Speed")
+plot_slices(cp_bird_slice,   "Total Bird Abundance")
+
+mtext("Lag (days)", side = 1, outer = TRUE, line = 0, cex = 1.2)
+mtext("Odds Ratio (95% CI)", side = 2, outer = TRUE, line = 0, cex = 1.2)
+
+dev.off()
+
+# Lag-Specific Odds Ratios — Season-Adjusted Timeseries Model
+
+extract_lag_ORs_wide <- function(cp_obj, varname, varval = "0.5", lags = 0:4) {
+  lag_labels <- paste0("lag", lags)
+  or   <- cp_obj$matRRfit[varval, lag_labels]
+  low  <- cp_obj$matRRlow[varval, lag_labels]
+  high <- cp_obj$matRRhigh[varval, lag_labels]
+
+  tibble(
+    Predictor = varname,
+    !!!setNames(as.list(or),   paste0("OR_Lag", lags)),
+    !!!setNames(as.list(low),  paste0("Low_Lag", lags)),
+    !!!setNames(as.list(high), paste0("High_Lag", lags)),
+    !!!setNames(as.list(sprintf("%.2f (%.2f, %.2f)", or, low, high)), paste0("Lag ", lags))
+  )
+}
+
+table_lag_ORs <- bind_rows(
+  extract_lag_ORs_wide(cp_runoff_slice, "Runoff"),
+  extract_lag_ORs_wide(cp_soil_slice,   "Soil Moisture"),
+  extract_lag_ORs_wide(cp_temp_slice,   "Temperature"),
+  extract_lag_ORs_wide(cp_precip_slice, "Precipitation"),
+  extract_lag_ORs_wide(cp_snow_slice,   "Snow Density"),
+  extract_lag_ORs_wide(cp_wind_slice,   "Wind Speed"),
+  extract_lag_ORs_wide(cp_bird_slice,   "Total Bird Abundance")
+)
+
+lags <- c(0, 7, 14, 21, 28)  # weekly anchor lags (daily resolution)
+highlight_matrix <- sapply(lags, function(i) {
+  table_lag_ORs[[paste0("Low_Lag", i)]] > 1 | table_lag_ORs[[paste0("High_Lag", i)]] < 1
+})
+colnames(highlight_matrix) <- paste0("Lag ", lags)
+
+# Build Flextable
+
+ft <- table_lag_ORs %>%
+  select(Predictor, paste0("Lag ", lags)) %>%
+  flextable() %>%
+  set_header_labels(Predictor = "Predictor") %>%
+  add_header_row(
+    values = c("Predictor", "Odds Ratio (95% CI)"),
+    colwidths = c(1, length(lags))
+  ) %>%
+  fontsize(size = 11, part = "all") %>%
+  autofit() %>%
+  align(align = "center", part = "all") %>%
+  theme_booktabs()
+
+# Bold significant lag cells
+for (i in lags) {
+  ft <- bold(ft, i = which(highlight_matrix[, paste0("Lag ", i)]),
+             j = paste0("Lag ", i))
+}
+
+# Export to Word
+doc <- read_docx() %>%
+  body_add_flextable(ft) %>%
+  body_add_par(
+    "Table: Lag-specific odds ratios from the adjusted time series model with DLNM crossbasis functions and season fixed effects. Estimates represent odds ratios (95% CI) per 0.5 standard deviation increase in each environmental predictor. Statistically significant lags are shown in bold.",
+    style = "Normal"
+  )
+
+print(doc, target = file.path(tables_folder, "Table_LagSpecific_OR_SeasonAdjusted_Timeseries.docx"))
+
+ft
+
+
+```
+
+# Astronomical Season Fixed Effect
+
+```{r, astronomical season model}
+
+
+# Astronomical season variable based on week number
+# Spring: March 20 ≈ week 12 to June 20 ≈ week 25
+# Summer: June 21 ≈ week 25 to Sept 22 ≈ week 39
+# Fall: Sept 22 ≈ week 39 to Dec 21 ≈ week 51
+# Winter: Dec 21 ≈ week 51 to March 20 ≈ week 12
+
+timeseries_clean <- timeseries_clean %>%
+  mutate(
+    season_astro = case_when(
+      week >= 12 & week < 25 ~ "Spring",
+      week >= 25 & week < 39 ~ "Summer",
+      week >= 39 & week < 51 ~ "Fall",
+      TRUE ~ "Winter"
+    ),
+    season_astro = factor(season_astro, levels = c("Winter", "Spring", "Summer", "Fall"))
+  )
+
+# Check distribution
+timeseries_clean %>%
+  count(season_astro)
+
+# Run model with astronomical seasons
+season_timeseries_model <- bam(outbreak_binary ~
+                   cb_precipitation +
+                   cb_snow_density + 
+                   cb_runoff +
+                   cb_soil_moisture +
+                   cb_bird_abundance +
+                   cb_wind_speed +
+                   cb_temperature +
+                   s(lat, lon, bs = "ds", k = 200) +
+                   season_astro,
+                   family = nb(),
+                   data = timeseries_clean,
+                   method = "fREML",
+                   discrete = TRUE)
+
+summary(season_timeseries_model)
+
+# Check number of cells analyzed 
+mf <- model.frame(season_timeseries_model)
+idx <- as.integer(rownames(mf))
+df_used <- timeseries_clean[idx, ]
+
+y <- df_used$outbreak_binary
+
+pos_cell_weeks <- sum(y == 1, na.rm = TRUE)
+neg_cell_weeks <- sum(y == 0, na.rm = TRUE)
+
+case_cells <- unique(df_used$zone_id[y == 1])
+n_case_cells <- length(case_cells)
+all_cells <- unique(df_used$zone_id)
+control_cells <- setdiff(all_cells, case_cells)
+n_control_cells <- length(control_cells)
+
+cat("=== Counts (rows used in bam()) ===\n")
+cat("Positive cell-weeks: ", pos_cell_weeks, "\n", sep = "")
+cat("Negative cell-weeks: ", neg_cell_weeks, "\n", sep = "")
+cat("Case cells (ever positive): ", n_case_cells, "\n", sep = "")
+cat("Control cells (never positive): ", n_control_cells, "\n", sep = "")
+cat("Total unique cells: ", length(all_cells), "\n", sep = "")
+
+```
+
+```{r, astronomical cross predict}
+
+
+## Center values for each variable
+center_precip <- mean(timeseries_clean$precipitation, na.rm = TRUE)
+center_snow     <- mean(timeseries_clean$snow_density, na.rm = TRUE)
+center_runoff <- mean(timeseries_clean$runoff, na.rm = TRUE)
+center_soil   <- mean(timeseries_clean$soil_moisture, na.rm = TRUE)
+center_bird   <- mean(timeseries_clean$total_bird_abundance, na.rm = TRUE)
+center_wind   <- mean(timeseries_clean$wind_speed, na.rm = TRUE)
+center_temp   <- mean(timeseries_clean$temperature, na.rm = TRUE)
+
+## Cumulative ORs (per 0.5 SD increase)
+cp_runoff   <- crosspred(cb_runoff,   season_timeseries_model, cen = center_runoff, at = 0.5, cumul = TRUE)
+cp_soil     <- crosspred(cb_soil_moisture, season_timeseries_model, cen = center_soil, at = 0.5, cumul = TRUE)
+cp_temp     <- crosspred(cb_temperature, season_timeseries_model, cen = center_temp, at = 0.5, cumul = TRUE)
+cp_precip   <- crosspred(cb_precipitation, season_timeseries_model, cen = center_precip, at = 0.5, cumul = TRUE)
+cp_snow       <- crosspred(cb_snow_density, season_timeseries_model, cen = center_snow, at = 0.5, cumul = TRUE)
+cp_wind     <- crosspred(cb_wind_speed, season_timeseries_model, cen = center_wind, at = 0.5, cumul = TRUE)
+cp_bird     <- crosspred(cb_bird_abundance, season_timeseries_model, cen = center_bird, at = 0.5, cumul = TRUE)
+
+## Slice (lag-specific)
+cp_runoff_slice   <- crosspred(cb_runoff,   season_timeseries_model, cen = center_runoff, at = 0.5)
+cp_soil_slice     <- crosspred(cb_soil_moisture, season_timeseries_model, cen = center_soil, at = 0.5)
+cp_temp_slice     <- crosspred(cb_temperature, season_timeseries_model, cen = center_temp, at = 0.5)
+cp_precip_slice   <- crosspred(cb_precipitation, season_timeseries_model, cen = center_precip, at = 0.5)
+cp_snow_slice       <- crosspred(cb_snow_density, season_timeseries_model, cen = center_snow, at = 0.5)
+cp_wind_slice     <- crosspred(cb_wind_speed, season_timeseries_model, cen = center_wind, at = 0.5)
+cp_bird_slice     <- crosspred(cb_bird_abundance, season_timeseries_model, cen = center_bird, at = 0.5)
+
+```
+
+
+### Results from Timeseries Model with Astronomical Seasonal Fixed Effects
+
+
+```{r, results astro season timeseries model}
+
+cumulative_summary <- tibble(
+  Predictor = c("Runoff", "Soil Moisture", "Temperature",
+                "Precipitation", "Snow Density", "Wind Speed", "Total Bird Abundance"),
+  OR = c(
+    cp_runoff$allRRfit["0.5"],
+    cp_soil$allRRfit["0.5"],
+    cp_temp$allRRfit["0.5"],
+    cp_precip$allRRfit["0.5"],
+    cp_snow$allRRfit["0.5"],
+    cp_wind$allRRfit["0.5"],
+    cp_bird$allRRfit["0.5"]
+  ),
+  CI_low = c(
+    cp_runoff$allRRlow["0.5"],
+    cp_soil$allRRlow["0.5"],
+    cp_temp$allRRlow["0.5"],
+    cp_precip$allRRlow["0.5"],
+    cp_snow$allRRlow["0.5"],
+    cp_wind$allRRlow["0.5"],
+    cp_bird$allRRlow["0.5"]
+  ),
+  CI_high = c(
+    cp_runoff$allRRhigh["0.5"],
+    cp_soil$allRRhigh["0.5"],
+    cp_temp$allRRhigh["0.5"],
+    cp_precip$allRRhigh["0.5"],
+    cp_snow$allRRhigh["0.5"],
+    cp_wind$allRRhigh["0.5"],
+    cp_bird$allRRhigh["0.5"]
+  )
+) %>%
+  mutate(`OR (95% CI)` = sprintf("%.2f (%.2f, %.2f)", OR, CI_low, CI_high)) %>%
+  select(Predictor, `OR (95% CI)`) %>%
+  gt() %>%
+  tab_header(
+    title = md("**Adjusted Timeseries Model: Cumulative Odds Ratios**"),
+    subtitle = "Per 0.5 SD Increase, Adjusted for Season"
+  ) %>%
+  cols_label(`OR (95% CI)` = "Odds Ratio (95% Confidence Interval)") %>%
+  tab_options(
+    table.font.size = 14,
+    heading.title.font.size = 16,
+    heading.subtitle.font.size = 14,
+    data_row.padding = px(6)
+  )
+
+cumulative_summary
+
+plot_cumulative <- function(cp, title) {
+  plot(cp, type = "cumulative", var = 0.5, ci = "area",
+       col = "black", ci.arg = list(col = rgb(0,0,0,0.1), border = NA),
+       lwd = 1.5, main = title, xlab = "", ylab = "", las = 1)
+  abline(h = 1, lty = 2, col = "gray40")
+}
+
+plot_slices <- function(cp, title) {
+  plot(cp, type = "slices", var = 0.5, ci = "area",
+       col = "black", ci.arg = list(col = rgb(0,0,0,0.1), border = NA),
+       lwd = 1.3, main = title, xlab = "", ylab = "", las = 1)
+  abline(h = 1, lty = 2, col = "gray40")
+}
+
+png(file.path(figures_folder, "figure_cumulative_ORs_season_fixed_efffect.png"),
+    width = 11, height = 7, units = "in", res = 300)
+
+par(
+  mfrow = c(2, 4),
+  mar = c(4.2, 4.2, 2.5, 1),
+  oma = c(3, 4, 0, 1),
+  cex.main = 1.2,
+  cex.lab = 1.2,
+  cex.axis = 1.1,
+  tcl = -0.3, mgp = c(2.5, 0.7, 0)
+)
+
+
+plot_cumulative(cp_runoff, "Runoff")
+plot_cumulative(cp_soil,   "Soil Moisture")
+plot_cumulative(cp_temp,   "Temperature")
+plot_cumulative(cp_precip, "Precipitation")
+plot_cumulative(cp_snow,     "Snow Density")
+plot_cumulative(cp_wind,   "Wind Speed")
+plot_cumulative(cp_bird,   "Total Bird Abundance")
+
+mtext("Lag (days)", side = 1, outer = TRUE, line = 0, cex = 1.2)
+mtext("Odds Ratio (95% CI)", side = 2, outer = TRUE, line = 0, cex = 1.2)
+
+dev.off()
+
+png(file.path(figures_folder, "figure_slice_ORs_astro_season_fixed_efffect.png"),
+    width = 11, height = 7, units = "in", res = 300)
+
+par(
+  mfrow = c(2, 4),
+  mar = c(4.2, 4.2, 2.5, 1),
+  oma = c(3, 4, 0, 1),
+  cex.main = 1.2,
+  cex.lab = 1.2,
+  cex.axis = 1.1,
+  tcl = -0.3, mgp = c(2.5, 0.7, 0)
+)
+
+
+plot_slices(cp_runoff_slice, "Runoff")
+plot_slices(cp_soil_slice,   "Soil Moisture")
+plot_slices(cp_temp_slice,   "Temperature")
+plot_slices(cp_precip_slice, "Precipitation")
+plot_slices(cp_snow_slice,     "Snow Density")
+plot_slices(cp_wind_slice,   "Wind Speed")
+plot_slices(cp_bird_slice,   "Total Bird Abundance")
+
+mtext("Lag (days)", side = 1, outer = TRUE, line = 0, cex = 1.2)
+mtext("Odds Ratio (95% CI)", side = 2, outer = TRUE, line = 0, cex = 1.2)
+
+dev.off()
+
+# Lag-Specific Odds Ratios — Season-Adjusted Timeseries Model
+
+extract_lag_ORs_wide <- function(cp_obj, varname, varval = "0.5", lags = 0:4) {
+  lag_labels <- paste0("lag", lags)
+  or   <- cp_obj$matRRfit[varval, lag_labels]
+  low  <- cp_obj$matRRlow[varval, lag_labels]
+  high <- cp_obj$matRRhigh[varval, lag_labels]
+
+  tibble(
+    Predictor = varname,
+    !!!setNames(as.list(or),   paste0("OR_Lag", lags)),
+    !!!setNames(as.list(low),  paste0("Low_Lag", lags)),
+    !!!setNames(as.list(high), paste0("High_Lag", lags)),
+    !!!setNames(as.list(sprintf("%.2f (%.2f, %.2f)", or, low, high)), paste0("Lag ", lags))
+  )
+}
+
+table_lag_ORs <- bind_rows(
+  extract_lag_ORs_wide(cp_runoff_slice, "Runoff"),
+  extract_lag_ORs_wide(cp_soil_slice,   "Soil Moisture"),
+  extract_lag_ORs_wide(cp_temp_slice,   "Temperature"),
+  extract_lag_ORs_wide(cp_precip_slice, "Precipitation"),
+  extract_lag_ORs_wide(cp_snow_slice,   "Snow Density"),
+  extract_lag_ORs_wide(cp_wind_slice,   "Wind Speed"),
+  extract_lag_ORs_wide(cp_bird_slice,   "Total Bird Abundance")
+)
+
+lags <- c(0, 7, 14, 21, 28)  # weekly anchor lags (daily resolution)
+highlight_matrix <- sapply(lags, function(i) {
+  table_lag_ORs[[paste0("Low_Lag", i)]] > 1 | table_lag_ORs[[paste0("High_Lag", i)]] < 1
+})
+colnames(highlight_matrix) <- paste0("Lag ", lags)
+
+# Build Flextable
+
+ft <- table_lag_ORs %>%
+  select(Predictor, paste0("Lag ", lags)) %>%
+  flextable() %>%
+  set_header_labels(Predictor = "Predictor") %>%
+  add_header_row(
+    values = c("Predictor", "Odds Ratio (95% CI)"),
+    colwidths = c(1, length(lags))
+  ) %>%
+  fontsize(size = 11, part = "all") %>%
+  autofit() %>%
+  align(align = "center", part = "all") %>%
+  theme_booktabs()
+
+# Bold significant lag cells
+for (i in lags) {
+  ft <- bold(ft, i = which(highlight_matrix[, paste0("Lag ", i)]),
+             j = paste0("Lag ", i))
+}
+
+# Export to Word
+doc <- read_docx() %>%
+  body_add_flextable(ft) %>%
+  body_add_par(
+    "Table: Lag-specific odds ratios from the adjusted time series model with DLNM crossbasis functions and astronomical season fixed effects. Estimates represent odds ratios (95% CI) per 0.5 standard deviation increase in each environmental predictor. Statistically significant lags are shown in bold.",
+    style = "Normal"
+  )
+
+print(doc, target = file.path(tables_folder, "Table_LagSpecific_OR_Astronomical_SeasonAdjusted_Timeseries.docx"))
+
+ft
+
+
+```

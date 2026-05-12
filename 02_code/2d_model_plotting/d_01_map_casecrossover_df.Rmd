@@ -1,0 +1,92 @@
+---
+title: "Case and Control Zone Maps"
+author: "Fintan Mooney"
+date: "2025-10-15"
+output: html_document
+---
+
+# Maps of case and control zones for the HPAI case-crossover study
+
+```{r include=FALSE}
+rm(list=ls())
+project.folder = paste0(print(here::here()),'/')
+source(paste0(project.folder,'create_folder_structure.R'))
+source(paste0(functions.folder,'script_initiate.R'))
+```
+
+
+## Read in the timeseries dataset
+
+```{r, read in timeseries dataset}
+
+# Daily timeseries (May 2026 revision)
+fishnet_timeseries_clean <- readRDS(file.path(objects_folder, "fishnet_timeseries_daily.RDS"))
+
+fishnet_timeseries_clean <- fishnet_timeseries_clean %>%
+  arrange(zone_id, date) %>%
+  select(-ends_with(".x")) %>%
+  rename_with(~ str_remove(.x, "\\.y$"), ends_with(".y"))
+
+# Spatial GPKG
+gpkg_path <- file.path(here("data", "processed"), "Fishnet_Timeseries_10km.gpkg")
+fishnet_weeks <- st_read(gpkg_path)
+
+## Simplify
+fishnet_weeks <- fishnet_weeks %>%
+  dplyr::select(week, shape_length, shape_area, zone_id, geom)
+
+```
+
+## Map Cases in Casecrossover Model
+
+```{r, casecrossover map}
+
+
+# Map 
+# Identify case zones
+case_zone_ids <- fishnet_timeseries_clean %>%
+  filter(any_outbreak == 1) %>%
+  distinct(zone_id)
+
+# Subset spatial features
+case_zones_sf <- fishnet_weeks %>% filter(zone_id %in% case_zone_ids$zone_id)
+control_zones_sf <- fishnet_weeks %>% filter(!(zone_id %in% case_zone_ids$zone_id))
+
+# Define output paths
+case_gpkg_out    <- file.path(here("data", "processed"), "Case_Zones.gpkg")
+control_gpkg_out <- file.path(here("data", "processed"), "Control_Zones.gpkg")
+
+# Export as GPKG
+st_write(case_zones_sf, case_gpkg_out,    delete_layer = TRUE)
+st_write(control_zones_sf, control_gpkg_out, delete_layer = TRUE)
+
+# Reproject to EPSG:3857 (Web Mercator) for basemap compatibility
+case_zones_sf_proj <- st_transform(case_zones_sf, 3857)
+control_zones_sf_proj <- st_transform(control_zones_sf, 3857)
+
+# Plot with basemap
+ggplot() +
+  # Add simple basemap
+  annotation_map_tile(type = "cartolight", zoomin = 0) +
+
+  # Control zones: outlines
+  geom_sf(data = control_zones_sf_proj, fill = NA, color = "lightblue", linewidth = 0.05) +
+
+  # Case zones: bold fill
+  geom_sf(data = case_zones_sf_proj, fill = "#d73027", color = "red", linewidth = 0.1, alpha = 0.9) +
+
+  # Scale bar
+  annotation_scale(location = "bl", width_hint = 0.3, text_cex = 0.75, line_width = 0.5, style = "ticks") +
+
+  # Theme and layout
+  theme_void(base_size = 12) +
+  theme(
+    plot.title = element_text(size = 12, face = "bold", hjust = 0.5),
+    plot.caption = element_text(size = 10, hjust = 0.5, face = "italic"),
+    plot.background = element_rect(fill = "white", color = NA)
+  ) +
+  coord_sf(expand = FALSE) +
+  labs(
+    title = "HPAI Outbreak Case Zones in Minnesota (2022)"
+  )
+```

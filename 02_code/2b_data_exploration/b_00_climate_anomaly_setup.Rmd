@@ -1,0 +1,169 @@
+---
+title: "Climate Anomaly Baselines (Sensitivity-Only)"
+author: "Fintan Mooney"
+date: "2026-05-12"
+output: html_document
+---
+
+# Builds the multi-year climatology baselines (10/15/20/25-year) and z-scores
+# used by `02_code/2c_models/c_06_climate_anomaly_models.Rmd` ONLY.
+# Lifted out of the primary daily pipeline during the May 2026 revision so that
+# `a_02_create_timeseries_df.Rmd` is no longer entangled with 1997–2021 baselines.
+#
+# Inputs : weekly ERA5-Land CSVs in 01_data/1a_exposure_data/meteorological_data/
+#          (years 1997–2022)
+# Outputs: 03_output/3b_model_output/dataframes/climate_anomaly_panel.RDS
+#
+# Run order: invoke this Rmd before `c_06_climate_anomaly_models.Rmd`.
+# Not required for the primary daily case-crossover model.
+
+```{r 0a-initiate, include=FALSE}
+# 0a. Declare root directory, folder locations, and load packages + helpers
+rm(list = ls())
+project.folder = paste0(print(here::here()), '/')
+source(paste0(project.folder, 'create_folder_structure.R'))
+source(paste0(functions.folder, 'script_initiate.R'))
+```
+
+## 1. Load 2022 weekly met + historical baselines
+
+```{r 1a-load-weekly-era5}
+# 1a. Read every yearly weekly ERA5-Land CSV (1997–2022). Each file is the
+#     full Minnesota fishnet × 52 weeks. Source: GEE export in
+#     02_code/2a_data_prep/a_00_era5_land_gee.js.
+all_years <- 1997:2022
+files <- file.path(env_data, paste0("mn_weekly_era5land_", all_years, ".csv"))
+all_data <- map2_dfr(files, all_years, ~ read_csv(.x) %>% mutate(year = .y))
+
+all_data <- all_data %>%
+  mutate(
+    week_start = as.Date(as.character(week_start), format = "%Y%m%d"),
+    # ERA5-Land returns ~99.9999 when no snow is present (known fill artefact)
+    snow_density = ifelse(snow_density <= 100, 0, snow_density)
+  )
+
+# 1b. Define the four candidate baseline windows requested by reviewers
+baseline_10yr <- all_data %>% filter(year %in% 2012:2021)
+baseline_15yr <- all_data %>% filter(year %in% 2007:2021)
+baseline_20yr <- all_data %>% filter(year %in% 2002:2021)
+baseline_25yr <- all_data %>% filter(year %in% 1997:2021)
+
+# 1c. Variables retained for climatology (12 ERA5-Land derivatives)
+vars <- c("leaf_area_index", "longwave_radiation", "runoff_sum", "shortwave_radiation",
+          "snow_density", "soil_moisture", "relative_humidity", "temperature",
+          "evapotranspiration", "precipitation", "wind_speed", "surface_pressure")
+
+# 1d. Convert week_start dates to ISO week index for cross-year alignment
+add_week <- function(df) df %>%
+  mutate(week = lubridate::isoweek(week_start)) %>%
+  filter(week <= 52)
+
+baseline_10yr <- add_week(baseline_10yr)
+baseline_15yr <- add_week(baseline_15yr)
+baseline_20yr <- add_week(baseline_20yr)
+baseline_25yr <- add_week(baseline_25yr)
+year_2022     <- add_week(all_data %>% filter(year == 2022))
+```
+
+## 2. Compute zone × week climatology + z-scores
+
+```{r 2a-climatology}
+# 2a. Zone × week climatology for each baseline window
+summarize_climatology <- function(df) {
+  df %>%
+    group_by(zone_id, week) %>%
+    summarise(across(all_of(vars), list(mean = mean, sd = sd), .names = "{.col}_{.fn}"),
+              .groups = "drop")
+}
+
+add_suffix <- function(df, yr_label) {
+  clim_cols <- grep("_(mean|sd)$", names(df), value = TRUE)
+  setNames(df, ifelse(names(df) %in% clim_cols,
+                      paste0(names(df), "_", yr_label),
+                      names(df)))
+}
+
+clim_10yr <- add_suffix(summarize_climatology(baseline_10yr), "10yr")
+clim_15yr <- add_suffix(summarize_climatology(baseline_15yr), "15yr")
+clim_20yr <- add_suffix(summarize_climatology(baseline_20yr), "20yr")
+clim_25yr <- add_suffix(summarize_climatology(baseline_25yr), "25yr")
+
+# 2b. Join climatologies to 2022 and compute z-scores against each baseline
+anomaly_panel <- year_2022 %>%
+  left_join(clim_10yr, by = c("zone_id", "week")) %>%
+  left_join(clim_15yr, by = c("zone_id", "week")) %>%
+  left_join(clim_20yr, by = c("zone_id", "week")) %>%
+  left_join(clim_25yr, by = c("zone_id", "week"))
+
+for (v in vars) {
+  for (yr in c(10, 15, 20, 25)) {
+    m <- paste0(v, "_mean_", yr, "yr")
+    s <- paste0(v, "_sd_",   yr, "yr")
+    z <- paste0(v, "_z_",    yr, "yr")
+    anomaly_panel[[z]] <- (anomaly_panel[[v]] - anomaly_panel[[m]]) / anomaly_panel[[s]]
+  }
+}
+```
+
+## 3. Winsorize z-scores at ±4
+
+```{r 3a-winsorize}
+# 3a. Cap extreme z-scores. ERA5-Land occasionally yields values >|10| from
+#     localized snow/wind events; bounding at ±4 prevents these from driving
+#     the downstream GAM smoothers.
+z_cols <- grep("_z_(10yr|15yr|20yr|25yr)$", names(anomaly_panel), value = TRUE)
+
+winsorize_with_summary <- function(x, varname, limit = 4) {
+  before <- sum(x < -limit | x > limit, na.rm = TRUE)
+  x_w <- pmin(pmax(x, -limit), limit)
+  message(sprintf("%s: %d values winsorized (limit ±%s)", varname, before, limit))
+  x_w
+}
+
+for (v in z_cols) {
+  anomaly_panel[[v]] <- winsorize_with_summary(anomaly_panel[[v]], v, limit = 4)
+}
+
+# 3b. Rename runoff_sum → runoff to match the rest of the project
+anomaly_panel <- anomaly_panel %>%
+  rename_with(~ gsub("runoff_sum", "runoff", .x), .cols = everything())
+```
+
+## 4. Bring in outcome + spatial covariates (aggregated from the daily fishnet)
+
+```{r 4a-merge-outcomes}
+# 4a. Aggregate daily case days to ISO weeks; carry zone-static covariates
+daily <- readRDS(file.path(objects_folder, "fishnet_timeseries_daily.RDS"))
+setDT(daily)
+
+# Aggregate outbreak counts to ISO week; carry land cover / lat-lon / feedlot as zone-level
+weekly_outbreak <- daily[date >= as.Date("2022-01-01") & date <= as.Date("2022-12-31"),
+                          .(outbreak_binary = as.integer(sum(outbreak_binary) > 0),
+                            outbreak_count  = sum(outbreak_count, na.rm = TRUE),
+                            season          = first(as.character(season)),
+                            month           = first(month)),
+                          by = .(zone_id, week = lubridate::isoweek(date))]
+
+zone_static <- daily[, .(lat = first(lat), lon = first(lon),
+                         feedlot_count = first(feedlot_count),
+                         land_cover_label = first(as.character(land_cover_label))),
+                     by = zone_id]
+
+anomaly_panel <- anomaly_panel %>%
+  left_join(weekly_outbreak, by = c("zone_id", "week")) %>%
+  left_join(zone_static, by = "zone_id") %>%
+  mutate(
+    outbreak_binary = tidyr::replace_na(outbreak_binary, 0L),
+    outbreak_count  = tidyr::replace_na(outbreak_count, 0L),
+    season          = factor(season, levels = c("Winter", "Spring", "Summer", "Fall"))
+  )
+
+```
+
+## 5. Export
+
+```{r 5a-export}
+# 5a. Persist the weekly anomaly panel for g_climate_anomaly_models.Rmd
+saveRDS(anomaly_panel, file.path(objects_folder, "climate_anomaly_panel.RDS"))
+cat("Wrote climate_anomaly_panel.RDS — zone × week, with z-scores, outbreak indicator, and spatial covariates.\n")
+```
