@@ -19,7 +19,6 @@ source(paste0(functions.folder,'script_initiate.R'))
 
 ```{r, read in timeseries dataset}
 
-# Daily timeseries (May 2026 revision)
 fishnet_timeseries_clean <- readRDS(file.path(objects_folder, "fishnet_timeseries_daily.RDS"))
 
 fishnet_timeseries_clean <- fishnet_timeseries_clean %>%

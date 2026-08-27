@@ -1,0 +1,123 @@
+---
+title: "Figures 1 and 2"
+author: "Fintan Mooney"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
+                      fig.align = "center", dev = "ragg_png", dpi = 150)
+```
+
+```{r initiate}
+rm(list = ls())
+project.folder = paste0(print(here::here()), '/')
+source(paste0(project.folder, 'create_folder_structure.R'))
+source(paste0(functions.folder, 'script_initiate.R'))
+library(sf); library(maptiles); library(tidyterra); library(ggspatial)
+```
+
+Rebuilt to match the submitted manuscript's Figures 1 and 2, on the 8-state grid with the
+current case definition. Same encodings as the original: grey bars with red dashed season
+boundaries, and red case cells over blue feedlot cells on a Positron basemap.
+
+```{r data}
+panel <- setDT(readRDS(paste0(objects_folder, multistate_ts_daily_rds)))[state == "Minnesota"]
+scr   <- readRDS(paste0(objects_folder, multistate_independence_screening_rds))
+
+count_flagged <- function(s, ids) {
+  if (is.na(s)) return(0L)
+  as.integer(sum(as.numeric(trimws(unlist(strsplit(s, ",")))) %in% ids))
+}
+panel[, nf := vapply(outbreak_id, count_flagged, integer(1), ids = scr$cross_farm_ids)]
+panel[, oc := pmax(outbreak_count - nf, 0L)]
+
+cases      <- panel[oc > 0]
+case_cells <- unique(cases$zone_id)
+# negative controls: cells that hold a registered feedlot but never had a spillover
+neg_cells  <- unique(panel[feedlot_count > 0 & !(zone_id %in% case_cells)]$zone_id)
+cat(sprintf("%d events | %d case cells | %d feedlot cells without an event\n",
+            sum(cases$oc), length(case_cells), length(neg_cells)))
+```
+
+# Figure 1
+
+```{r figure1, fig.width = 11, fig.height = 5}
+wk <- cases[, .(n = sum(oc)), by = .(week = as.integer(strftime(date, "%V")))][order(week)]
+
+# meteorological season starts as ISO weeks: Mar 1, Jun 1, Sep 1, Dec 1
+seas <- data.table(week  = c(9, 22, 35, 48),
+                   label = c("Spring", "Summer", "Fall", "Winter"))
+
+# two-line tick labels: week number always, month name whenever the month changes
+brk <- seq(2, 52, 2)
+brk_mon <- strftime(as.Date("2022-01-01") + (brk - 1) * 7, "%b")
+brk_lab <- paste0(brk, "\n", ifelse(c(TRUE, diff(match(brk_mon, month.abb)) != 0), brk_mon, ""))
+
+fig1 <- ggplot(wk, aes(week, n)) +
+  geom_col(fill = "grey60", colour = "black", linewidth = 0.3, width = 0.9) +
+  geom_vline(data = seas, aes(xintercept = week),
+             colour = "red", linetype = "dashed", linewidth = 0.7) +
+  geom_text(data = seas, aes(x = week - 0.6, y = max(wk$n) * 0.98, label = label),
+            colour = "red", family = "Avenir Heavy", size = 3.4,
+            angle = 90, hjust = 1, vjust = 0.5) +
+  # both on the bottom: week number on the first line, month name on the second, printed
+  # only on the first tick that falls in each month
+  scale_x_continuous(breaks = brk, limits = c(0.5, 52.5), expand = c(0, 0), labels = brk_lab) +
+  scale_y_continuous(breaks = seq(0, 30, 2), expand = expansion(mult = c(0, 0.05)),
+                     labels = scales::label_number(drop0trailing = TRUE)) +
+  labs(x = "Week", y = "Number of Spillover Events") +
+  theme_classic(base_family = "Avenir") +
+  theme(panel.border = element_rect(fill = NA, colour = "grey20", linewidth = 0.5),
+        axis.title = element_text(size = 12),
+        axis.text  = element_text(size = 9, colour = "black"))
+
+ggsave_spark(file.path(figures_main_folder, "figure1_epidemic_curve.png"),
+             fig1, width = 11, height = 5)
+fig1
+```
+
+# Figure 2
+
+```{r figure2, fig.width = 9, fig.height = 9}
+g8 <- st_read(paste0(env_data, "hpai_multistate_era5/fishnet_8state.geojson"), quiet = TRUE)
+# the geojson declares WGS84 but its coordinates are the projected EPSG:5070 grid, so set the
+# CRS rather than reproject; transforming it as lon/lat returns empty geometries
+suppressWarnings(st_crs(g8) <- 5070)
+g8 <- g8[g8$state == "Minnesota", "zone_id"]
+
+mn <- st_read(paste0(spatial_data, "cb_2022_us_state_5m"), quiet = TRUE) |>
+  subset(NAME == "Minnesota") |> st_transform(3857)
+
+# web mercator, because that's what the tile service serves
+case_sf <- st_transform(g8[g8$zone_id %in% case_cells, ], 3857)
+neg_sf  <- st_transform(g8[g8$zone_id %in% neg_cells,  ], 3857)
+
+bb   <- st_bbox(st_buffer(st_union(st_geometry(mn)), 25000))
+tile <- get_tiles(st_as_sfc(bb), provider = "Esri.WorldGrayCanvas", zoom = 8,
+                  crop = TRUE, cachedir = tempdir())
+
+lab <- c(sprintf("Positive Case (N = %d)", length(case_cells)),
+         sprintf("Negative Control (N = %s)", format(length(neg_cells), big.mark = ",")))
+
+fig2 <- ggplot() +
+  geom_spatraster_rgb(data = tile, maxcell = 5e6) +
+  geom_sf(data = neg_sf,  aes(fill = lab[2]), colour = "#1270ae", linewidth = 0.15, alpha = 0.5) +
+  geom_sf(data = case_sf, aes(fill = lab[1]), colour = "red",     linewidth = 0.25, alpha = 0.9) +
+  geom_sf(data = mn, fill = NA, colour = "black", linewidth = 0.8) +
+  scale_fill_manual(values = setNames(c("#d73027", "#1f78b4"), lab), limits = lab, name = NULL) +
+  annotation_scale(location = "br", style = "ticks", text_family = "Avenir") +
+  coord_sf(xlim = c(bb$xmin, bb$xmax), ylim = c(bb$ymin, bb$ymax), expand = FALSE) +
+  theme_bw(base_family = "Avenir") +
+  theme(panel.grid = element_line(colour = "grey90", linewidth = 0.2),
+        axis.title = element_blank(),
+        axis.text  = element_text(size = 8, colour = "grey30"),
+        legend.position = c(0.99, 0.99), legend.justification = c(1, 1),
+        legend.background = element_rect(fill = "white", colour = "grey40"),
+        legend.text = element_text(size = 9))
+
+ggsave_spark(file.path(figures_main_folder, "figure2_case_zone_map.png"),
+             fig2, width = 9, height = 9)
+fig2
+```

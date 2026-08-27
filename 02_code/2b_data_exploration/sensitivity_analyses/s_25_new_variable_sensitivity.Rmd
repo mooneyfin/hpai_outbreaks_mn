@@ -1,0 +1,433 @@
+---
+title: "Sensitivity: new ERA5 variables — testing strategy for the daily primary"
+author: "Fintan Mooney"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r initiate}
+rm(list = ls())
+project.folder = paste0(print(here::here()), '/')
+source(paste0(project.folder, 'create_folder_structure.R'))
+source(paste0(functions.folder, 'script_initiate.R'))
+```
+
+# Testing strategy
+
+The Nov 2025 ERA5-Land refresh added five candidate met variables to the
+case-crossover dataframe alongside `snow_depth` (which is already in the
+primary model after replacing `snow_density`):
+
+- `snow_cover` (%)            — threshold version of snow_depth
+- `skin_temperature` (K)      — land-surface temp, frozen-water proxy
+- `soil_temperature` (K)      — 0–7 cm soil temp, frost vs thaw
+- `soil_moisture_2` (m³/m³)   — 7–28 cm soil moisture (depth sensitivity)
+- `snowfall` (m water-eq/day) — daily fresh-snow accumulation
+
+We evaluate each in a 4-tier sequence:
+
+- **Tier 0**: descriptive — pairwise correlations with existing predictors.
+- **Tier 1**: univariate screen — does the variable carry signal at all when paired only with anseriformes + stratum?
+- **Tier 2**: swap tests — does the new variable improve the primary when it
+  *replaces* a correlated existing predictor (skin↔temp, soil_moisture_2↔soil_moisture, snow_cover↔snow_depth)?
+- **Tier 3**: addition tests — does adding the new variable to the primary improve fit (LRT + ΔAIC)? Reports change in *other* predictors' coefficients.
+- **Tier 4**: pre-registered biological hypotheses, Bonferroni-corrected across 3 tests (α/3 = 0.0167):
+    1. Surface-freezing concentrates waterfowl on remaining open water → `skin_temperature` cumulative OR at lag 7–14 d ≠ 1
+    2. Rain-on-snow drives the runoff signal → primary + `snowfall` shifts the precipitation OR away from primary-only's precipitation OR
+    3. Spring soil thaw shifts case timing → `soil_temperature` cumulative OR at lag 14–28 d ≠ 1
+
+# 1. Load case-crossover dataframe
+
+```{r load-data}
+cc <- readRDS(paste0(objects_folder, "case_crossover_df.RDS"))
+setDT(cc)
+
+MAX_LAG  <- 28
+ARGLAG   <- list(fun = "ns", df = 3)
+ARGVAR   <- list(fun = "lin")
+
+# Sanity: all new variables present?
+new_vars <- c("snow_cover", "skin_temperature", "soil_temperature",
+              "soil_moisture_2", "snowfall")
+missing  <- new_vars[!sapply(new_vars, function(v)
+              all(paste0(v, "_Lag", 0:MAX_LAG) %in% names(cc)))]
+if (length(missing) > 0) {
+  stop("Missing lag columns for: ", paste(missing, collapse = ", "),
+       "\nRe-run a_01 → a_02 → a_03 with the multistate ERA5 path first.")
+}
+
+cat("Rows:", nrow(cc), " | cases:", sum(cc$outbreak_binary == 1),
+    " | strata:", uniqueN(cc$stratum_id), "\n")
+```
+
+# 2. Crossbasis builders (shared across all tiers)
+
+```{r cb-builders}
+mk_cb <- function(varname, argvar = ARGVAR, arglag = ARGLAG) {
+  X <- as.matrix(cc[, paste0(varname, "_Lag", 0:MAX_LAG), with = FALSE])
+  crossbasis(X, lag = c(0, MAX_LAG), argvar = argvar, arglag = arglag)
+}
+mk_cb_bird <- function() {
+  X <- as.matrix(cc[, paste0("anseriformes_Lag", 0:MAX_LAG), with = FALSE])
+  crossbasis(X, lag = c(0, MAX_LAG),
+             argvar = list(fun = "lin"),
+             arglag = list(fun = "strata", breaks = c(7, 14, 21)))
+}
+
+# Pre-build the standard crossbases used in primary
+cb_bird          <- mk_cb_bird()
+cb_runoff        <- mk_cb("runoff")
+cb_soil_moisture <- mk_cb("soil_moisture")
+cb_temperature   <- mk_cb("temperature")
+cb_precipitation <- mk_cb("precipitation")
+cb_wind_speed    <- mk_cb("wind_speed")
+cb_snow_depth    <- mk_cb("snow_depth")
+
+# New-variable crossbases
+cb_snow_cover       <- mk_cb("snow_cover")
+cb_skin_temperature <- mk_cb("skin_temperature")
+cb_soil_temperature <- mk_cb("soil_temperature")
+cb_soil_moisture_2  <- mk_cb("soil_moisture_2")
+cb_snowfall         <- mk_cb("snowfall")
+```
+
+# 3. Cumulative-OR extractor (manual contrast — robust across model variants)
+
+```{r extractor}
+# +0.5 SD cumulative over a contiguous lag window
+cum_OR <- function(model, prefix, lag_from = 0, lag_to = MAX_LAG, df_lag = 3) {
+  beta <- coef(model); V <- vcov(model)
+  cols <- grep(paste0("^", prefix, "v"), names(beta))
+  if (length(cols) == 0) return(c(OR = NA, lo = NA, hi = NA))
+  b <- beta[cols]; Vsub <- V[cols, cols]
+  lag_seq <- 0:MAX_LAG
+  lag_basis <- do.call(dlnm::onebasis,
+                       c(list(x = lag_seq), list(fun = "ns", df = df_lag)))
+  contrast <- 0.5 * colSums(lag_basis[lag_seq >= lag_from & lag_seq <= lag_to, ,
+                                       drop = FALSE])
+  lo  <- as.numeric(contrast %*% b)
+  se  <- sqrt(as.numeric(t(contrast) %*% Vsub %*% contrast))
+  c(OR = exp(lo), lo = exp(lo - 1.96 * se), hi = exp(lo + 1.96 * se))
+}
+fmt_OR <- function(x) sprintf("%.2f (%.2f, %.2f)", x["OR"], x["lo"], x["hi"])
+```
+
+# Tier 0 — Correlation with existing predictors
+
+```{r tier-0-correlation}
+existing <- c("temperature", "soil_moisture", "snow_depth",
+              "precipitation", "wind_speed", "runoff")
+all_vars <- c(existing, new_vars)
+# Use Lag 0 of each (instantaneous correlations across all zone-days)
+m <- as.matrix(cc[, paste0(all_vars, "_Lag0"), with = FALSE])
+colnames(m) <- all_vars
+corr_mat <- round(cor(m, use = "pairwise.complete.obs"), 2)
+print(corr_mat)
+
+# Flag |r| > 0.7 with existing predictors
+threshold <- 0.7
+flags <- vapply(new_vars, function(nv) {
+  paste(existing[abs(corr_mat[nv, existing]) > threshold], collapse = ", ")
+}, character(1))
+cat("\nNew vars correlated (|r|>", threshold, ") with existing:\n", sep = "")
+for (v in new_vars) cat(sprintf("  %-18s : %s\n", v, flags[v]))
+```
+
+# Tier 1 — Univariate screen
+
+```{r tier-1-univariate}
+univariate_results <- rbindlist(lapply(new_vars, function(v) {
+  cb_new <- get(paste0("cb_", v))
+  # Build formula on the fly so the prefix matches the cb object name
+  assign("cb_target", cb_new, envir = .GlobalEnv)
+  m <- clogit(outbreak_binary ~ cb_target + cb_bird + strata(stratum_id),
+              data = cc, method = "efron")
+  cu <- cum_OR(m, "cb_target")
+  data.table(Variable = v,
+             AIC      = round(AIC(m), 2),
+             Cumulative_OR = fmt_OR(cu))
+}))
+
+# Also include a bird-only baseline for AIC comparison
+m_baseline <- clogit(outbreak_binary ~ cb_bird + strata(stratum_id),
+                     data = cc, method = "efron")
+baseline_row <- data.table(Variable = "(bird only — baseline)",
+                           AIC = round(AIC(m_baseline), 2),
+                           Cumulative_OR = "—")
+univariate_results <- rbind(baseline_row, univariate_results)
+univariate_results[, dAIC := round(AIC - AIC[Variable == "(bird only — baseline)"], 2)]
+
+print(univariate_results)
+```
+
+# Tier 2 — Swap tests
+
+Three biologically-motivated swaps. Each refits the 7-predictor primary with one
+predictor replaced and compares AIC.
+
+```{r tier-2-swaps}
+# Reference: current primary (snow_depth + temperature + soil_moisture)
+m_primary <- clogit(
+  outbreak_binary ~ cb_runoff + cb_soil_moisture + cb_temperature +
+                    cb_precipitation + cb_wind_speed + cb_snow_depth +
+                    cb_bird + strata(stratum_id),
+  data = cc, method = "efron")
+
+# Swap 1: skin_temperature replaces temperature
+m_swap_skin <- clogit(
+  outbreak_binary ~ cb_runoff + cb_soil_moisture + cb_skin_temperature +
+                    cb_precipitation + cb_wind_speed + cb_snow_depth +
+                    cb_bird + strata(stratum_id),
+  data = cc, method = "efron")
+
+# Swap 2: soil_moisture_2 replaces soil_moisture
+m_swap_soil <- clogit(
+  outbreak_binary ~ cb_runoff + cb_soil_moisture_2 + cb_temperature +
+                    cb_precipitation + cb_wind_speed + cb_snow_depth +
+                    cb_bird + strata(stratum_id),
+  data = cc, method = "efron")
+
+# Swap 3: snow_cover replaces snow_depth
+m_swap_cover <- clogit(
+  outbreak_binary ~ cb_runoff + cb_soil_moisture + cb_temperature +
+                    cb_precipitation + cb_wind_speed + cb_snow_cover +
+                    cb_bird + strata(stratum_id),
+  data = cc, method = "efron")
+
+swap_tbl <- data.table(
+  Spec = c("Primary (snow_depth + temp + soil_moisture)",
+           "Swap: skin_temperature ↔ temperature",
+           "Swap: soil_moisture_2 ↔ soil_moisture",
+           "Swap: snow_cover ↔ snow_depth"),
+  AIC  = c(AIC(m_primary), AIC(m_swap_skin), AIC(m_swap_soil), AIC(m_swap_cover)),
+  Concordance = c(summary(m_primary)$concordance[1],
+                  summary(m_swap_skin)$concordance[1],
+                  summary(m_swap_soil)$concordance[1],
+                  summary(m_swap_cover)$concordance[1])
+)
+swap_tbl[, dAIC := round(AIC - AIC[1], 2)]
+swap_tbl[, `:=`(AIC = round(AIC, 2), Concordance = round(Concordance, 3))]
+print(swap_tbl)
+
+# How does each swap change the cumulative ORs of the other predictors?
+swap_or_tbl <- data.table(
+  Predictor   = c("Runoff", "Soil Moisture", "Temperature/Skin temp",
+                  "Precipitation", "Wind Speed", "Snow Depth/Snow Cover"),
+  Primary     = c(fmt_OR(cum_OR(m_primary, "cb_runoff")),
+                  fmt_OR(cum_OR(m_primary, "cb_soil_moisture")),
+                  fmt_OR(cum_OR(m_primary, "cb_temperature")),
+                  fmt_OR(cum_OR(m_primary, "cb_precipitation")),
+                  fmt_OR(cum_OR(m_primary, "cb_wind_speed")),
+                  fmt_OR(cum_OR(m_primary, "cb_snow_depth"))),
+  Swap_skin   = c(fmt_OR(cum_OR(m_swap_skin, "cb_runoff")),
+                  fmt_OR(cum_OR(m_swap_skin, "cb_soil_moisture")),
+                  fmt_OR(cum_OR(m_swap_skin, "cb_skin_temperature")),
+                  fmt_OR(cum_OR(m_swap_skin, "cb_precipitation")),
+                  fmt_OR(cum_OR(m_swap_skin, "cb_wind_speed")),
+                  fmt_OR(cum_OR(m_swap_skin, "cb_snow_depth"))),
+  Swap_soil   = c(fmt_OR(cum_OR(m_swap_soil, "cb_runoff")),
+                  fmt_OR(cum_OR(m_swap_soil, "cb_soil_moisture_2")),
+                  fmt_OR(cum_OR(m_swap_soil, "cb_temperature")),
+                  fmt_OR(cum_OR(m_swap_soil, "cb_precipitation")),
+                  fmt_OR(cum_OR(m_swap_soil, "cb_wind_speed")),
+                  fmt_OR(cum_OR(m_swap_soil, "cb_snow_depth"))),
+  Swap_cover  = c(fmt_OR(cum_OR(m_swap_cover, "cb_runoff")),
+                  fmt_OR(cum_OR(m_swap_cover, "cb_soil_moisture")),
+                  fmt_OR(cum_OR(m_swap_cover, "cb_temperature")),
+                  fmt_OR(cum_OR(m_swap_cover, "cb_precipitation")),
+                  fmt_OR(cum_OR(m_swap_cover, "cb_wind_speed")),
+                  fmt_OR(cum_OR(m_swap_cover, "cb_snow_cover")))
+)
+print(swap_or_tbl)
+```
+
+# Tier 3 — Addition tests
+
+Two non-substitute additions: `snowfall` (decomposes precip into snow vs rain) and `soil_temperature` (orthogonal info to air temp at the freezing edge).
+
+```{r tier-3-additions}
+m_add_snowfall <- clogit(
+  outbreak_binary ~ cb_runoff + cb_soil_moisture + cb_temperature +
+                    cb_precipitation + cb_wind_speed + cb_snow_depth +
+                    cb_snowfall + cb_bird + strata(stratum_id),
+  data = cc, method = "efron")
+
+m_add_soil_t <- clogit(
+  outbreak_binary ~ cb_runoff + cb_soil_moisture + cb_temperature +
+                    cb_precipitation + cb_wind_speed + cb_snow_depth +
+                    cb_soil_temperature + cb_bird + strata(stratum_id),
+  data = cc, method = "efron")
+
+# Likelihood-ratio tests vs primary
+lrt <- function(m_full, m_red) {
+  chi <- 2 * (as.numeric(logLik(m_full)) - as.numeric(logLik(m_red)))
+  ddf <- attr(logLik(m_full), "df") - attr(logLik(m_red), "df")
+  list(chi = chi, df = ddf,
+       p = pchisq(chi, df = ddf, lower.tail = FALSE))
+}
+lrt_snowfall <- lrt(m_add_snowfall, m_primary)
+lrt_soil_t   <- lrt(m_add_soil_t,   m_primary)
+
+add_tbl <- data.table(
+  Spec        = c("Primary",
+                  "+ snowfall (decompose precip)",
+                  "+ soil_temperature"),
+  AIC         = round(c(AIC(m_primary), AIC(m_add_snowfall), AIC(m_add_soil_t)), 2),
+  dAIC        = round(c(0,
+                        AIC(m_add_snowfall) - AIC(m_primary),
+                        AIC(m_add_soil_t)   - AIC(m_primary)), 2),
+  LRT_chisq   = c("—", sprintf("%.2f", lrt_snowfall$chi), sprintf("%.2f", lrt_soil_t$chi)),
+  LRT_df      = c("—", lrt_snowfall$df, lrt_soil_t$df),
+  LRT_p       = c("—", sprintf("%.4f", lrt_snowfall$p), sprintf("%.4f", lrt_soil_t$p))
+)
+print(add_tbl)
+
+# How does each addition change the precipitation OR (key for the rain-on-snow story)?
+add_or_tbl <- data.table(
+  Predictor     = c("Runoff", "Temperature", "Precipitation", "Snow depth",
+                    "Snowfall (new)", "Soil temperature (new)"),
+  Primary       = c(fmt_OR(cum_OR(m_primary, "cb_runoff")),
+                    fmt_OR(cum_OR(m_primary, "cb_temperature")),
+                    fmt_OR(cum_OR(m_primary, "cb_precipitation")),
+                    fmt_OR(cum_OR(m_primary, "cb_snow_depth")),
+                    "—", "—"),
+  Plus_snowfall = c(fmt_OR(cum_OR(m_add_snowfall, "cb_runoff")),
+                    fmt_OR(cum_OR(m_add_snowfall, "cb_temperature")),
+                    fmt_OR(cum_OR(m_add_snowfall, "cb_precipitation")),
+                    fmt_OR(cum_OR(m_add_snowfall, "cb_snow_depth")),
+                    fmt_OR(cum_OR(m_add_snowfall, "cb_snowfall")),
+                    "—"),
+  Plus_soil_t   = c(fmt_OR(cum_OR(m_add_soil_t, "cb_runoff")),
+                    fmt_OR(cum_OR(m_add_soil_t, "cb_temperature")),
+                    fmt_OR(cum_OR(m_add_soil_t, "cb_precipitation")),
+                    fmt_OR(cum_OR(m_add_soil_t, "cb_snow_depth")),
+                    "—",
+                    fmt_OR(cum_OR(m_add_soil_t, "cb_soil_temperature")))
+)
+print(add_or_tbl)
+```
+
+# Tier 4 — Pre-registered biological hypotheses
+
+Bonferroni: α/3 = 0.0167 → 98.3% CIs. We declare reject only if CI excludes 1
+at the 98.3% level.
+
+```{r tier-4-pre-registered}
+# Wider CI helper for 98.3% intervals
+cum_OR_98 <- function(model, prefix, lag_from = 0, lag_to = MAX_LAG, df_lag = 3) {
+  beta <- coef(model); V <- vcov(model)
+  cols <- grep(paste0("^", prefix, "v"), names(beta))
+  b <- beta[cols]; Vsub <- V[cols, cols]
+  lag_seq <- 0:MAX_LAG
+  lag_basis <- do.call(dlnm::onebasis,
+                       c(list(x = lag_seq), list(fun = "ns", df = df_lag)))
+  contrast <- 0.5 * colSums(lag_basis[lag_seq >= lag_from & lag_seq <= lag_to, ,
+                                       drop = FALSE])
+  lo  <- as.numeric(contrast %*% b)
+  se  <- sqrt(as.numeric(t(contrast) %*% Vsub %*% contrast))
+  z_983 <- qnorm(1 - 0.0167 / 2)   # 98.3% z-multiplier ≈ 2.39
+  c(OR = exp(lo), lo = exp(lo - z_983 * se), hi = exp(lo + z_983 * se))
+}
+
+# Hypothesis 1: skin_temperature lag 7-14 in a primary-style model (swap variant)
+h1 <- cum_OR_98(m_swap_skin, "cb_skin_temperature", lag_from = 7, lag_to = 14)
+# Hypothesis 2: snowfall in primary + snowfall model — does adding it shift precip OR?
+#   Operationalized as: snowfall's own cumulative OR ≠ 1 (i.e. it carries info)
+h2 <- cum_OR_98(m_add_snowfall, "cb_snowfall", lag_from = 0, lag_to = MAX_LAG)
+# Hypothesis 3: soil_temperature lag 14-28 in primary + soil_t model
+h3 <- cum_OR_98(m_add_soil_t, "cb_soil_temperature", lag_from = 14, lag_to = 28)
+
+prereg_tbl <- data.table(
+  Hypothesis = c(
+    "H1: skin_temperature lag 7-14 d (open-water concentration)",
+    "H2: snowfall cumulative lag 0-28 d (rain-on-snow decomp)",
+    "H3: soil_temperature lag 14-28 d (spring thaw)"
+  ),
+  `Cumulative OR (98.3% CI)` = c(fmt_OR(h1), fmt_OR(h2), fmt_OR(h3)),
+  Reject_H0 = c(
+    h1["lo"] > 1 | h1["hi"] < 1,
+    h2["lo"] > 1 | h2["hi"] < 1,
+    h3["lo"] > 1 | h3["hi"] < 1
+  )
+)
+print(prereg_tbl)
+```
+
+# Verdict
+
+```{r verdict, echo = FALSE, results = "asis"}
+cat("Decision rules (deterministic, declared before running):\n\n")
+cat("- **Tier 2 swap adopted** if ΔAIC < -2 (favors new variable) AND concordance not worse by >0.005\n")
+cat("- **Tier 3 addition adopted** if LRT p < 0.01 AND ΔAIC < -4\n")
+cat("- **Tier 4 hypothesis supported** if 98.3% CI excludes 1\n\n")
+
+# Apply rules
+swap_winner <- swap_tbl[dAIC < -2 & Concordance >= max(swap_tbl$Concordance) - 0.005]
+adds <- add_tbl[Spec != "Primary" & dAIC < -4 & as.numeric(LRT_p) < 0.01]
+
+cat("**Swap test verdicts:** ",
+    if (nrow(swap_winner) == 0) "no swap meets criteria — primary unchanged" else
+    paste("adopt", paste(swap_winner$Spec, collapse = "; ")), "\n\n")
+cat("**Addition test verdicts:** ",
+    if (nrow(adds) == 0) "no addition meets criteria" else
+    paste("add", paste(adds$Spec, collapse = "; ")), "\n\n")
+cat("**Pre-registered hypothesis verdicts:**\n")
+for (i in seq_len(nrow(prereg_tbl))) {
+  cat("- ", prereg_tbl$Hypothesis[i], ": ",
+      if (prereg_tbl$Reject_H0[i]) "**supported**" else "not supported", "\n")
+}
+```
+
+# Export supplementary tables
+
+```{r export-tables}
+# Save all four output tables to a single docx for supplementary material
+doc <- read_docx() %>%
+  body_add_par("Sensitivity Analysis: New ERA5 Variables", style = "heading 1") %>%
+  body_add_par(paste0("Sample: ", sum(cc$outbreak_binary == 1),
+                      " cases across ", uniqueN(cc$stratum_id),
+                      " strata. Daily 4-week unidirectional case-crossover, ",
+                      "lag 0-28 d, lin × ns(df=3); anseriformes uses strata(7,14,21)."),
+               style = "Normal") %>%
+  body_add_par("Tier 1: Univariate screen", style = "heading 2") %>%
+  body_add_flextable(flextable(univariate_results) %>% autofit() %>%
+                       theme_booktabs()) %>%
+  body_add_par("Tier 2: Swap-test fit", style = "heading 2") %>%
+  body_add_flextable(flextable(swap_tbl) %>% autofit() %>% theme_booktabs()) %>%
+  body_add_par("Tier 2: Swap-test cumulative ORs", style = "heading 2") %>%
+  body_add_flextable(flextable(swap_or_tbl) %>% autofit() %>% theme_booktabs()) %>%
+  body_add_par("Tier 3: Addition-test fit + LRT", style = "heading 2") %>%
+  body_add_flextable(flextable(add_tbl) %>% autofit() %>% theme_booktabs()) %>%
+  body_add_par("Tier 3: Addition-test cumulative ORs", style = "heading 2") %>%
+  body_add_flextable(flextable(add_or_tbl) %>% autofit() %>% theme_booktabs()) %>%
+  body_add_par("Tier 4: Pre-registered hypothesis tests (Bonferroni-corrected)",
+               style = "heading 2") %>%
+  body_add_flextable(flextable(prereg_tbl) %>% autofit() %>% theme_booktabs())
+
+print(doc, target = paste0(tables_sensitivity_folder, "Table_New_Variable_Sensitivity.docx"))
+cat("Saved: ", tables_sensitivity_folder, "Table_New_Variable_Sensitivity.docx\n", sep = "")
+```
+
+# Save full bundle
+
+```{r save-bundle}
+saveRDS(list(
+  univariate_results = univariate_results,
+  swap_tbl           = swap_tbl,
+  swap_or_tbl        = swap_or_tbl,
+  add_tbl            = add_tbl,
+  add_or_tbl         = add_or_tbl,
+  prereg_tbl         = prereg_tbl,
+  corr_mat           = corr_mat,
+  models = list(primary      = m_primary,
+                swap_skin    = m_swap_skin,
+                swap_soil    = m_swap_soil,
+                swap_cover   = m_swap_cover,
+                add_snowfall = m_add_snowfall,
+                add_soil_t   = m_add_soil_t)
+), paste0(objects_folder, "new_variable_sensitivity.RDS"))
+```

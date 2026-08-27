@@ -23,8 +23,8 @@ case_zones <- st_read(file.path(processed_data, "Case_Zones.gpkg"))
 hpai_mn_2022 <- hpai_outbreaks %>%
   filter(
     state == "MN",
-    date_confirmed >= as.Date("2022-01-01"),
-    date_confirmed <= as.Date("2022-12-31")
+    case_date >= as.Date("2022-01-01"),
+    case_date <= as.Date("2022-12-31")
   )
 
 cat("Total MN outbreaks in 2022:", nrow(hpai_mn_2022), "\n")
@@ -52,7 +52,7 @@ hpai_with_zones_flagged <- hpai_with_zones %>%
     location_id = as.numeric(factor(as.character(geometry)))
   ) %>%
   group_by(zone_id, location_id) %>%
-  mutate(detection_num_at_farm = row_number(date_confirmed)) %>%
+  mutate(detection_num_at_farm = row_number(case_date)) %>%
   ungroup()
 
 # ---- Define independent spillovers ----
@@ -60,10 +60,10 @@ hpai_with_zones_flagged <- hpai_with_zones %>%
 min_gap_weeks <- 12
 
 hpai_independent <- hpai_with_zones_flagged %>%
-  arrange(zone_id, location_id, date_confirmed) %>%
+  arrange(zone_id, location_id, case_date) %>%
   group_by(zone_id, location_id) %>%
   mutate(
-    weeks_since_last = as.numeric(difftime(date_confirmed, lag(date_confirmed), units = "weeks")),
+    weeks_since_last = as.numeric(difftime(case_date, lag(case_date), units = "weeks")),
     keep = detection_num_at_farm == 1 | (!is.na(weeks_since_last) & weeks_since_last >= min_gap_weeks)
   ) %>%
   filter(keep) %>%
@@ -74,7 +74,7 @@ cat("Independent spillovers:", nrow(hpai_independent), "\n")
 
 # ---- Create case dataset ----
 hpai_independent <- hpai_independent %>%
-  mutate(case_week = as.numeric(floor(difftime(date_confirmed, as.Date("2022-01-01"), units = "weeks")) + 1))
+  mutate(case_week = as.numeric(floor(difftime(case_date, as.Date("2022-01-01"), units = "weeks")) + 1))
 
 cases <- hpai_independent %>%
   st_drop_geometry() %>%
@@ -104,12 +104,12 @@ cat("First case week:", min(hpai_independent$case_week), "\n")
 cat("Last case week:", max(hpai_independent$case_week), "\n")
 
 # First and last case by date
-cat("\nFirst case date:", as.character(min(hpai_independent$date_confirmed)), "\n")
-cat("Last case date:", as.character(max(hpai_independent$date_confirmed)), "\n")
+cat("\nFirst case date:", as.character(min(hpai_independent$case_date)), "\n")
+cat("Last case date:", as.character(max(hpai_independent$case_date)), "\n")
 
 # Total span
-date_range <- as.numeric(difftime(max(hpai_independent$date_confirmed), 
-                                  min(hpai_independent$date_confirmed), 
+date_range <- as.numeric(difftime(max(hpai_independent$case_date), 
+                                  min(hpai_independent$case_date), 
                                   units = "days"))
 cat("Total span (days):", date_range, "\n")
 
@@ -129,9 +129,9 @@ zones_multiple_cases <- hpai_independent %>%
   group_by(zone_id) %>%
   summarise(
     n_cases = n(),
-    first_date = min(date_confirmed),
-    last_date = max(date_confirmed),
-    span_days = as.numeric(difftime(max(date_confirmed), min(date_confirmed), units = "days")),
+    first_date = min(case_date),
+    last_date = max(case_date),
+    span_days = as.numeric(difftime(max(case_date), min(case_date), units = "days")),
     weeks_with_cases = paste(sort(unique(case_week)), collapse = ", "),
     .groups = "drop"
   ) %>%
@@ -167,7 +167,7 @@ season_lines <- data.frame(
 )
 
 ggplot(hpai_independent %>% st_drop_geometry(), 
-       aes(x = date_confirmed)) +
+       aes(x = case_date)) +
   # Add histogram
   geom_histogram(binwidth = 7, fill = "black", color = "white") +
   # Add vertical lines at season boundaries

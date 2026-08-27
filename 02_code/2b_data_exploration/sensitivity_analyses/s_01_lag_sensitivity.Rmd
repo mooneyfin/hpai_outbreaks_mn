@@ -1,0 +1,250 @@
+---
+title: "Lag-window sensitivity (daily)"
+author: "Fintan Mooney"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r initiate}
+rm(list = ls())
+# 0a.Declare root directory, folder location and load essential stuff
+project.folder = paste0(print(here::here()), '/')
+source(paste0(project.folder, 'create_folder_structure.R'))
+source(paste0(functions.folder, 'script_initiate.R'))
+```
+
+# 1. Load case-crossover dataframes
+
+```{r load}
+cc_14 <- readRDS(paste0(objects_folder, "case_crossover_df_14lag.RDS"))
+cc_28 <- readRDS(paste0(objects_folder, "case_crossover_df.RDS"))
+cc_42 <- readRDS(paste0(objects_folder, "case_crossover_df_42lag.RDS"))
+cc_56 <- readRDS(paste0(objects_folder, "case_crossover_df_56lag.RDS"))
+```
+
+# 2. Fit DLNM at lag 0–14 d
+
+```{r fit-14}
+cb_runoff               <- crossbasis(as.matrix(cc_14[, paste0("runoff_Lag",               0:14), with = FALSE]), lag = c(0, 14), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 2))
+cb_soil_moisture        <- crossbasis(as.matrix(cc_14[, paste0("soil_moisture_Lag",        0:14), with = FALSE]), lag = c(0, 14), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 2))
+cb_temperature          <- crossbasis(as.matrix(cc_14[, paste0("temperature_Lag",          0:14), with = FALSE]), lag = c(0, 14), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 2))
+cb_precipitation        <- crossbasis(as.matrix(cc_14[, paste0("precipitation_Lag",        0:14), with = FALSE]), lag = c(0, 14), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 2))
+cb_wind_speed           <- crossbasis(as.matrix(cc_14[, paste0("wind_speed_Lag",           0:14), with = FALSE]), lag = c(0, 14), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 2))
+cb_anseriformes <- crossbasis(as.matrix(cc_14[, paste0("anseriformes_Lag", 0:14), with = FALSE]), lag = c(0, 14), argvar = list(fun = "lin"), arglag = list(fun = "strata", breaks = c(7)))
+
+model_14 <- clogit(
+  outbreak_binary ~
+    cb_runoff + cb_soil_moisture + cb_temperature +
+    cb_precipitation + cb_wind_speed + cb_anseriformes +
+    strata(stratum_id),
+  method = "efron",
+  data = cc_14
+)
+saveRDS(model_14, paste0(models_folder, "casecrossover_model_14lag.RDS"))
+
+cp_runoff_14 <- crosspred(cb_runoff,               model_14, cen = 0, at = 0.5, cumul = TRUE)
+cp_soil_14   <- crosspred(cb_soil_moisture,        model_14, cen = 0, at = 0.5, cumul = TRUE)
+cp_temp_14   <- crosspred(cb_temperature,          model_14, cen = 0, at = 0.5, cumul = TRUE)
+cp_precip_14 <- crosspred(cb_precipitation,        model_14, cen = 0, at = 0.5, cumul = TRUE)
+cp_wind_14   <- crosspred(cb_wind_speed,           model_14, cen = 0, at = 0.5, cumul = TRUE)
+cp_bird_14   <- crosspred(cb_anseriformes, model_14, cen = 0, at = 0.5, cumul = TRUE)
+
+n <- ncol(cp_runoff_14$cumRRfit)
+or_runoff_14 <- sprintf("%.2f (%.2f, %.2f)", cp_runoff_14$cumRRfit["0.5", n], cp_runoff_14$cumRRlow["0.5", n], cp_runoff_14$cumRRhigh["0.5", n])
+or_soil_14   <- sprintf("%.2f (%.2f, %.2f)", cp_soil_14$cumRRfit["0.5", n],   cp_soil_14$cumRRlow["0.5", n],   cp_soil_14$cumRRhigh["0.5", n])
+or_temp_14   <- sprintf("%.2f (%.2f, %.2f)", cp_temp_14$cumRRfit["0.5", n],   cp_temp_14$cumRRlow["0.5", n],   cp_temp_14$cumRRhigh["0.5", n])
+or_precip_14 <- sprintf("%.2f (%.2f, %.2f)", cp_precip_14$cumRRfit["0.5", n], cp_precip_14$cumRRlow["0.5", n], cp_precip_14$cumRRhigh["0.5", n])
+or_wind_14   <- sprintf("%.2f (%.2f, %.2f)", cp_wind_14$cumRRfit["0.5", n],   cp_wind_14$cumRRlow["0.5", n],   cp_wind_14$cumRRhigh["0.5", n])
+or_bird_14   <- sprintf("%.2f (%.2f, %.2f)", cp_bird_14$cumRRfit["0.5", n],   cp_bird_14$cumRRlow["0.5", n],   cp_bird_14$cumRRhigh["0.5", n])
+```
+
+# 3. Fit DLNM at lag 0–28 d (primary)
+
+```{r fit-28}
+cb_runoff               <- crossbasis(as.matrix(cc_28[, paste0("runoff_Lag",               0:28), with = FALSE]), lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 3))
+cb_soil_moisture        <- crossbasis(as.matrix(cc_28[, paste0("soil_moisture_Lag",        0:28), with = FALSE]), lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 3))
+cb_temperature          <- crossbasis(as.matrix(cc_28[, paste0("temperature_Lag",          0:28), with = FALSE]), lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 3))
+cb_precipitation        <- crossbasis(as.matrix(cc_28[, paste0("precipitation_Lag",        0:28), with = FALSE]), lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 3))
+cb_wind_speed           <- crossbasis(as.matrix(cc_28[, paste0("wind_speed_Lag",           0:28), with = FALSE]), lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 3))
+cb_anseriformes <- crossbasis(as.matrix(cc_28[, paste0("anseriformes_Lag", 0:28), with = FALSE]), lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "strata", breaks = c(7, 14, 21)))
+
+model_28 <- clogit(
+  outbreak_binary ~
+    cb_runoff + cb_soil_moisture + cb_temperature +
+    cb_precipitation + cb_wind_speed + cb_anseriformes +
+    strata(stratum_id),
+  method = "efron",
+  data = cc_28
+)
+saveRDS(model_28, paste0(models_folder, "casecrossover_model_28lag.RDS"))
+
+cp_runoff_28 <- crosspred(cb_runoff,               model_28, cen = 0, at = 0.5, cumul = TRUE)
+cp_soil_28   <- crosspred(cb_soil_moisture,        model_28, cen = 0, at = 0.5, cumul = TRUE)
+cp_temp_28   <- crosspred(cb_temperature,          model_28, cen = 0, at = 0.5, cumul = TRUE)
+cp_precip_28 <- crosspred(cb_precipitation,        model_28, cen = 0, at = 0.5, cumul = TRUE)
+cp_wind_28   <- crosspred(cb_wind_speed,           model_28, cen = 0, at = 0.5, cumul = TRUE)
+cp_bird_28   <- crosspred(cb_anseriformes, model_28, cen = 0, at = 0.5, cumul = TRUE)
+
+n <- ncol(cp_runoff_28$cumRRfit)
+or_runoff_28 <- sprintf("%.2f (%.2f, %.2f)", cp_runoff_28$cumRRfit["0.5", n], cp_runoff_28$cumRRlow["0.5", n], cp_runoff_28$cumRRhigh["0.5", n])
+or_soil_28   <- sprintf("%.2f (%.2f, %.2f)", cp_soil_28$cumRRfit["0.5", n],   cp_soil_28$cumRRlow["0.5", n],   cp_soil_28$cumRRhigh["0.5", n])
+or_temp_28   <- sprintf("%.2f (%.2f, %.2f)", cp_temp_28$cumRRfit["0.5", n],   cp_temp_28$cumRRlow["0.5", n],   cp_temp_28$cumRRhigh["0.5", n])
+or_precip_28 <- sprintf("%.2f (%.2f, %.2f)", cp_precip_28$cumRRfit["0.5", n], cp_precip_28$cumRRlow["0.5", n], cp_precip_28$cumRRhigh["0.5", n])
+or_wind_28   <- sprintf("%.2f (%.2f, %.2f)", cp_wind_28$cumRRfit["0.5", n],   cp_wind_28$cumRRlow["0.5", n],   cp_wind_28$cumRRhigh["0.5", n])
+or_bird_28   <- sprintf("%.2f (%.2f, %.2f)", cp_bird_28$cumRRfit["0.5", n],   cp_bird_28$cumRRlow["0.5", n],   cp_bird_28$cumRRhigh["0.5", n])
+```
+
+# 4. Fit DLNM at lag 0–42 d
+
+```{r fit-42}
+cb_runoff               <- crossbasis(as.matrix(cc_42[, paste0("runoff_Lag",               0:42), with = FALSE]), lag = c(0, 42), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 6))
+cb_soil_moisture        <- crossbasis(as.matrix(cc_42[, paste0("soil_moisture_Lag",        0:42), with = FALSE]), lag = c(0, 42), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 6))
+cb_temperature          <- crossbasis(as.matrix(cc_42[, paste0("temperature_Lag",          0:42), with = FALSE]), lag = c(0, 42), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 6))
+cb_precipitation        <- crossbasis(as.matrix(cc_42[, paste0("precipitation_Lag",        0:42), with = FALSE]), lag = c(0, 42), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 6))
+cb_wind_speed           <- crossbasis(as.matrix(cc_42[, paste0("wind_speed_Lag",           0:42), with = FALSE]), lag = c(0, 42), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 6))
+cb_anseriformes <- crossbasis(as.matrix(cc_42[, paste0("anseriformes_Lag", 0:42), with = FALSE]), lag = c(0, 42), argvar = list(fun = "lin"), arglag = list(fun = "strata", breaks = c(7, 14, 21, 28, 35)))
+
+model_42 <- clogit(
+  outbreak_binary ~
+    cb_runoff + cb_soil_moisture + cb_temperature +
+    cb_precipitation + cb_wind_speed + cb_anseriformes +
+    strata(stratum_id),
+  method = "efron",
+  data = cc_42
+)
+saveRDS(model_42, paste0(models_folder, "casecrossover_model_42lag.RDS"))
+
+cp_runoff_42 <- crosspred(cb_runoff,               model_42, cen = 0, at = 0.5, cumul = TRUE)
+cp_soil_42   <- crosspred(cb_soil_moisture,        model_42, cen = 0, at = 0.5, cumul = TRUE)
+cp_temp_42   <- crosspred(cb_temperature,          model_42, cen = 0, at = 0.5, cumul = TRUE)
+cp_precip_42 <- crosspred(cb_precipitation,        model_42, cen = 0, at = 0.5, cumul = TRUE)
+cp_wind_42   <- crosspred(cb_wind_speed,           model_42, cen = 0, at = 0.5, cumul = TRUE)
+cp_bird_42   <- crosspred(cb_anseriformes, model_42, cen = 0, at = 0.5, cumul = TRUE)
+
+n <- ncol(cp_runoff_42$cumRRfit)
+or_runoff_42 <- sprintf("%.2f (%.2f, %.2f)", cp_runoff_42$cumRRfit["0.5", n], cp_runoff_42$cumRRlow["0.5", n], cp_runoff_42$cumRRhigh["0.5", n])
+or_soil_42   <- sprintf("%.2f (%.2f, %.2f)", cp_soil_42$cumRRfit["0.5", n],   cp_soil_42$cumRRlow["0.5", n],   cp_soil_42$cumRRhigh["0.5", n])
+or_temp_42   <- sprintf("%.2f (%.2f, %.2f)", cp_temp_42$cumRRfit["0.5", n],   cp_temp_42$cumRRlow["0.5", n],   cp_temp_42$cumRRhigh["0.5", n])
+or_precip_42 <- sprintf("%.2f (%.2f, %.2f)", cp_precip_42$cumRRfit["0.5", n], cp_precip_42$cumRRlow["0.5", n], cp_precip_42$cumRRhigh["0.5", n])
+or_wind_42   <- sprintf("%.2f (%.2f, %.2f)", cp_wind_42$cumRRfit["0.5", n],   cp_wind_42$cumRRlow["0.5", n],   cp_wind_42$cumRRhigh["0.5", n])
+or_bird_42   <- sprintf("%.2f (%.2f, %.2f)", cp_bird_42$cumRRfit["0.5", n],   cp_bird_42$cumRRlow["0.5", n],   cp_bird_42$cumRRhigh["0.5", n])
+```
+
+# 5. Fit DLNM at lag 0–56 d
+
+```{r fit-56}
+cb_runoff               <- crossbasis(as.matrix(cc_56[, paste0("runoff_Lag",               0:56), with = FALSE]), lag = c(0, 56), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 8))
+cb_soil_moisture        <- crossbasis(as.matrix(cc_56[, paste0("soil_moisture_Lag",        0:56), with = FALSE]), lag = c(0, 56), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 8))
+cb_temperature          <- crossbasis(as.matrix(cc_56[, paste0("temperature_Lag",          0:56), with = FALSE]), lag = c(0, 56), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 8))
+cb_precipitation        <- crossbasis(as.matrix(cc_56[, paste0("precipitation_Lag",        0:56), with = FALSE]), lag = c(0, 56), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 8))
+cb_wind_speed           <- crossbasis(as.matrix(cc_56[, paste0("wind_speed_Lag",           0:56), with = FALSE]), lag = c(0, 56), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 8))
+cb_anseriformes <- crossbasis(as.matrix(cc_56[, paste0("anseriformes_Lag", 0:56), with = FALSE]), lag = c(0, 56), argvar = list(fun = "lin"), arglag = list(fun = "strata", breaks = c(7, 14, 21, 28, 35, 42, 49)))
+
+model_56 <- clogit(
+  outbreak_binary ~
+    cb_runoff + cb_soil_moisture + cb_temperature +
+    cb_precipitation + cb_wind_speed + cb_anseriformes +
+    strata(stratum_id),
+  method = "efron",
+  data = cc_56
+)
+saveRDS(model_56, paste0(models_folder, "casecrossover_model_56lag.RDS"))
+
+cp_runoff_56 <- crosspred(cb_runoff,               model_56, cen = 0, at = 0.5, cumul = TRUE)
+cp_soil_56   <- crosspred(cb_soil_moisture,        model_56, cen = 0, at = 0.5, cumul = TRUE)
+cp_temp_56   <- crosspred(cb_temperature,          model_56, cen = 0, at = 0.5, cumul = TRUE)
+cp_precip_56 <- crosspred(cb_precipitation,        model_56, cen = 0, at = 0.5, cumul = TRUE)
+cp_wind_56   <- crosspred(cb_wind_speed,           model_56, cen = 0, at = 0.5, cumul = TRUE)
+cp_bird_56   <- crosspred(cb_anseriformes, model_56, cen = 0, at = 0.5, cumul = TRUE)
+
+n <- ncol(cp_runoff_56$cumRRfit)
+or_runoff_56 <- sprintf("%.2f (%.2f, %.2f)", cp_runoff_56$cumRRfit["0.5", n], cp_runoff_56$cumRRlow["0.5", n], cp_runoff_56$cumRRhigh["0.5", n])
+or_soil_56   <- sprintf("%.2f (%.2f, %.2f)", cp_soil_56$cumRRfit["0.5", n],   cp_soil_56$cumRRlow["0.5", n],   cp_soil_56$cumRRhigh["0.5", n])
+or_temp_56   <- sprintf("%.2f (%.2f, %.2f)", cp_temp_56$cumRRfit["0.5", n],   cp_temp_56$cumRRlow["0.5", n],   cp_temp_56$cumRRhigh["0.5", n])
+or_precip_56 <- sprintf("%.2f (%.2f, %.2f)", cp_precip_56$cumRRfit["0.5", n], cp_precip_56$cumRRlow["0.5", n], cp_precip_56$cumRRhigh["0.5", n])
+or_wind_56   <- sprintf("%.2f (%.2f, %.2f)", cp_wind_56$cumRRfit["0.5", n],   cp_wind_56$cumRRlow["0.5", n],   cp_wind_56$cumRRhigh["0.5", n])
+or_bird_56   <- sprintf("%.2f (%.2f, %.2f)", cp_bird_56$cumRRfit["0.5", n],   cp_bird_56$cumRRlow["0.5", n],   cp_bird_56$cumRRhigh["0.5", n])
+```
+
+# 6. Cumulative OR comparison table
+
+```{r comparison}
+comparison <- tibble(
+  Predictor = c("Surface Runoff", "Soil Moisture",
+                "Temperature", "Precipitation", "Wind Speed", "Anseriformes"),
+  `0–14 d (short-lag sensitivity)` = c(or_runoff_14, or_soil_14, or_temp_14, or_precip_14, or_wind_14, or_bird_14),
+  `0–28 d (primary)` = c(or_runoff_28, or_soil_28, or_temp_28, or_precip_28, or_wind_28, or_bird_28),
+  `0–42 d`           = c(or_runoff_42, or_soil_42, or_temp_42, or_precip_42, or_wind_42, or_bird_42),
+  `0–56 d`           = c(or_runoff_56, or_soil_56, or_temp_56, or_precip_56, or_wind_56, or_bird_56)
+)
+
+ft <- comparison %>%
+  flextable() %>%
+  set_header_labels(Predictor = "Predictor") %>%
+  add_header_row(values = c("Predictor", "Cumulative OR (95% CI), per 0.5 SD"),
+                 colwidths = c(1, 4)) %>%
+  fontsize(size = 11, part = "all") %>%
+  autofit() %>%
+  align(align = "center", part = "all") %>%
+  theme_booktabs()
+
+doc <- read_docx() %>%
+  body_add_flextable(ft) %>%
+  body_add_par(
+    "Cumulative odds ratios across DLNM lag windows (0–28 d primary; 0–14, 0–42, 0–56 d sensitivities) for the daily time-stratified case-crossover model, per 0.5 SD increase in each predictor.",
+    style = "Normal"
+  )
+print(doc, target = paste0(tables_sensitivity_folder, "Table_LagWindow_Sensitivity_daily.docx"))
+
+print(comparison)
+```
+
+# 7. Lag-response slice figure
+
+```{r plot, fig.width = 13, fig.height = 9}
+png(paste0(figures_sensitivity_folder, "figure_lag_sensitivity_daily.png"),
+    width = 13, height = 9, units = "in", res = 300)
+
+par(mfrow = c(6, 4),
+    mar = c(3.5, 4, 2.5, 1), oma = c(3, 3, 0, 0),
+    cex.main = 0.95, cex.lab = 1.0, cex.axis = 0.9)
+
+plot(cp_runoff_14, type = "slices", var = 0.5, ci = "area", col = "black", ci.arg = list(col = rgb(0,0,0,0.15), border = NA), lwd = 1.3, main = "Runoff — 0–14 d", xlab = "", ylab = "", las = 1); abline(h = 1, lty = 2, col = "gray40")
+plot(cp_runoff_28, type = "slices", var = 0.5, ci = "area", col = "black", ci.arg = list(col = rgb(0,0,0,0.15), border = NA), lwd = 1.3, main = "Runoff — 0–28 d", xlab = "", ylab = "", las = 1); abline(h = 1, lty = 2, col = "gray40")
+plot(cp_runoff_42, type = "slices", var = 0.5, ci = "area", col = "black", ci.arg = list(col = rgb(0,0,0,0.15), border = NA), lwd = 1.3, main = "Runoff — 0–42 d", xlab = "", ylab = "", las = 1); abline(h = 1, lty = 2, col = "gray40")
+plot(cp_runoff_56, type = "slices", var = 0.5, ci = "area", col = "black", ci.arg = list(col = rgb(0,0,0,0.15), border = NA), lwd = 1.3, main = "Runoff — 0–56 d", xlab = "", ylab = "", las = 1); abline(h = 1, lty = 2, col = "gray40")
+
+
+plot(cp_soil_14, type = "slices", var = 0.5, ci = "area", col = "black", ci.arg = list(col = rgb(0,0,0,0.15), border = NA), lwd = 1.3, main = "Soil Moisture — 0–14 d", xlab = "", ylab = "", las = 1); abline(h = 1, lty = 2, col = "gray40")
+plot(cp_soil_28, type = "slices", var = 0.5, ci = "area", col = "black", ci.arg = list(col = rgb(0,0,0,0.15), border = NA), lwd = 1.3, main = "Soil Moisture — 0–28 d", xlab = "", ylab = "", las = 1); abline(h = 1, lty = 2, col = "gray40")
+plot(cp_soil_42, type = "slices", var = 0.5, ci = "area", col = "black", ci.arg = list(col = rgb(0,0,0,0.15), border = NA), lwd = 1.3, main = "Soil Moisture — 0–42 d", xlab = "", ylab = "", las = 1); abline(h = 1, lty = 2, col = "gray40")
+plot(cp_soil_56, type = "slices", var = 0.5, ci = "area", col = "black", ci.arg = list(col = rgb(0,0,0,0.15), border = NA), lwd = 1.3, main = "Soil Moisture — 0–56 d", xlab = "", ylab = "", las = 1); abline(h = 1, lty = 2, col = "gray40")
+
+plot(cp_temp_14, type = "slices", var = 0.5, ci = "area", col = "black", ci.arg = list(col = rgb(0,0,0,0.15), border = NA), lwd = 1.3, main = "Temperature — 0–14 d", xlab = "", ylab = "", las = 1); abline(h = 1, lty = 2, col = "gray40")
+plot(cp_temp_28, type = "slices", var = 0.5, ci = "area", col = "black", ci.arg = list(col = rgb(0,0,0,0.15), border = NA), lwd = 1.3, main = "Temperature — 0–28 d", xlab = "", ylab = "", las = 1); abline(h = 1, lty = 2, col = "gray40")
+plot(cp_temp_42, type = "slices", var = 0.5, ci = "area", col = "black", ci.arg = list(col = rgb(0,0,0,0.15), border = NA), lwd = 1.3, main = "Temperature — 0–42 d", xlab = "", ylab = "", las = 1); abline(h = 1, lty = 2, col = "gray40")
+plot(cp_temp_56, type = "slices", var = 0.5, ci = "area", col = "black", ci.arg = list(col = rgb(0,0,0,0.15), border = NA), lwd = 1.3, main = "Temperature — 0–56 d", xlab = "", ylab = "", las = 1); abline(h = 1, lty = 2, col = "gray40")
+
+plot(cp_precip_14, type = "slices", var = 0.5, ci = "area", col = "black", ci.arg = list(col = rgb(0,0,0,0.15), border = NA), lwd = 1.3, main = "Precipitation — 0–14 d", xlab = "", ylab = "", las = 1); abline(h = 1, lty = 2, col = "gray40")
+plot(cp_precip_28, type = "slices", var = 0.5, ci = "area", col = "black", ci.arg = list(col = rgb(0,0,0,0.15), border = NA), lwd = 1.3, main = "Precipitation — 0–28 d", xlab = "", ylab = "", las = 1); abline(h = 1, lty = 2, col = "gray40")
+plot(cp_precip_42, type = "slices", var = 0.5, ci = "area", col = "black", ci.arg = list(col = rgb(0,0,0,0.15), border = NA), lwd = 1.3, main = "Precipitation — 0–42 d", xlab = "", ylab = "", las = 1); abline(h = 1, lty = 2, col = "gray40")
+plot(cp_precip_56, type = "slices", var = 0.5, ci = "area", col = "black", ci.arg = list(col = rgb(0,0,0,0.15), border = NA), lwd = 1.3, main = "Precipitation — 0–56 d", xlab = "", ylab = "", las = 1); abline(h = 1, lty = 2, col = "gray40")
+
+plot(cp_wind_14, type = "slices", var = 0.5, ci = "area", col = "black", ci.arg = list(col = rgb(0,0,0,0.15), border = NA), lwd = 1.3, main = "Wind Speed — 0–14 d", xlab = "", ylab = "", las = 1); abline(h = 1, lty = 2, col = "gray40")
+plot(cp_wind_28, type = "slices", var = 0.5, ci = "area", col = "black", ci.arg = list(col = rgb(0,0,0,0.15), border = NA), lwd = 1.3, main = "Wind Speed — 0–28 d", xlab = "", ylab = "", las = 1); abline(h = 1, lty = 2, col = "gray40")
+plot(cp_wind_42, type = "slices", var = 0.5, ci = "area", col = "black", ci.arg = list(col = rgb(0,0,0,0.15), border = NA), lwd = 1.3, main = "Wind Speed — 0–42 d", xlab = "", ylab = "", las = 1); abline(h = 1, lty = 2, col = "gray40")
+plot(cp_wind_56, type = "slices", var = 0.5, ci = "area", col = "black", ci.arg = list(col = rgb(0,0,0,0.15), border = NA), lwd = 1.3, main = "Wind Speed — 0–56 d", xlab = "", ylab = "", las = 1); abline(h = 1, lty = 2, col = "gray40")
+
+plot(cp_bird_14, type = "slices", var = 0.5, ci = "area", col = "black", ci.arg = list(col = rgb(0,0,0,0.15), border = NA), lwd = 1.3, main = "Anseriformes — 0–14 d", xlab = "", ylab = "", las = 1); abline(h = 1, lty = 2, col = "gray40")
+plot(cp_bird_28, type = "slices", var = 0.5, ci = "area", col = "black", ci.arg = list(col = rgb(0,0,0,0.15), border = NA), lwd = 1.3, main = "Anseriformes — 0–28 d", xlab = "", ylab = "", las = 1); abline(h = 1, lty = 2, col = "gray40")
+plot(cp_bird_42, type = "slices", var = 0.5, ci = "area", col = "black", ci.arg = list(col = rgb(0,0,0,0.15), border = NA), lwd = 1.3, main = "Anseriformes — 0–42 d", xlab = "", ylab = "", las = 1); abline(h = 1, lty = 2, col = "gray40")
+plot(cp_bird_56, type = "slices", var = 0.5, ci = "area", col = "black", ci.arg = list(col = rgb(0,0,0,0.15), border = NA), lwd = 1.3, main = "Anseriformes — 0–56 d", xlab = "", ylab = "", las = 1); abline(h = 1, lty = 2, col = "gray40")
+
+mtext("Lag (days)",          side = 1, outer = TRUE, line = 1, cex = 1.0)
+mtext("Odds Ratio (95% CI)", side = 2, outer = TRUE, line = 1, cex = 1.0)
+dev.off()
+```

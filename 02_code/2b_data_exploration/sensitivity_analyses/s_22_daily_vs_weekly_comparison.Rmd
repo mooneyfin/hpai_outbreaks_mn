@@ -1,0 +1,275 @@
+---
+title: "Daily vs Weekly DLNM comparison: lag-specific and cumulative figures"
+author: "Fintan Mooney"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r initiate}
+rm(list = ls())
+# 0a.Declare root directory, folder location and load essential stuff
+project.folder = paste0(print(here::here()), '/')
+source(paste0(project.folder, 'create_folder_structure.R'))
+source(paste0(functions.folder, 'script_initiate.R'))
+```
+
+# 1. Reload the daily and weekly primary models + data
+
+```{r load}
+# Daily primary (ns df=2 at lag 0-28 d)
+daily_model     <- readRDS(paste0(models_folder, "casecrossover_model.RDS"))
+daily_df        <- readRDS(paste0(objects_folder, "case_crossover_df.RDS"))
+setDT(daily_df)
+
+# Weekly primary (ns df=2 at lag 0-4 wk, CSLT excluded)
+weekly_bundle   <- readRDS(paste0(objects_folder, "weekly_primary_ab.RDS"))
+weekly_model_A  <- weekly_bundle$model_A
+weekly_cc_A     <- weekly_bundle$cc_A
+setDT(weekly_cc_A)
+```
+
+# 2. Rebuild crossbases for both resolutions (must match what was fit)
+
+```{r rebuild-cb}
+DAILY_MAX <- 28
+WEEK_MAX  <- 4
+
+# Daily crossbases — primary spec: lin × ns(df=2); bird strata(7, 14, 21)
+cb_d_runoff <- crossbasis(
+  as.matrix(daily_df[, paste0("runoff_Lag", 0:DAILY_MAX), with = FALSE]),
+  lag = c(0, DAILY_MAX), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 3)
+)
+cb_d_soil <- crossbasis(
+  as.matrix(daily_df[, paste0("soil_moisture_Lag", 0:DAILY_MAX), with = FALSE]),
+  lag = c(0, DAILY_MAX), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 3)
+)
+cb_d_temp <- crossbasis(
+  as.matrix(daily_df[, paste0("temperature_Lag", 0:DAILY_MAX), with = FALSE]),
+  lag = c(0, DAILY_MAX), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 3)
+)
+cb_d_precip <- crossbasis(
+  as.matrix(daily_df[, paste0("precipitation_Lag", 0:DAILY_MAX), with = FALSE]),
+  lag = c(0, DAILY_MAX), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 3)
+)
+cb_d_wind <- crossbasis(
+  as.matrix(daily_df[, paste0("wind_speed_Lag", 0:DAILY_MAX), with = FALSE]),
+  lag = c(0, DAILY_MAX), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 3)
+)
+cb_d_snow <- crossbasis(
+  as.matrix(daily_df[, paste0("snow_cover_Lag", 0:DAILY_MAX), with = FALSE]),
+  lag = c(0, DAILY_MAX), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 3)
+)
+cb_d_bird <- crossbasis(
+  as.matrix(daily_df[, paste0("anseriformes_Lag", 0:DAILY_MAX), with = FALSE]),
+  lag = c(0, DAILY_MAX), argvar = list(fun = "lin"),
+  arglag = list(fun = "strata", breaks = c(7, 14, 21))
+)
+
+# Weekly crossbases — lin × ns(df=2) for ALL six predictors (incl bird)
+cb_w_runoff <- crossbasis(
+  as.matrix(weekly_cc_A[, paste0("runoff_Lag", 0:WEEK_MAX), with = FALSE]),
+  lag = c(0, WEEK_MAX), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 2)
+)
+cb_w_soil <- crossbasis(
+  as.matrix(weekly_cc_A[, paste0("soil_moisture_Lag", 0:WEEK_MAX), with = FALSE]),
+  lag = c(0, WEEK_MAX), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 2)
+)
+cb_w_temp <- crossbasis(
+  as.matrix(weekly_cc_A[, paste0("temperature_Lag", 0:WEEK_MAX), with = FALSE]),
+  lag = c(0, WEEK_MAX), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 2)
+)
+cb_w_precip <- crossbasis(
+  as.matrix(weekly_cc_A[, paste0("precipitation_Lag", 0:WEEK_MAX), with = FALSE]),
+  lag = c(0, WEEK_MAX), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 2)
+)
+cb_w_wind <- crossbasis(
+  as.matrix(weekly_cc_A[, paste0("wind_speed_Lag", 0:WEEK_MAX), with = FALSE]),
+  lag = c(0, WEEK_MAX), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 2)
+)
+cb_w_snow <- crossbasis(
+  as.matrix(weekly_cc_A[, paste0("snow_cover_Lag", 0:WEEK_MAX), with = FALSE]),
+  lag = c(0, WEEK_MAX), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 2)
+)
+cb_w_bird <- crossbasis(
+  as.matrix(weekly_cc_A[, paste0("anseriformes_Lag", 0:WEEK_MAX), with = FALSE]),
+  lag = c(0, WEEK_MAX), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 2)
+)
+```
+
+# 3. Extract lag-specific + cumulative ORs from each model via manual contrast vectors
+
+```{r extract-lag-response}
+extract_lag_response <- function(model, cb_obj, prefix, lag_max) {
+  beta <- coef(model); V <- vcov(model)
+  cols <- grep(paste0("^", prefix, "v"), names(beta))
+  b    <- beta[cols]; Vsub <- V[cols, cols]
+
+  lag_seq   <- 0:lag_max
+  lag_basis <- do.call(dlnm::onebasis,
+                       c(list(x = lag_seq), attr(cb_obj, "arglag")))
+
+  # Lag-specific (per-lag) — OR if +0.5 SD on that single lag day/week
+  lag_specific <- data.table(
+    lag = lag_seq,
+    OR = NA_real_, OR_lo = NA_real_, OR_hi = NA_real_
+  )
+  for (i in seq_along(lag_seq)) {
+    contrast <- 0.5 * lag_basis[i, ]
+    lo <- as.numeric(contrast %*% b)
+    se <- sqrt(as.numeric(t(contrast) %*% Vsub %*% contrast))
+    lag_specific[i, `:=`(OR = exp(lo),
+                         OR_lo = exp(lo - 1.96 * se),
+                         OR_hi = exp(lo + 1.96 * se))]
+  }
+
+  # Cumulative — OR if +0.5 SD across lags 0..k
+  cumulative <- data.table(
+    lag = lag_seq,
+    OR = NA_real_, OR_lo = NA_real_, OR_hi = NA_real_
+  )
+  for (i in seq_along(lag_seq)) {
+    contrast <- 0.5 * colSums(lag_basis[1:i, , drop = FALSE])
+    lo <- as.numeric(contrast %*% b)
+    se <- sqrt(as.numeric(t(contrast) %*% Vsub %*% contrast))
+    cumulative[i, `:=`(OR = exp(lo),
+                       OR_lo = exp(lo - 1.96 * se),
+                       OR_hi = exp(lo + 1.96 * se))]
+  }
+  list(lag_specific = lag_specific, cumulative = cumulative)
+}
+
+predictor_map <- list(
+  list(name = "Runoff",        daily_cb = cb_d_runoff, daily_prefix = "cb_runoff",
+       weekly_cb = cb_w_runoff, weekly_prefix = "cb_runoff_A"),
+  list(name = "Soil Moisture", daily_cb = cb_d_soil,   daily_prefix = "cb_soil_moisture",
+       weekly_cb = cb_w_soil,   weekly_prefix = "cb_soil_moisture_A"),
+  list(name = "Temperature",   daily_cb = cb_d_temp,   daily_prefix = "cb_temperature",
+       weekly_cb = cb_w_temp,   weekly_prefix = "cb_temperature_A"),
+  list(name = "Precipitation", daily_cb = cb_d_precip, daily_prefix = "cb_precipitation",
+       weekly_cb = cb_w_precip, weekly_prefix = "cb_precipitation_A"),
+  list(name = "Wind Speed",    daily_cb = cb_d_wind,   daily_prefix = "cb_wind_speed",
+       weekly_cb = cb_w_wind,   weekly_prefix = "cb_wind_speed_A"),
+  list(name = "Snow Cover",    daily_cb = cb_d_snow,   daily_prefix = "cb_snow_cover",
+       weekly_cb = cb_w_snow,   weekly_prefix = "cb_snow_cover_A"),
+  list(name = "Anseriformes",  daily_cb = cb_d_bird,   daily_prefix = "cb_anseriformes",
+       weekly_cb = cb_w_bird,   weekly_prefix = "cb_anseriformes_A")
+)
+
+build_plot_data <- function() {
+  rbindlist(lapply(predictor_map, function(p) {
+    d_res <- extract_lag_response(daily_model,    p$daily_cb,  p$daily_prefix,  DAILY_MAX)
+    w_res <- extract_lag_response(weekly_model_A, p$weekly_cb, p$weekly_prefix, WEEK_MAX)
+
+    # Convert weekly lag to days for unified x-axis
+    w_res$lag_specific[, lag_days := lag * 7]
+    w_res$cumulative[,   lag_days := lag * 7]
+    d_res$lag_specific[, lag_days := lag]
+    d_res$cumulative[,   lag_days := lag]
+
+    rbind(
+      d_res$lag_specific[, .(Predictor = p$name, Resolution = "Daily",  Type = "Lag-specific",
+                              lag_days, OR, OR_lo, OR_hi)],
+      w_res$lag_specific[, .(Predictor = p$name, Resolution = "Weekly", Type = "Lag-specific",
+                              lag_days, OR, OR_lo, OR_hi)],
+      d_res$cumulative[,   .(Predictor = p$name, Resolution = "Daily",  Type = "Cumulative",
+                              lag_days, OR, OR_lo, OR_hi)],
+      w_res$cumulative[,   .(Predictor = p$name, Resolution = "Weekly", Type = "Cumulative",
+                              lag_days, OR, OR_lo, OR_hi)]
+    )
+  }))
+}
+
+plot_data <- build_plot_data()
+plot_data[, Predictor := factor(Predictor,
+  levels = c("Runoff", "Soil Moisture", "Temperature",
+             "Precipitation", "Wind Speed", "Snow Cover", "Anseriformes"))]
+```
+
+# 4. Figure 1 — Lag-specific OR side-by-side comparison
+
+```{r fig1-lag-specific, fig.width = 14, fig.height = 8}
+fig1_data <- plot_data[Type == "Lag-specific"]
+
+p1 <- ggplot(fig1_data, aes(x = lag_days, y = OR,
+                            color = Resolution, fill = Resolution)) +
+  geom_hline(yintercept = 1, linetype = "dashed", color = "gray40") +
+  geom_ribbon(aes(ymin = OR_lo, ymax = OR_hi), alpha = 0.18, color = NA) +
+  geom_line(linewidth = 0.9) +
+  geom_point(data = fig1_data[Resolution == "Weekly"], size = 2) +
+  scale_color_manual(values = c("Daily" = "black", "Weekly" = "firebrick")) +
+  scale_fill_manual( values = c("Daily" = "black", "Weekly" = "firebrick")) +
+  coord_cartesian(ylim = c(0, 4)) +
+  scale_x_continuous(breaks = c(0, 7, 14, 21, 28),
+                     labels = c("0", "7", "14", "21", "28")) +
+  facet_wrap(~ Predictor, scales = "fixed", ncol = 3) +
+  labs(
+    x        = "Lag (days)",
+    y        = "Odds Ratio (95% CI), per +0.5 SD on that lag day / week",
+    color    = "Resolution",
+    fill     = "Resolution",
+    title    = "Lag-specific (per-lag) OR — daily vs weekly DLNM",
+    subtitle = "Daily: case-crossover lag 0–28 d, ns(df=3); Weekly: lag 0–4 wk, ns(df=2); CSLT excluded"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(panel.grid.minor = element_blank(),
+        legend.position  = "top",
+        strip.text       = element_text(face = "bold"))
+
+ggsave(paste0(figures_sensitivity_folder, "figure_daily_vs_weekly_lag_specific.png"),
+       p1, width = 14, height = 8, units = "in", dpi = 300)
+
+print(p1)
+```
+
+# 5. Figure 2 — Cumulative OR side-by-side comparison
+
+```{r fig2-cumulative, fig.width = 14, fig.height = 8}
+fig2_data <- plot_data[Type == "Cumulative"]
+
+p2 <- ggplot(fig2_data, aes(x = lag_days, y = OR,
+                            color = Resolution, fill = Resolution)) +
+  geom_hline(yintercept = 1, linetype = "dashed", color = "gray40") +
+  geom_ribbon(aes(ymin = OR_lo, ymax = OR_hi), alpha = 0.18, color = NA) +
+  geom_line(linewidth = 0.9) +
+  geom_point(data = fig2_data[Resolution == "Weekly"], size = 2) +
+  scale_color_manual(values = c("Daily" = "black", "Weekly" = "firebrick")) +
+  scale_fill_manual( values = c("Daily" = "black", "Weekly" = "firebrick")) +
+  coord_cartesian(ylim = c(0, 4)) +
+  scale_x_continuous(breaks = c(0, 7, 14, 21, 28),
+                     labels = c("0", "7", "14", "21", "28")) +
+  facet_wrap(~ Predictor, scales = "fixed", ncol = 3) +
+  labs(
+    x        = "Cumulative through lag (days)",
+    y        = "Cumulative OR (95% CI), per +0.5 SD across lags 0…k",
+    color    = "Resolution",
+    fill     = "Resolution",
+    title    = "Cumulative OR — daily vs weekly DLNM",
+    subtitle = "Daily: case-crossover lag 0–28 d, ns(df=3); Weekly: lag 0–4 wk, ns(df=2); CSLT excluded"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(panel.grid.minor = element_blank(),
+        legend.position  = "top",
+        strip.text       = element_text(face = "bold"))
+
+ggsave(paste0(figures_sensitivity_folder, "figure_daily_vs_weekly_cumulative.png"),
+       p2, width = 14, height = 8, units = "in", dpi = 300)
+
+print(p2)
+```
+
+# 6. Save underlying data
+
+```{r save}
+saveRDS(list(
+  plot_data    = plot_data,
+  daily_model  = daily_model,
+  weekly_model = weekly_model_A
+), paste0(objects_folder, "daily_vs_weekly_comparison.RDS"))
+
+# Also export the merged plot data as CSV
+fwrite(plot_data, paste0(tables_sensitivity_folder, "Table_Daily_vs_Weekly_LagResponse.csv"))
+```

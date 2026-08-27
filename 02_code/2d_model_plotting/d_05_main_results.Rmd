@@ -1,0 +1,380 @@
+---
+title: "Main results — Table 2 and Figures 3-6"
+author: "Fintan Mooney"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
+                      fig.align = "center", dev = "ragg_png", dpi = 150)
+```
+
+```{r initiate}
+rm(list = ls())
+project.folder = paste0(print(here::here()), '/')
+source(paste0(project.folder, 'create_folder_structure.R'))
+source(paste0(functions.folder, 'script_initiate.R'))
+stopifnot(requireNamespace("INLA", quietly = TRUE))
+library(INLA); library(Matrix); library(RColorBrewer)
+INLA::inla.setOption(num.threads = 1)
+source(paste0(functions.folder, 'inla_dlnm_helpers.R'))
+```
+
+Primary: symmetric bidirectional referents, daily, ±14 to ±28 d, CSLT-excluded, no spatial
+restriction, 8-state grid.
+
+Lag-response panels follow the style already used in `c_05`: black line, grey ribbon, dashed
+reference at 1, `Avenir Heavy` facet titles. The referent-design comparison is a design
+sensitivity and is written to the sensitivity folder, not the main text.
+
+```{r fit}
+PRIM <- setDT(readRDS(paste0(objects_folder, "case_crossover_df_sym_g14.RDS")))
+mn_o <- assemble_cc_dlnm(PRIM[state == "Minnesota"])
+mn_f <- fit_cc_inla_dlnm(mn_o)
+cat(sprintf("MN primary: %d cases, WAIC %.1f\n",
+            sum(mn_o$data$outbreak_binary == 1), mn_f$waic$waic))
+
+ORD  <- c("Surface Runoff","Soil Moisture","Temperature","Precipitation",
+          "Wind Speed","Snow Cover")
+
+# no gridlines, but keep real axis lines and tick marks so values stay readable
+theme_ms <- function(base = 11) {
+  theme_minimal(base_family = "Avenir", base_size = base) +
+    theme(panel.grid        = element_blank(),
+          axis.line         = element_line(colour = "black", linewidth = 0.3),
+          axis.ticks        = element_line(colour = "black", linewidth = 0.3),
+          axis.ticks.length = unit(2.5, "pt"),
+          strip.text        = element_text(family = "Avenir Heavy"))
+}
+
+# symmetric limits about OR = 1 on the log scale, so the null line lands dead centre and in
+# the same spot in every panel of a faceted forest plot
+sym_lim <- function(x) {
+  m <- max(abs(log10(x[is.finite(x) & x > 0])), na.rm = TRUE)
+  10^c(-m, m)
+}
+ordv <- c(ORD, "Anseriformes")
+
+# axis labels: no trailing zero on whole numbers, so a scale reads 1, 1.5, 2 rather than
+# 1.0, 1.5, 2.0
+lab_num <- scales::label_number(drop0trailing = TRUE)
+```
+
+# 1. Table 2
+
+```{r table2}
+t_lag <- lag_window_table(mn_f, mn_o, "lagspecific", labels = INLA_LABELS)
+t_cum <- lag_window_table(mn_f, mn_o, "cumulative",  labels = INLA_LABELS)
+t_pr  <- prob_window_table(mn_f, mn_o, labels = INLA_LABELS)
+setkey(t_lag, Predictor); setkey(t_cum, Predictor); setkey(t_pr, Predictor)
+t_lag <- t_lag[ordv]; t_cum <- t_cum[ordv]; t_pr <- t_pr[ordv]
+
+# Formatting follows the submitted manuscript's tables: spanning header, 11 pt, centred,
+# booktabs rules, and significant estimates in bold.
+is_sig <- function(x) {
+  p <- suppressWarnings(as.numeric(unlist(regmatches(x, gregexpr("[0-9.]+", x)))))
+  length(p) >= 3 && (p[2] > 1 || p[3] < 1)
+}
+ms_ft <- function(t, span) {
+  ft <- flextable(t) |>
+    add_header_row(values = c("Predictor", span), colwidths = c(1, ncol(t) - 1)) |>
+    fontsize(size = 11, part = "all") |>
+    autofit() |>
+    align(align = "center", part = "all") |>
+    theme_booktabs()
+  for (j in setdiff(names(t), "Predictor")) {
+    hit <- which(vapply(t[[j]], is_sig, logical(1)))
+    if (length(hit)) ft <- bold(ft, i = hit, j = j)
+  }
+  ft
+}
+write_tab <- function(t, span, f) {
+  read_docx() |> body_add_flextable(ms_ft(t, span)) |>
+    print(target = file.path(tables_main_folder, f)); cat("wrote", f, "\n")
+}
+write_tab(t_lag, "Odds Ratio (95% CrI)", "Table2_lag_specific_OR.docx")
+write_tab(t_cum, "Odds Ratio (95% CrI)", "Table2_cumulative_OR.docx")
+write_tab(t_pr,  "Pr(OR > 1)",           "Table2_probability_direction.docx")
+
+# same tables as markdown, so the register can show them inline
+saveRDS(list(lagspecific = t_lag, cumulative = t_cum, probability = t_pr),
+        paste0(objects_folder, "table2_parts.RDS"))
+print(t_cum)
+```
+
+# 2. Lag curves
+
+```{r curves}
+# met terms: crosspred hands back the whole lag curve, both lag-specific and running cumulative
+met_curve <- function(f, o, v) {
+  cp <- crosspred_cc(f, o, v, cumul = TRUE, bylag = 1)
+  lg <- as.numeric(sub("^lag", "", dimnames(cp$matRRfit)[[2]]))
+  rbind(
+    data.table(lag = lg, type = "Lag-specific", OR = as.numeric(cp$matRRfit),
+               lo = as.numeric(cp$matRRlow), hi = as.numeric(cp$matRRhigh)),
+    data.table(lag = lg, type = "Cumulative",  OR = as.numeric(cp$cumRRfit),
+               lo = as.numeric(cp$cumRRlow), hi = as.numeric(cp$cumRRhigh))
+  )[, label := unname(INLA_LABELS[v])][]
+}
+
+# the weekly bird term sits on RW knots, so its cumulative at knot k is a posterior sum over
+# knots 0..k, which crosspred can't produce
+bird_curve <- function(f, o, v) {
+  s <- weekly_lag_summary(f, o, v)$lagspec
+  cum <- rbindlist(lapply(s$lag_day, function(k) {
+    z <- weekly_lag_summary(f, o, v, window = c(0, k))$cumulative
+    data.table(lag = k, type = "Cumulative", OR = z[["OR"]], lo = z[["low"]], hi = z[["high"]])
+  }))
+  rbind(data.table(lag = s$lag_day, type = "Lag-specific", OR = s$OR, lo = s$low, hi = s$high),
+        cum)[, label := unname(INLA_LABELS[v])][]
+}
+
+cv_met  <- rbindlist(lapply(INLA_MET_VARS, function(v) met_curve(mn_f, mn_o, v)))
+cv_bird <- bird_curve(mn_f, mn_o, "anseriformes")
+for (d in list(cv_met, cv_bird)) d[, type := factor(type, c("Lag-specific", "Cumulative"))]
+cv_met[, label := factor(label, levels = ORD)]
+
+# facet_grid only frees y per row, so runoff's 28-day cumulative (which is the inflated
+# number we deliberately never report) would set the scale for every other panel. ggh4x lets
+# each panel keep its own y range.
+lag_panel <- function(d, rows = vars(type), cols = vars(label)) {
+  ggplot(d, aes(lag, OR)) +
+    geom_hline(yintercept = 1, linetype = "dashed", colour = "grey40") +
+    geom_ribbon(aes(ymin = lo, ymax = hi), fill = "black", alpha = 0.13) +
+    geom_line(colour = "black", linewidth = 0.7) +
+    ggh4x::facet_grid2(rows = rows, cols = cols, scales = "free_y", independent = "y") +
+    scale_x_continuous(breaks = c(0, 7, 14, 21, 28)) +
+    labs(x = "Lag (days)", y = "Odds Ratio (95% CrI)") +
+    theme_ms() +
+    theme(strip.text = element_text(family = "Avenir Heavy"),
+          panel.grid.minor = element_blank())
+}
+```
+
+# 3. Figure 3 — lag-response, all exposures
+
+All seven exposures from the primary model, lag-specific. The six meteorological panels share
+one y so they are directly comparable; waterfowl gets its own, because its interval reaches 2.25
+while the meteorological terms live inside 0.9-1.15 and one shared scale flattens all six into
+lines. Linear rather than log throughout: on a log axis this range gets almost no ticks above 1.
+Seven panels in a four-wide grid leaves a hole, so the bottom row is centred. Cumulative effects
+by weekly window are in Table 2.
+
+```{r figure3, fig.width = 11, fig.height = 6}
+cv3 <- rbind(cv_met, bird_curve(mn_f, mn_o, "anseriformes"))[type == "Lag-specific"]
+cv3[, label := factor(label, levels = c(ORD, "Anseriformes"))]
+FIG3_DESIGN <- "AABBCCDD
+#EEFFGG#"
+met_lim  <- range(cv3[label != "Anseriformes", c(lo, hi)], na.rm = TRUE)
+bird_lim <- range(cv3[label == "Anseriformes", c(lo, hi)], na.rm = TRUE)
+
+fig3 <- ggplot(cv3, aes(lag, OR)) +
+  geom_hline(yintercept = 1, linetype = "dashed", colour = "grey40") +
+  geom_ribbon(aes(ymin = lo, ymax = hi), fill = "black", alpha = 0.13) +
+  geom_line(colour = "black", linewidth = 0.7) +
+  # 8 half-columns so the four top panels span the row and the remaining three sit centred
+  # underneath rather than leaving a hole in the corner. axes = "all" keeps an x axis on every
+  # panel; with free scales ggplot otherwise drops it from any panel that has one below it.
+  ggh4x::facet_manual(~ label, design = FIG3_DESIGN, scales = "free_y", axes = "all") +
+  scale_x_continuous(breaks = c(0, 7, 14, 21, 28)) +
+  # free_y then override: the six met panels all get the same explicit range, waterfowl keeps
+  # its own. Panel order follows the factor levels, met first then Anseriformes.
+  ggh4x::facetted_pos_scales(y = c(
+    rep(list(scale_y_continuous(limits = met_lim, breaks = scales::pretty_breaks(5),
+                                labels = lab_num)), length(ORD)),
+    list(scale_y_continuous(limits = bird_lim, breaks = scales::pretty_breaks(5),
+                            labels = lab_num)))) +
+  labs(x = "Lag (days)", y = "Lag-specific Odds Ratio (95% CrI)") +
+  theme_ms()
+ggsave_spark(file.path(figures_main_folder, "figure3_lag_response.png"),
+             fig3, width = 11, height = 6)
+fig3
+```
+
+# 4. Figure 4 — wild birds, own model, 56-day window
+
+Anseriformes and predators in a bird-only model with no meteorological terms, out to **56 days**.
+The longer window is deliberate here: migration operates over weeks, and the manuscript's
+original bird figure ran to 8 lag weeks. Meteorology stays at 28 d, where WAIC puts it.
+
+```{r figure4, fig.width = 8, fig.height = 6}
+BIRD_LAG <- 56
+bird_o <- assemble_cc_dlnm(PRIM[state == "Minnesota"],
+                           met_vars    = character(0),
+                           weekly_vars = c("anseriformes", "predators"),
+                           max_lag     = BIRD_LAG,
+                           bird_knots  = seq(0, BIRD_LAG, 7))
+bird_f <- fit_cc_inla_dlnm(bird_o)
+cat(sprintf("bird-only model, lag 0-%d d: WAIC %.1f\n", BIRD_LAG, bird_f$waic$waic))
+
+cv_b <- rbindlist(lapply(c("anseriformes", "predators"),
+                         function(v) bird_curve(bird_f, bird_o, v)))
+cv_b[, type  := factor(type, c("Lag-specific", "Cumulative"))]
+cv_b[, label := factor(label, levels = unname(INLA_LABELS[c("anseriformes", "predators")]))]
+
+cv_b[, panel_lab := factor(
+  paste0(label, " \u2014 ", type),
+  levels = as.vector(t(outer(levels(cv_b$label), levels(cv_b$type),
+                             function(a, b) paste0(a, " \u2014 ", b)))))]
+
+fig4 <- ggplot(cv_b, aes(lag, OR)) +
+  geom_hline(yintercept = 1, linewidth = 0.4) +
+  geom_ribbon(aes(ymin = lo, ymax = hi), fill = "grey85") +
+  # step for lag-specific, dashed for cumulative, as in the submitted Figure 4
+  geom_step(data = cv_b[type == "Lag-specific"], linewidth = 0.6) +
+  geom_line(data = cv_b[type == "Cumulative"], linewidth = 0.6, linetype = "dashed") +
+  # axes = "all": without it the Anseriformes row loses its x axis, because ggplot only draws
+  # one on the bottom panel of each column
+  ggh4x::facet_wrap2(~ panel_lab, ncol = 2, axes = "all") +
+  scale_x_continuous(breaks = seq(0, BIRD_LAG, 14)) +
+  scale_y_continuous(breaks = scales::pretty_breaks(6), labels = lab_num) +
+  labs(x = "Lag (days)", y = "Odds Ratio (95% CrI)") +
+  theme_ms()
+ggsave_spark(file.path(figures_main_folder, "figure4_birds_lag_response.png"),
+             fig4, width = 8, height = 6)
+fig4
+```
+
+# 5. Figure 5 — flyway context
+
+Cumulative rather than lag-specific: per-day estimates are small and noisy, and comparing lag
+*shapes* across panels of 85 / 90 / 175 events is underpowered. Linear x, shared across facets,
+so the null aligns down the figure.
+
+```{r figure5, fig.width = 12, fig.height = 5.5}
+panels <- list("Minnesota"           = PRIM[state == "Minnesota"],
+               "Other flyway states" = PRIM[state != "Minnesota"],
+               "Pooled"              = PRIM)
+d5 <- rbindlist(lapply(names(panels), function(nm) {
+  o <- assemble_cc_dlnm(panels[[nm]]); f <- fit_cc_inla_dlnm(o)
+  m <- melt(lag_window_table(f, o, "cumulative", labels = INLA_LABELS),
+            id.vars = "Predictor", variable.name = "window", value.name = "cell")
+  m[, `:=`(OR   = as.numeric(sub("^([0-9.]+).*", "\\1", cell)),
+           lo   = as.numeric(sub(".*\\(([0-9.]+),.*", "\\1", cell)),
+           hi   = as.numeric(sub(".*, ([0-9.]+)\\)$", "\\1", cell)),
+           panel = nm)][] }))
+d5[, panel  := factor(panel, levels = rev(names(panels)))]      # dodge stacks first level low
+d5[, window := factor(sub(" d$", " days", window),
+                      levels = sub(" d$", " days", names(INLA_LAG_WINDOWS)))]
+d5[, Predictor := factor(Predictor, levels = rev(ordv))]
+
+# dark end of viridis so all three read on white and stay distinguishable in greyscale
+pal5 <- setNames(rev(viridisLite::viridis(3, begin = 0.05, end = 0.62)), rev(names(panels)))
+
+# linear axis floored at 0, which is the natural bound for an odds ratio, so no space is spent
+# on impossible values. Temperature's upper limit runs past the right edge and gets a chevron
+# there rather than stretching the axis and squashing everything else.
+X_LIM <- c(0, 3); X_HI <- X_LIM[2]
+
+fig5 <- ggplot(d5, aes(OR, Predictor, colour = panel, shape = panel)) +
+  geom_vline(xintercept = 1, linetype = "dashed", colour = "grey40") +
+  geom_errorbarh(aes(xmin = lo, xmax = pmin(hi, X_HI)), height = 0.2,
+                 position = position_dodge(width = 0.7)) +
+  geom_point(size = 2, position = position_dodge(width = 0.7)) +
+  facet_wrap(~ window, nrow = 1) +
+  geom_text(data = d5[hi > X_HI], aes(x = X_HI, label = "\u203a"),
+            position = position_dodge(width = 0.7), size = 5, show.legend = FALSE,
+            hjust = 0.2) +
+  scale_x_continuous(breaks = seq(0, 3, 0.5), limits = X_LIM, labels = lab_num) +
+  scale_colour_manual(values = pal5, breaks = names(panels)) +
+  scale_shape_manual(values = setNames(c(16, 17, 15), names(panels)), breaks = names(panels)) +
+  labs(x = "Cumulative Odds Ratio (95% CrI)", y = NULL) +
+  theme_ms(base = 15) +
+  theme(legend.position = "bottom", legend.title = element_blank(),
+        legend.box.spacing = unit(2, "pt"),   # pull the key up toward the panels
+        legend.margin = margin(t = 0, b = 0))
+ggsave_spark(file.path(figures_main_folder, "figure5_flyway_forest.png"),
+             fig5, width = 12, height = 5.5)
+fig5
+```
+
+# 6. Exploration only — exposure-response curves
+
+Not a manuscript figure. Cumulative exposure-response across each exposure's observed range,
+summed over the lag window, which is `plot(pred, "overall")` in `dlnm`. Everything except
+temperature is linear on the exposure scale by specification, so those panels are straight lines
+by construction — the point of looking is to check the temperature threshold behaves and that
+nothing runs away at the tails. Written to the EDA folder, not `main/` or `sensitivity/`.
+
+```{r exposure-response, fig.width = 11, fig.height = 6.5}
+mnp <- PRIM[state == "Minnesota"]
+
+er_met <- rbindlist(lapply(INLA_MET_VARS, function(v) {
+  X  <- as.matrix(mnp[, paste0(v, "_Lag", 0:28), with = FALSE])
+  at <- seq(quantile(X, .01, na.rm = TRUE), quantile(X, .99, na.rm = TRUE), length.out = 60)
+  cen <- if (v == "temperature") temp_threshold_z(mnp) else 0
+  cp <- crosspred_cc(mn_f, mn_o, v, at = at, cen = cen, bylag = 1, cumul = FALSE)
+  x <- if (v == "temperature")
+         at * sd(mnp$temperature, na.rm = TRUE) + mean(mnp$temperature, na.rm = TRUE) - 273.15
+       else at
+  data.table(x, OR = cp$allRRfit, lo = cp$allRRlow, hi = cp$allRRhigh,
+             label = unname(INLA_LABELS[v]))
+}))
+
+# the weekly bird terms are linear in abundance, so their exposure-response is the summed knot
+# effect scaled by the exposure value
+er_bird <- rbindlist(lapply(c("anseriformes", "predators"), function(v) {
+  o <- bird_o; f <- bird_f
+  w <- o$weekly[[v]]; K <- length(w$knots)
+  b <- utils::tail(f$summary.random[[w$idx]], K)
+  Z <- as.matrix(mnp[, paste0(v, "_Lag", w$knots), with = FALSE])
+  at <- seq(quantile(Z, .01, na.rm = TRUE), quantile(Z, .99, na.rm = TRUE), length.out = 60)
+  s <- sum(b$mean); se <- sqrt(sum(b$sd^2))
+  data.table(x = at, OR = exp(at * s), lo = exp(at * (s - 1.96 * se)),
+             hi = exp(at * (s + 1.96 * se)), label = unname(INLA_LABELS[v]))
+}))
+
+er <- rbind(er_met, er_bird)
+er[, label := factor(label, levels = c(ORD, unname(INLA_LABELS[c("anseriformes","predators")])))]
+
+fig_er <- ggplot(er, aes(x, OR)) +
+  geom_hline(yintercept = 1, linetype = "dashed", colour = "grey40") +
+  geom_ribbon(aes(ymin = lo, ymax = hi), fill = "black", alpha = 0.13) +
+  geom_line(linewidth = 0.7) +
+  facet_wrap(~ label, ncol = 4, scales = "free") +
+  scale_y_log10(breaks = c(0.1, 0.5, 1, 2, 10), labels = lab_num) +
+  coord_cartesian(ylim = c(0.05, 20)) +
+  labs(x = "Exposure (SD, except temperature in °C)",
+       y = "Cumulative Odds Ratio (95% CrI) over the lag window") +
+  theme_ms()
+ggsave_spark(file.path(figures_eda_folder, "exploration_exposure_response.png"),
+             fig_er, width = 11, height = 6.5)
+fig_er
+```
+
+# 7. Sensitivity figure — referent design
+
+```{r si-referent, fig.width = 8.5, fig.height = 5.5}
+dec <- setDT(readRDS(paste0(objects_folder, "design_decomposition.RDS")))
+d7  <- dec[kind == "cumulative" & panel == "Minnesota" &
+             design %in% c("Unidirectional", "Bidirectional"),
+           .(Predictor, design, cell = `Lag 0-7 d`)]
+sym <- melt(lag_window_table(mn_f, mn_o, "cumulative", labels = INLA_LABELS),
+            id.vars = "Predictor", variable.name = "window", value.name = "cell")[
+              window == "Lag 0-7 d"][, .(Predictor, design = "Symmetric ±14–28 days (primary)", cell)]
+d7 <- rbind(d7, sym)
+d7[, `:=`(OR = as.numeric(sub("^([0-9.]+).*", "\\1", cell)),
+          lo = as.numeric(sub(".*\\(([0-9.]+),.*", "\\1", cell)),
+          hi = as.numeric(sub(".*, ([0-9.]+)\\)$", "\\1", cell)))]
+d7[design == "Bidirectional", design := "Time-stratified (bidirectional)"]
+lev <- c("Unidirectional", "Time-stratified (bidirectional)", "Symmetric ±14–28 days (primary)")
+d7[, design := factor(design, levels = rev(lev))]
+d7[, Predictor := factor(Predictor, levels = rev(ordv))]
+pal7 <- setNames(rev(viridisLite::viridis(3, begin = 0.05, end = 0.62)), rev(lev))
+
+figS <- ggplot(d7, aes(OR, Predictor, colour = design, shape = design)) +
+  geom_vline(xintercept = 1, linetype = "dashed", colour = "grey40") +
+  geom_errorbarh(aes(xmin = lo, xmax = hi), height = 0.25,
+                 position = position_dodge(width = 0.7)) +
+  geom_point(size = 2, position = position_dodge(width = 0.7)) +
+  scale_x_continuous(breaks = scales::pretty_breaks(5), labels = lab_num) +
+  scale_colour_manual(values = pal7, breaks = lev) +
+  scale_shape_manual(values = setNames(c(16, 17, 15), lev), breaks = lev) +
+  labs(x = "Cumulative Odds Ratio (95% CrI), lag 0-7 days", y = NULL) +
+  theme_ms() +
+  theme(legend.position = "bottom", legend.title = element_blank())
+ggsave_spark(file.path(figures_sensitivity_folder, "figureS_referent_design.png"),
+             figS, width = 8.5, height = 5.5)
+figS
+```

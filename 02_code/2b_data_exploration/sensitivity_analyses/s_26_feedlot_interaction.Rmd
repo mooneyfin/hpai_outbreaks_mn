@@ -1,0 +1,306 @@
+---
+title: "Sensitivity: poultry-density × runoff interaction"
+author: "Fintan Mooney"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r initiate}
+rm(list = ls())
+project.folder = paste0(print(here::here()), '/')
+source(paste0(project.folder, 'create_folder_structure.R'))
+source(paste0(functions.folder, 'script_initiate.R'))
+```
+
+# Hypothesis
+
+The primary case-crossover finding is a positive cumulative OR for **runoff**.
+Mechanistically, this could reflect waterborne movement of HPAI-virus-laden
+material from upstream/upland zones into commercial poultry operations.
+If that mechanism is real, the runoff effect should **amplify in zones with
+more poultry per cell** — more entry points, more total birds, higher
+probability that a runoff-mediated incursion lands on a susceptible operation.
+
+We test this with a poultry-density × runoff interaction in the daily
+case-crossover. **Poultry density (`birds_au`, animal-units of poultry per
+fishnet cell) is zone-fixed**, so it would normally be conditioned out of a
+case-crossover. But the *interaction term* (birds_au × runoff_Lag_k) varies
+within a stratum because runoff varies within the stratum — so the
+interaction is estimable.
+
+# 1. Load the case-crossover data
+
+```{r load}
+cc <- readRDS(paste0(objects_folder, "case_crossover_df.RDS"))
+setDT(cc)
+
+MAX_LAG <- 28
+ARGLAG  <- list(fun = "ns", df = 3)
+ARGVAR  <- list(fun = "lin")
+
+# Sanity: birds_au present, varied across zones
+if (!"birds_au" %in% names(cc)) stop("birds_au not found in case_crossover_df")
+ba_summary <- cc[, .(unique_zones = uniqueN(zone_id)), by = birds_au]
+cat("birds_au range: ", round(range(cc$birds_au)),
+    "  | unique values: ", uniqueN(cc$birds_au),
+    "  | zones with birds_au=0: ",
+    cc[birds_au == 0, uniqueN(zone_id)], "\n", sep = "")
+```
+
+# 2. Standardise poultry density (log+z)
+
+`birds_au` is heavily right-skewed (a few large CAFOs dominate). Apply
+log1p, then z-score so the interaction coefficient interprets per +1 SD of
+log poultry-density.
+
+```{r standardise-birds-au}
+cc[, birds_au_z := as.numeric(scale(log1p(birds_au)))]
+cat("birds_au_z summary:\n"); print(summary(cc$birds_au_z))
+```
+
+# 3. Crossbasis builders (snow_cover primary spec)
+
+```{r cb-builders}
+mk_cb <- function(varname, argvar = ARGVAR, arglag = ARGLAG) {
+  X <- as.matrix(cc[, paste0(varname, "_Lag", 0:MAX_LAG), with = FALSE])
+  crossbasis(X, lag = c(0, MAX_LAG), argvar = argvar, arglag = arglag)
+}
+mk_cb_bird <- function() {
+  X <- as.matrix(cc[, paste0("anseriformes_Lag", 0:MAX_LAG), with = FALSE])
+  crossbasis(X, lag = c(0, MAX_LAG),
+             argvar = list(fun = "lin"),
+             arglag = list(fun = "strata", breaks = c(7, 14, 21)))
+}
+
+cb_runoff        <- mk_cb("runoff")
+cb_soil_moisture <- mk_cb("soil_moisture")
+cb_temperature   <- mk_cb("temperature")
+cb_precipitation <- mk_cb("precipitation")
+cb_wind_speed    <- mk_cb("wind_speed")
+cb_snow_cover    <- mk_cb("snow_cover")
+cb_bird          <- mk_cb_bird()
+```
+
+# 4. Build the interaction crossbasis
+
+The interaction term is built by element-wise multiplying each
+`runoff_Lag_k` column by `birds_au_z`, then re-crossbasing the resulting
+matrix on the same lag basis as the main runoff term. This yields three
+columns (one per lag basis function); their joint LRT against the primary
+gives the 3-df interaction test.
+
+```{r interaction-cb}
+runoff_mat        <- as.matrix(cc[, paste0("runoff_Lag", 0:MAX_LAG), with = FALSE])
+runoff_x_birds    <- runoff_mat * cc$birds_au_z
+cb_runoff_x_birds <- crossbasis(runoff_x_birds,
+                                 lag    = c(0, MAX_LAG),
+                                 argvar = ARGVAR,
+                                 arglag = ARGLAG)
+```
+
+# 5. Fit the two models
+
+```{r fit-models}
+# Reference (snow_cover primary)
+m_primary <- clogit(
+  outbreak_binary ~ cb_runoff + cb_soil_moisture + cb_temperature +
+                    cb_precipitation + cb_wind_speed + cb_snow_cover +
+                    cb_bird + strata(stratum_id),
+  data = cc, method = "efron")
+
+# With density × runoff interaction
+m_inter <- clogit(
+  outbreak_binary ~ cb_runoff + cb_runoff_x_birds +
+                    cb_soil_moisture + cb_temperature +
+                    cb_precipitation + cb_wind_speed + cb_snow_cover +
+                    cb_bird + strata(stratum_id),
+  data = cc, method = "efron")
+
+cat("\n--- Fit comparison ---\n")
+cat(sprintf("Primary       AIC: %.2f\n", AIC(m_primary)))
+cat(sprintf("+ Interaction AIC: %.2f  (ΔAIC = %+.2f)\n",
+            AIC(m_inter), AIC(m_inter) - AIC(m_primary)))
+
+# LRT (3 df: the three interaction crossbasis columns)
+chi <- 2 * (as.numeric(logLik(m_inter)) - as.numeric(logLik(m_primary)))
+ddf <- attr(logLik(m_inter), "df") - attr(logLik(m_primary), "df")
+p_lrt <- pchisq(chi, df = ddf, lower.tail = FALSE)
+cat(sprintf("LRT (interaction): chi^2 = %.2f, df = %d, p = %.4f\n",
+            chi, ddf, p_lrt))
+```
+
+# 6. Runoff OR at low / median / high poultry density — cumulative AND lag-specific
+
+```{r runoff-or-by-density}
+# birds_au_z quantiles (in standardized units)
+ba_low    <- quantile(cc$birds_au_z, 0.10)   # ~10th pctl
+ba_median <- quantile(cc$birds_au_z, 0.50)
+ba_high   <- quantile(cc$birds_au_z, 0.90)   # ~90th pctl
+
+# OR contribution for runoff at a given (lag-window, birds_au_z) combo:
+#   logOR  = contrast' %*% (b_runoff + ba_z * b_runoff_x_birds)
+#   Var    = contrast' (V_mm + 2*ba_z*V_mi + ba_z^2 * V_ii) contrast
+beta <- coef(m_inter); V <- vcov(m_inter)
+i_main <- grep("^cb_runoffv",         names(beta))
+i_intx <- grep("^cb_runoff_x_birdsv", names(beta))
+b_main <- beta[i_main]; b_intx <- beta[i_intx]
+V_mm   <- V[i_main, i_main]
+V_ii   <- V[i_intx, i_intx]
+V_mi   <- V[i_main, i_intx]
+
+lag_basis <- do.call(dlnm::onebasis,
+                     c(list(x = 0:MAX_LAG), list(fun = "ns", df = 3)))
+
+or_at <- function(contrast, ba_z) {
+  lo  <- as.numeric(contrast %*% (b_main + ba_z * b_intx))
+  var <- as.numeric(t(contrast) %*% (V_mm + 2 * ba_z * V_mi + ba_z^2 * V_ii) %*% contrast)
+  se  <- sqrt(var)
+  c(OR = exp(lo), lo = exp(lo - 1.96*se), hi = exp(lo + 1.96*se))
+}
+
+# Convert birds_au_z back to interpretable birds_au scale for reporting:
+ba_grid_raw <- exp(c(ba_low, ba_median, ba_high) * sd(log1p(cc$birds_au)) +
+                   mean(log1p(cc$birds_au))) - 1
+
+# 6a. Cumulative runoff OR over lag 0-28 d at three density levels
+contrast_cum <- 0.5 * colSums(lag_basis)
+cum_tbl <- data.table(
+  Density_label = c("Low (10th pctl)", "Median (50th pctl)", "High (90th pctl)"),
+  birds_au_raw  = round(ba_grid_raw, 1),
+  Cumulative_runoff_OR_95CI = c(
+    sprintf("%.2f (%.2f, %.2f)", or_at(contrast_cum, ba_low)["OR"],
+            or_at(contrast_cum, ba_low)["lo"], or_at(contrast_cum, ba_low)["hi"]),
+    sprintf("%.2f (%.2f, %.2f)", or_at(contrast_cum, ba_median)["OR"],
+            or_at(contrast_cum, ba_median)["lo"], or_at(contrast_cum, ba_median)["hi"]),
+    sprintf("%.2f (%.2f, %.2f)", or_at(contrast_cum, ba_high)["OR"],
+            or_at(contrast_cum, ba_high)["lo"], or_at(contrast_cum, ba_high)["hi"])
+  )
+)
+cat("\n--- Cumulative runoff OR over lag 0-28 d by poultry density ---\n")
+print(cum_tbl)
+
+# 6b. Lag-specific OR at each daily lag (the per-day estimate)
+lag_specific_tbl <- rbindlist(lapply(0:MAX_LAG, function(k) {
+  c_k <- 0.5 * lag_basis[k + 1, ]
+  data.table(
+    lag_days        = k,
+    Low_OR_95CI     = sprintf("%.2f (%.2f, %.2f)", or_at(c_k, ba_low)["OR"],
+                              or_at(c_k, ba_low)["lo"],  or_at(c_k, ba_low)["hi"]),
+    Median_OR_95CI  = sprintf("%.2f (%.2f, %.2f)", or_at(c_k, ba_median)["OR"],
+                              or_at(c_k, ba_median)["lo"], or_at(c_k, ba_median)["hi"]),
+    High_OR_95CI    = sprintf("%.2f (%.2f, %.2f)", or_at(c_k, ba_high)["OR"],
+                              or_at(c_k, ba_high)["lo"],  or_at(c_k, ba_high)["hi"])
+  )
+}))
+# Print just the weekly markers for the manuscript-style table
+cat("\n--- Lag-specific runoff OR at weekly checkpoints (per +0.5 SD on that day) ---\n")
+print(lag_specific_tbl[lag_days %in% c(0, 7, 14, 21, 28)])
+
+# Also keep the full daily-resolution version for plotting
+lag_specific_numeric <- rbindlist(lapply(0:MAX_LAG, function(k) {
+  c_k <- 0.5 * lag_basis[k + 1, ]
+  rbindlist(lapply(list(Low = ba_low, Median = ba_median, High = ba_high),
+                   function(z) {
+    o <- or_at(c_k, z)
+    data.table(lag_days = k, OR = o["OR"], OR_lo = o["lo"], OR_hi = o["hi"])
+  }), idcol = "Density")
+}))
+# (Sorted so Density is a factor with sensible plotting order)
+lag_specific_numeric[, Density := factor(Density, levels = c("Low", "Median", "High"))]
+```
+
+# 6c. Lag-specific OR figure
+
+```{r lag-specific-figure, fig.width = 10, fig.height = 5}
+p <- ggplot(lag_specific_numeric, aes(x = lag_days, y = OR,
+                                      color = Density, fill = Density)) +
+  geom_hline(yintercept = 1, linetype = "dashed", color = "gray40") +
+  geom_ribbon(aes(ymin = OR_lo, ymax = OR_hi), alpha = 0.15, color = NA) +
+  geom_line(linewidth = 0.9) +
+  scale_y_log10() +
+  scale_x_continuous(breaks = c(0, 7, 14, 21, 28)) +
+  scale_color_manual(values = c("Low" = "steelblue",
+                                "Median" = "gray40",
+                                "High" = "firebrick")) +
+  scale_fill_manual( values = c("Low" = "steelblue",
+                                "Median" = "gray40",
+                                "High" = "firebrick")) +
+  labs(
+    x = "Lag (days)",
+    y = "Runoff OR (95% CI), per +0.5 SD on that lag day",
+    color = "Poultry density", fill = "Poultry density",
+    title    = "Lag-specific runoff OR by poultry density — daily case-crossover",
+    subtitle = "Daily lin × ns(df=3); density = standardised log birds_au at 10th/50th/90th pctl"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(panel.grid.minor = element_blank(), legend.position = "top",
+        strip.text = element_text(face = "bold"))
+ggsave(paste0(figures_sensitivity_folder, "figure_feedlot_runoff_lag_specific_daily.png"),
+       p, width = 10, height = 5, units = "in", dpi = 300)
+print(p)
+```
+
+# 7. Verdict
+
+```{r verdict}
+verdict <- if (p_lrt < 0.05 && AIC(m_inter) - AIC(m_primary) < -2) {
+  "SUPPORTED — interaction is jointly significant (LRT p<0.05) and improves AIC by >2"
+} else if (p_lrt < 0.05) {
+  "PARTIAL — LRT significant but ΔAIC does not exceed -2"
+} else {
+  "NOT SUPPORTED — interaction is not jointly significant at α=0.05"
+}
+cat("Decision rule: LRT p < 0.05 AND ΔAIC < -2 → adopt interaction\n")
+cat("Verdict: ", verdict, "\n", sep = "")
+```
+
+# 8. Export tables
+
+```{r export}
+# Save tables to a single docx
+fit_tbl <- data.table(
+  Spec    = c("Primary (snow_cover)", "+ runoff × poultry-density interaction"),
+  AIC     = c(round(AIC(m_primary), 2), round(AIC(m_inter), 2)),
+  dAIC    = c(0, round(AIC(m_inter) - AIC(m_primary), 2)),
+  LRT_chi = c("—", sprintf("%.2f", chi)),
+  LRT_df  = c("—", as.character(ddf)),
+  LRT_p   = c("—", sprintf("%.4f", p_lrt))
+)
+
+doc <- read_docx() %>%
+  body_add_par("Sensitivity Analysis: Poultry-density × Runoff Interaction (Daily)",
+               style = "heading 1") %>%
+  body_add_par(paste0("Sample: ", sum(cc$outbreak_binary == 1),
+                      " cases across ", uniqueN(cc$stratum_id),
+                      " strata. Interaction tested via a 3-df runoff × birds_au_z ",
+                      "crossbasis on the snow_cover primary spec."),
+               style = "Normal") %>%
+  body_add_par("Model fit", style = "heading 2") %>%
+  body_add_flextable(flextable(fit_tbl) %>% autofit() %>% theme_booktabs()) %>%
+  body_add_par("Cumulative runoff OR (per +0.5 SD across lag 0–28 d) at three poultry-density levels",
+               style = "heading 2") %>%
+  body_add_flextable(flextable(cum_tbl) %>% autofit() %>% theme_booktabs()) %>%
+  body_add_par("Lag-specific runoff OR at weekly checkpoints (per +0.5 SD on that lag day)",
+               style = "heading 2") %>%
+  body_add_flextable(
+    flextable(lag_specific_tbl[lag_days %in% c(0, 7, 14, 21, 28)]) %>%
+      autofit() %>% theme_booktabs()
+  )
+
+print(doc, target = paste0(tables_sensitivity_folder, "Table_Feedlot_Interaction_Daily.docx"))
+cat("Saved: ", tables_sensitivity_folder, "Table_Feedlot_Interaction_Daily.docx\n", sep = "")
+
+saveRDS(list(
+  m_primary       = m_primary,
+  m_inter         = m_inter,
+  fit_tbl         = fit_tbl,
+  cum_tbl         = cum_tbl,
+  lag_specific_tbl     = lag_specific_tbl,
+  lag_specific_numeric = lag_specific_numeric,
+  LRT_p           = p_lrt
+), paste0(objects_folder, "feedlot_interaction_daily.RDS"))
+```

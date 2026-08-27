@@ -1,0 +1,234 @@
+---
+title: "Multi-state case-crossover — seasonal-anomaly vs raw (unidirectional)"
+author: "Fintan Mooney"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r initiate}
+rm(list = ls())
+project.folder = paste0(print(here::here()), '/')
+source(paste0(project.folder, 'create_folder_structure.R'))
+source(paste0(functions.folder, 'script_initiate.R'))
+conflict_prefer("year",  "lubridate", quiet = TRUE)
+conflict_prefer("month", "lubridate", quiet = TRUE)
+library(splines)
+```
+
+Directly tests Reviewer #1's seasonal-confounding critique of the unidirectional design.
+Each exposure is **deseasonalized** — for every 10 km cell we fit a smooth spline of date
+(`ns(date, df=6)`) across the study period and take the residual, i.e. the short-term
+**anomaly** (departure from that cell's own seasonal cycle). We then rebuild the same
+**unidirectional** case-crossover (case + 4 prior control periods) on anomalies and compare
+per-lag ORs to the raw-value model. Signals that survive deseasonalization are genuine
+short-term departures; signals that collapse were seasonal trend.
+
+Note: the multi-state ERA5 pull is 2021–2022 only, so there is no multi-year climatology
+(that exists for MN alone). Deseasonalizing *within* the study period via a per-cell spline
+is the defensible single-season approach; `df` is a tunable smoothness knob (6 ≈ bi-monthly
+knots — removes the seasonal cycle while preserving ≤4-week variation, the referent window).
+
+# 1. Load panels and settings
+
+```{r load}
+daily  <- setDT(readRDS(paste0(objects_folder, "multistate_fishnet_timeseries_daily.RDS")))
+weekly <- setDT(readRDS(paste0(objects_folder, "multistate_fishnet_timeseries_weekly.RDS")))
+screening <- readRDS(paste0(objects_folder, "multistate_independence_screening.RDS"))
+
+case_window_start <- as.Date("2022-01-01"); case_window_end <- as.Date("2022-12-31")
+DF_SEASON <- 6                                   # spline df for the per-cell seasonal fit
+OFFSETS   <- c(0, 7, 14, 21, 28)                 # unidirectional: case + 4 prior periods (days)
+
+predictors  <- c("runoff", "soil_moisture", "temperature", "precipitation",
+                 "wind_speed", "snow_cover", "anseriformes")
+pred_labels <- c(runoff = "Runoff", soil_moisture = "Soil Moisture", temperature = "Temperature",
+                 precipitation = "Precipitation", wind_speed = "Wind Speed",
+                 snow_cover = "Snow Cover", anseriformes = "Anseriformes")
+skewed <- c("runoff", "precipitation", "anseriformes")
+
+remove_ids <- union(screening$cross_farm_ids, screening$ids_500m)   # independent def
+count_flagged_ids <- function(id_str, ids) {
+  if (is.na(id_str)) return(0L)
+  as.integer(sum(as.numeric(trimws(unlist(strsplit(id_str, ",")))) %in% ids))
+}
+
+# m -> mm before any log1p (panels store runoff/precip in metres).
+daily[,  `:=`(runoff = runoff * 1000, precipitation = precipitation * 1000)]
+weekly[, `:=`(runoff = runoff * 1000, precipitation = precipitation * 1000)]
+```
+
+# 2. Prepare raw and anomaly exposure panels
+
+```{r prep}
+# Raw: log1p the skewed exposures (matches c_05/c_06). Anomaly: log1p, then subtract the
+# per-cell seasonal spline (residual = short-term anomaly). Both are z-scaled later.
+deseason <- function(y, tnum, df) as.numeric(resid(lm(y ~ ns(tnum, df = df), na.action = na.exclude)))
+
+prep_panel <- function(panel, tcol, anomaly) {
+  p <- copy(panel)
+  p[, tnum := as.numeric(as.Date(get(tcol)))]
+  for (v in predictors) {
+    if (v %in% skewed) p[, (v) := log1p(get(v))]
+    if (anomaly)       p[, (v) := deseason(get(v), tnum, DF_SEASON), by = zone_id]
+  }
+  p
+}
+```
+
+# 3. Unidirectional builder (z-scale only; exposures already transformed)
+
+```{r builder}
+build_uni <- function(panel, tcol, max_lag) {
+  p <- copy(panel); p[, tkey := as.Date(get(tcol))]
+  p[, is_outbreak_raw := as.integer(outbreak_binary == 1)]
+  fl <- p[outbreak_binary == 1 & tkey >= case_window_start & tkey <= case_window_end
+        ][, nf := vapply(outbreak_id, count_flagged_ids, integer(1), ids = remove_ids)
+        ][nf > 0, .(zone_id, tkey, nf)]
+  p <- merge(p, fl, by = c("zone_id", "tkey"), all.x = TRUE)
+  p[, nf := fcoalesce(nf, 0L)]; p[, outbreak_binary := as.integer(outbreak_count - nf > 0)]
+
+  cases <- p[outbreak_binary == 1 & tkey >= case_window_start & tkey <= case_window_end,
+             .(zone_id, ct = tkey)]
+  cases[, `:=`(stratum_id = paste0("z", zone_id, "_", format(ct, "%Y%m%d")), cid = .I)]
+
+  src <- p[zone_id %in% unique(cases$zone_id)]; setorder(src, zone_id, tkey)
+  for (v in predictors) src[, (paste0(v, "_Lag", 0:max_lag)) :=
+                             shift(.SD[[1]], n = 0:max_lag, type = "lag"), by = zone_id, .SDcols = v]
+
+  sets <- cases[, .(tkey = ct - OFFSETS, is_case = c(1L, 0L, 0L, 0L, 0L)),
+                by = .(cid, zone_id, stratum_id)]
+  m <- merge(sets, src, by = c("zone_id", "tkey"), all.x = FALSE)
+  m <- m[is_case == 1L | is_outbreak_raw == 0L]
+  keep <- m[, .(nc = sum(is_case == 1L), nk = sum(is_case == 0L)), by = stratum_id][nc >= 1 & nk >= 1, stratum_id]
+  m <- m[stratum_id %in% keep]
+  m[, outbreak_binary := is_case]
+  for (v in predictors) for (k in 0:max_lag) {
+    col <- paste0(v, "_Lag", k); m[[col]] <- as.numeric(scale(m[[col]]))
+  }
+  m[]
+}
+```
+
+# 4. Fit DLNM + per-lag OR extraction
+
+```{r fit-extract}
+fit_dlnm <- function(df, res) {
+  setDT(df); max_lag <- if (res == "daily") 28 else 4
+  arglag_met  <- if (res == "daily") list(fun = "ns", df = 3) else list(fun = "ns", df = 2)
+  arglag_bird <- if (res == "daily") list(fun = "strata", breaks = c(7, 14, 21)) else list(fun = "ns", df = 2)
+  cbs <- setNames(lapply(predictors, function(v) {
+    X  <- as.matrix(df[, paste0(v, "_Lag", 0:max_lag), with = FALSE])
+    crossbasis(X, lag = c(0, max_lag), argvar = list(fun = "lin"),
+               arglag = if (v == "anseriformes") arglag_bird else arglag_met)
+  }), paste0("cb_", predictors))
+  list2env(cbs, environment())
+  m <- clogit(as.formula(paste("outbreak_binary ~", paste(names(cbs), collapse = " + "),
+                               "+ strata(stratum_id)")), method = "efron", data = df)
+  list(model = m, cbs = cbs, max_lag = max_lag)
+}
+
+perlag <- function(fit, lags) {
+  beta <- coef(fit$model); V <- vcov(fit$model); ll <- 0:fit$max_lag
+  rbindlist(lapply(predictors, function(v) {
+    ix <- grep(paste0("^cb_", v, "v"), names(beta)); b <- beta[ix]; Vs <- V[ix, ix, drop = FALSE]
+    lb <- do.call(dlnm::onebasis, c(list(x = ll), attr(fit$cbs[[paste0("cb_", v)]], "arglag")))
+    rbindlist(lapply(lags, function(L) {
+      ct <- 0.5 * lb[L + 1, ]; lo <- sum(ct * b); se <- sqrt(as.numeric(t(ct) %*% Vs %*% ct))
+      data.table(label = pred_labels[[v]], lag = L,
+                 OR = exp(lo), lcl = exp(lo - 1.96 * se), ucl = exp(lo + 1.96 * se))
+    }))
+  }))
+}
+
+run_one <- function(panel, tcol, res, anomaly) {
+  df  <- build_uni(prep_panel(panel, tcol, anomaly), tcol, if (res == "daily") 28 else 4)
+  fit <- fit_dlnm(df, res)
+  list(df = df, fit = fit)
+}
+
+wk_raw  <- run_one(weekly, "week_start", "weekly", FALSE)
+wk_anom <- run_one(weekly, "week_start", "weekly", TRUE)
+dy_raw  <- run_one(daily,  "date",       "daily",  FALSE)
+dy_anom <- run_one(daily,  "date",       "daily",  TRUE)
+
+saveRDS(wk_anom$fit$model, paste0(models_folder, "casecrossover_multistate_weekly_anomaly.RDS"))
+saveRDS(dy_anom$fit$model, paste0(models_folder, "casecrossover_multistate_daily_anomaly.RDS"))
+```
+
+# 5. Weekly comparison — raw vs anomaly (per-lag, the manuscript metric)
+
+```{r weekly-compare}
+star <- function(lo, hi) ifelse(lo > 1 | hi < 1, "*", "")
+mk <- function(x, tag) { x[, cell := sprintf("%.2f (%.2f,%.2f)%s", OR, lcl, ucl, star(lcl, ucl))]; x[, model := tag]; x }
+wk <- rbindlist(list(mk(perlag(wk_raw$fit, 0:4), "raw"), mk(perlag(wk_anom$fit, 0:4), "anomaly")))
+wk_wide <- dcast(wk[lag %in% c(0, 4)], label + lag ~ model, value.var = "cell")
+setorder(wk_wide, label, lag)
+cat("WEEKLY per-lag OR (per +0.5 SD), raw vs seasonal-anomaly; * = CI excludes 1\n")
+print(wk_wide)
+```
+
+# 6. Daily comparison — raw vs anomaly
+
+```{r daily-compare}
+dy <- rbindlist(list(mk(perlag(dy_raw$fit, c(0,7,14,21,28)), "raw"),
+                     mk(perlag(dy_anom$fit, c(0,7,14,21,28)), "anomaly")))
+dy_wide <- dcast(dy[lag %in% c(0, 7, 28)], label + lag ~ model, value.var = "cell")
+setorder(dy_wide, label, lag)
+cat("\nDAILY per-lag OR (per +0.5 SD), raw vs seasonal-anomaly; * = CI excludes 1\n")
+print(dy_wide)
+```
+
+# 7. Figure — weekly per-lag curves, raw vs anomaly
+
+```{r figure, fig.width = 10, fig.height = 7}
+allwk <- rbindlist(list(perlag(wk_raw$fit, 0:4)[, model := "Raw value"],
+                        perlag(wk_anom$fit, 0:4)[, model := "Seasonal anomaly"]))
+allwk[, label := factor(label, levels = pred_labels[predictors])]
+fig <- ggplot(allwk, aes(lag, OR, colour = model, fill = model)) +
+  geom_hline(yintercept = 1, linetype = "dashed", colour = "grey40") +
+  geom_ribbon(aes(ymin = lcl, ymax = ucl), alpha = 0.12, colour = NA) +
+  geom_line(linewidth = 0.7) + geom_point(size = 1.6) +
+  facet_wrap(~ label, ncol = 3, scales = "free_y") +
+  scale_colour_manual(values = c("Raw value" = "#B2182B", "Seasonal anomaly" = "#2166AC"), name = NULL) +
+  scale_fill_manual(values = c("Raw value" = "#B2182B", "Seasonal anomaly" = "#2166AC"), guide = "none") +
+  labs(title = "Weekly per-lag OR — raw vs seasonal anomaly (unidirectional, 7-state)",
+       subtitle = "If the signal collapses under deseasonalization, it was seasonal trend",
+       x = "Lag (weeks)", y = "OR (95% CI) per +0.5 SD") +
+  theme_minimal(base_family = "Avenir") +
+  theme(legend.position = "top", plot.title = element_text(family = "Avenir Heavy"),
+        strip.text = element_text(family = "Avenir Heavy"), panel.grid.minor = element_blank())
+ggsave(paste0(figures_main_folder, "figure_multistate_weekly_raw_vs_anomaly.png"),
+       fig, width = 10, height = 7, dpi = 300, bg = "white")
+cat("\nWrote raw-vs-anomaly weekly figure + anomaly models.\n")
+```
+
+# 8. Sensitivity — robustness to the deseasonalizing smoothness (df = 4 / 6 / 8)
+
+```{r df-sensitivity}
+# The seasonal-anomaly result should not hinge on the spline df. Re-deseasonalize the weekly
+# panel at df = 4 (looser, ~quarterly knots), 6 (primary), and 8 (tighter) and compare the
+# per-lag ORs at each signal's key lag. If climate stays null and birds stay significant
+# across all three, the collapse is a robust finding, not an artifact of over/under-smoothing.
+key <- data.table(
+  label = c("Runoff", "Soil Moisture", "Wind Speed", "Temperature", "Temperature",
+            "Snow Cover", "Precipitation", "Anseriformes", "Anseriformes"),
+  lag   = c(0L, 4L, 4L, 0L, 4L, 4L, 4L, 4L, 0L))
+orstar <- function(pl) pl[, .(label, lag, v = sprintf("%.2f%s", OR, ifelse(lcl > 1 | ucl < 1, "*", "")))]
+
+sens <- merge(key, orstar(perlag(wk_raw$fit, 0:4))[, .(label, lag, raw = v)],
+              by = c("label", "lag"), all.x = TRUE)
+for (d in c(4, 6, 8)) {
+  DF_SEASON <- d
+  fit_d <- fit_dlnm(build_uni(prep_panel(weekly, "week_start", TRUE), "week_start", 4), "weekly")
+  pl <- orstar(perlag(fit_d, 0:4)); setnames(pl, "v", paste0("anom_df", d))
+  sens <- merge(sens, pl, by = c("label", "lag"), all.x = TRUE)
+}
+DF_SEASON <- 6
+setorder(sens, label, lag)
+cat("WEEKLY key per-lag OR (per +0.5 SD) — raw vs seasonal anomaly at df 4/6/8; * = CI excludes 1\n")
+print(sens)
+```

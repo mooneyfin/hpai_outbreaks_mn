@@ -439,7 +439,7 @@ plot_slices <- function(cp, title) {
 # -- Save Plots --
 
 # --- Cumulative plots ---
-png(file.path(figures_folder, "figure_cumulative_ORs_casecrossover_val.png"),
+png(file.path(figures_eda_folder, "figure_cumulative_ORs_casecrossover_val.png"),
     width = 11, height = 7, units = "in", res = 300)
 par(mfrow = c(2, 4),
     mar = c(4.2, 4.2, 2.5, 1),
@@ -457,7 +457,7 @@ plot_cumulative(cp_bird,     "Total Bird Abundance")
 dev.off()
 
 # --- Slice plots ---
-png(file.path(figures_folder, "figure_slice_ORs_casecrossover_val.png"),
+png(file.path(figures_eda_folder, "figure_slice_ORs_casecrossover_val.png"),
     width = 11, height = 7, units = "in", res = 300)
 par(mfrow = c(2, 4),
     mar = c(4.2, 4.2, 2.5, 1),

@@ -1,0 +1,303 @@
+---
+title: "Log-spaced lag-knot sensitivity (short-lag-dense arglag)"
+author: "Fintan Mooney"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r initiate}
+rm(list = ls())
+# 0a.Declare root directory, folder location and load essential stuff
+project.folder = paste0(print(here::here()), '/')
+source(paste0(project.folder, 'create_folder_structure.R'))
+source(paste0(functions.folder, 'script_initiate.R'))
+```
+
+# 1. Load case-crossover dataset
+
+```{r load}
+case_crossover_df <- readRDS(paste0(objects_folder, "case_crossover_df.RDS"))
+setDT(case_crossover_df)
+```
+
+# 2. Build crossbases with logknots arglag (met) and weekly strata (bird)
+
+```{r crossbasis-log}
+log_lag_knots <- logknots(28, 3)
+print(log_lag_knots)
+
+cb_runoff <- crossbasis(
+  as.matrix(case_crossover_df[, paste0("runoff_Lag", 0:28), with = FALSE]),
+  lag = c(0, 28), argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", knots = log_lag_knots)
+)
+cb_snow_density <- crossbasis(
+  as.matrix(case_crossover_df[, paste0("snow_density_Lag", 0:28), with = FALSE]),
+  lag = c(0, 28), argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", knots = log_lag_knots)
+)
+cb_soil_moisture <- crossbasis(
+  as.matrix(case_crossover_df[, paste0("soil_moisture_Lag", 0:28), with = FALSE]),
+  lag = c(0, 28), argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", knots = log_lag_knots)
+)
+cb_temperature <- crossbasis(
+  as.matrix(case_crossover_df[, paste0("temperature_Lag", 0:28), with = FALSE]),
+  lag = c(0, 28), argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", knots = log_lag_knots)
+)
+cb_precipitation <- crossbasis(
+  as.matrix(case_crossover_df[, paste0("precipitation_Lag", 0:28), with = FALSE]),
+  lag = c(0, 28), argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", knots = log_lag_knots)
+)
+cb_wind_speed <- crossbasis(
+  as.matrix(case_crossover_df[, paste0("wind_speed_Lag", 0:28), with = FALSE]),
+  lag = c(0, 28), argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", knots = log_lag_knots)
+)
+cb_total_bird_abundance <- crossbasis(
+  as.matrix(case_crossover_df[, paste0("total_bird_abundance_Lag", 0:28), with = FALSE]),
+  lag = c(0, 28), argvar = list(fun = "lin"),
+  arglag = list(fun = "strata", breaks = c(7, 14, 21))
+)
+```
+
+# 3. Fit multivariable case-crossover with logknots arglag
+
+```{r fit-log}
+model_log <- clogit(
+  outbreak_binary ~
+    cb_runoff + cb_snow_density + cb_soil_moisture + cb_temperature +
+    cb_precipitation + cb_wind_speed + cb_total_bird_abundance +
+    strata(stratum_id),
+  data = case_crossover_df, method = "efron"
+)
+saveRDS(model_log, paste0(models_folder, "casecrossover_model_logknots.RDS"))
+
+print(summary(model_log))
+```
+
+# 4. Extract cumulative ORs for logknots model
+
+```{r extract-log}
+cp_runoff_log <- crosspred(cb_runoff,               model_log, cen = 0, at = 0.5, cumul = TRUE)
+cp_snow_log   <- crosspred(cb_snow_density,         model_log, cen = 0, at = 0.5, cumul = TRUE)
+cp_soil_log   <- crosspred(cb_soil_moisture,        model_log, cen = 0, at = 0.5, cumul = TRUE)
+cp_temp_log   <- crosspred(cb_temperature,          model_log, cen = 0, at = 0.5, cumul = TRUE)
+cp_precip_log <- crosspred(cb_precipitation,        model_log, cen = 0, at = 0.5, cumul = TRUE)
+cp_wind_log   <- crosspred(cb_wind_speed,           model_log, cen = 0, at = 0.5, cumul = TRUE)
+cp_bird_log   <- crosspred(cb_total_bird_abundance, model_log, cen = 0, at = 0.5, cumul = TRUE)
+
+n_log <- ncol(cp_runoff_log$cumRRfit)
+or_runoff_log <- sprintf("%.2f (%.2f, %.2f)", cp_runoff_log$cumRRfit["0.5", n_log], cp_runoff_log$cumRRlow["0.5", n_log], cp_runoff_log$cumRRhigh["0.5", n_log])
+or_snow_log   <- sprintf("%.2f (%.2f, %.2f)", cp_snow_log$cumRRfit["0.5",   n_log], cp_snow_log$cumRRlow["0.5",   n_log], cp_snow_log$cumRRhigh["0.5",   n_log])
+or_soil_log   <- sprintf("%.2f (%.2f, %.2f)", cp_soil_log$cumRRfit["0.5",   n_log], cp_soil_log$cumRRlow["0.5",   n_log], cp_soil_log$cumRRhigh["0.5",   n_log])
+or_temp_log   <- sprintf("%.2f (%.2f, %.2f)", cp_temp_log$cumRRfit["0.5",   n_log], cp_temp_log$cumRRlow["0.5",   n_log], cp_temp_log$cumRRhigh["0.5",   n_log])
+or_precip_log <- sprintf("%.2f (%.2f, %.2f)", cp_precip_log$cumRRfit["0.5", n_log], cp_precip_log$cumRRlow["0.5", n_log], cp_precip_log$cumRRhigh["0.5", n_log])
+or_wind_log   <- sprintf("%.2f (%.2f, %.2f)", cp_wind_log$cumRRfit["0.5",   n_log], cp_wind_log$cumRRlow["0.5",   n_log], cp_wind_log$cumRRhigh["0.5",   n_log])
+or_bird_log   <- sprintf("%.2f (%.2f, %.2f)", cp_bird_log$cumRRfit["0.5",   n_log], cp_bird_log$cumRRlow["0.5",   n_log], cp_bird_log$cumRRhigh["0.5",   n_log])
+```
+
+# 5. Rebuild primary crossbases (uniform ns knots) and refit primary for direct comparison
+
+```{r primary-refit}
+cb_runoff <- crossbasis(
+  as.matrix(case_crossover_df[, paste0("runoff_Lag", 0:28), with = FALSE]),
+  lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 4)
+)
+cb_snow_density <- crossbasis(
+  as.matrix(case_crossover_df[, paste0("snow_density_Lag", 0:28), with = FALSE]),
+  lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 4)
+)
+cb_soil_moisture <- crossbasis(
+  as.matrix(case_crossover_df[, paste0("soil_moisture_Lag", 0:28), with = FALSE]),
+  lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 4)
+)
+cb_temperature <- crossbasis(
+  as.matrix(case_crossover_df[, paste0("temperature_Lag", 0:28), with = FALSE]),
+  lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 4)
+)
+cb_precipitation <- crossbasis(
+  as.matrix(case_crossover_df[, paste0("precipitation_Lag", 0:28), with = FALSE]),
+  lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 4)
+)
+cb_wind_speed <- crossbasis(
+  as.matrix(case_crossover_df[, paste0("wind_speed_Lag", 0:28), with = FALSE]),
+  lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 4)
+)
+cb_total_bird_abundance <- crossbasis(
+  as.matrix(case_crossover_df[, paste0("total_bird_abundance_Lag", 0:28), with = FALSE]),
+  lag = c(0, 28), argvar = list(fun = "lin"),
+  arglag = list(fun = "strata", breaks = c(7, 14, 21))
+)
+
+model_primary <- clogit(
+  outbreak_binary ~
+    cb_runoff + cb_snow_density + cb_soil_moisture + cb_temperature +
+    cb_precipitation + cb_wind_speed + cb_total_bird_abundance +
+    strata(stratum_id),
+  data = case_crossover_df, method = "efron"
+)
+
+cp_runoff_pri <- crosspred(cb_runoff,               model_primary, cen = 0, at = 0.5, cumul = TRUE)
+cp_snow_pri   <- crosspred(cb_snow_density,         model_primary, cen = 0, at = 0.5, cumul = TRUE)
+cp_soil_pri   <- crosspred(cb_soil_moisture,        model_primary, cen = 0, at = 0.5, cumul = TRUE)
+cp_temp_pri   <- crosspred(cb_temperature,          model_primary, cen = 0, at = 0.5, cumul = TRUE)
+cp_precip_pri <- crosspred(cb_precipitation,        model_primary, cen = 0, at = 0.5, cumul = TRUE)
+cp_wind_pri   <- crosspred(cb_wind_speed,           model_primary, cen = 0, at = 0.5, cumul = TRUE)
+cp_bird_pri   <- crosspred(cb_total_bird_abundance, model_primary, cen = 0, at = 0.5, cumul = TRUE)
+
+n_pri <- ncol(cp_runoff_pri$cumRRfit)
+or_runoff_pri <- sprintf("%.2f (%.2f, %.2f)", cp_runoff_pri$cumRRfit["0.5", n_pri], cp_runoff_pri$cumRRlow["0.5", n_pri], cp_runoff_pri$cumRRhigh["0.5", n_pri])
+or_snow_pri   <- sprintf("%.2f (%.2f, %.2f)", cp_snow_pri$cumRRfit["0.5",   n_pri], cp_snow_pri$cumRRlow["0.5",   n_pri], cp_snow_pri$cumRRhigh["0.5",   n_pri])
+or_soil_pri   <- sprintf("%.2f (%.2f, %.2f)", cp_soil_pri$cumRRfit["0.5",   n_pri], cp_soil_pri$cumRRlow["0.5",   n_pri], cp_soil_pri$cumRRhigh["0.5",   n_pri])
+or_temp_pri   <- sprintf("%.2f (%.2f, %.2f)", cp_temp_pri$cumRRfit["0.5",   n_pri], cp_temp_pri$cumRRlow["0.5",   n_pri], cp_temp_pri$cumRRhigh["0.5",   n_pri])
+or_precip_pri <- sprintf("%.2f (%.2f, %.2f)", cp_precip_pri$cumRRfit["0.5", n_pri], cp_precip_pri$cumRRlow["0.5", n_pri], cp_precip_pri$cumRRhigh["0.5", n_pri])
+or_wind_pri   <- sprintf("%.2f (%.2f, %.2f)", cp_wind_pri$cumRRfit["0.5",   n_pri], cp_wind_pri$cumRRlow["0.5",   n_pri], cp_wind_pri$cumRRhigh["0.5",   n_pri])
+or_bird_pri   <- sprintf("%.2f (%.2f, %.2f)", cp_bird_pri$cumRRfit["0.5",   n_pri], cp_bird_pri$cumRRlow["0.5",   n_pri], cp_bird_pri$cumRRhigh["0.5",   n_pri])
+```
+
+# 6. Side-by-side comparison table
+
+```{r compare-table}
+comparison <- data.table(
+  Predictor                                  = c("Runoff", "Snow Density", "Soil Moisture", "Temperature",
+                                                 "Precipitation", "Wind Speed", "Total Bird Abundance"),
+  `Primary OR (95% CI)`                      = c(or_runoff_pri, or_snow_pri, or_soil_pri, or_temp_pri, or_precip_pri, or_wind_pri, or_bird_pri),
+  `Logknots OR (95% CI)`                     = c(or_runoff_log, or_snow_log, or_soil_log, or_temp_log, or_precip_log, or_wind_log, or_bird_log)
+)
+print(comparison)
+
+ft <- comparison %>%
+  flextable() %>%
+  fontsize(size = 11, part = "all") %>%
+  autofit() %>%
+  align(align = "center", part = "all") %>%
+  theme_booktabs()
+
+doc <- read_docx() %>%
+  body_add_flextable(ft) %>%
+  body_add_par(
+    "Cumulative ORs (per 0.5 SD, lag 0-28 d) under the primary spec (arglag = ns(df = 4), uniform knot placement) versus a logknots sensitivity (arglag = ns with 3 log-spaced knots; short-lag-dense). Bird abundance fixed at piecewise-constant weekly strata across both.",
+    style = "Normal"
+  )
+print(doc, target = paste0(tables_sensitivity_folder, "Table_Logknots_Comparison.docx"))
+```
+
+# 7. Fit-statistic comparison
+
+```{r fit-stats}
+fit_compare <- data.table(
+  Specification = c("Primary (ns df=4)", "Logknots (ns 3 log-spaced)"),
+  df            = c(length(coef(model_primary)),
+                    length(coef(model_log))),
+  logLik        = c(as.numeric(logLik(model_primary)),
+                    as.numeric(logLik(model_log))),
+  AIC           = c(AIC(model_primary), AIC(model_log)),
+  BIC           = c(BIC(model_primary), BIC(model_log)),
+  concordance   = c(summary(model_primary)$concordance["C"],
+                    summary(model_log)$concordance["C"])
+)
+fit_compare[, dAIC := AIC - min(AIC)]
+fit_compare[, dBIC := BIC - min(BIC)]
+print(fit_compare)
+```
+
+# 8. Lag-response slice grid (primary vs logknots)
+
+```{r slice-grid, fig.width = 14, fig.height = 8}
+png(paste0(figures_sensitivity_folder, "figure_logknots_slices.png"),
+    width = 14, height = 8, units = "in", res = 300)
+
+par(mfrow = c(2, 7), mar = c(4.0, 4.0, 2.5, 1), oma = c(3, 5, 2, 1),
+    cex.main = 1.0, cex.lab = 0.95, cex.axis = 0.85)
+
+# 8a.Primary row
+plot(cp_runoff_pri, type = "slices", var = 0.5, ci = "area", col = "black", ci.arg = list(col = rgb(0,0,0,0.15), border = NA), lwd = 1.3, main = "Runoff",               xlab = "", ylab = "", las = 1); abline(h = 1, lty = 2, col = "gray40")
+plot(cp_snow_pri,   type = "slices", var = 0.5, ci = "area", col = "black", ci.arg = list(col = rgb(0,0,0,0.15), border = NA), lwd = 1.3, main = "Snow Density",         xlab = "", ylab = "", las = 1); abline(h = 1, lty = 2, col = "gray40")
+plot(cp_soil_pri,   type = "slices", var = 0.5, ci = "area", col = "black", ci.arg = list(col = rgb(0,0,0,0.15), border = NA), lwd = 1.3, main = "Soil Moisture",        xlab = "", ylab = "", las = 1); abline(h = 1, lty = 2, col = "gray40")
+plot(cp_temp_pri,   type = "slices", var = 0.5, ci = "area", col = "black", ci.arg = list(col = rgb(0,0,0,0.15), border = NA), lwd = 1.3, main = "Temperature",          xlab = "", ylab = "", las = 1); abline(h = 1, lty = 2, col = "gray40")
+plot(cp_precip_pri, type = "slices", var = 0.5, ci = "area", col = "black", ci.arg = list(col = rgb(0,0,0,0.15), border = NA), lwd = 1.3, main = "Precipitation",        xlab = "", ylab = "", las = 1); abline(h = 1, lty = 2, col = "gray40")
+plot(cp_wind_pri,   type = "slices", var = 0.5, ci = "area", col = "black", ci.arg = list(col = rgb(0,0,0,0.15), border = NA), lwd = 1.3, main = "Wind Speed",           xlab = "", ylab = "", las = 1); abline(h = 1, lty = 2, col = "gray40")
+plot(cp_bird_pri,   type = "slices", var = 0.5, ci = "area", col = "black", ci.arg = list(col = rgb(0,0,0,0.15), border = NA), lwd = 1.3, main = "Total Bird Abundance", xlab = "", ylab = "", las = 1); abline(h = 1, lty = 2, col = "gray40")
+
+# 8b.Logknots row
+plot(cp_runoff_log, type = "slices", var = 0.5, ci = "area", col = "black", ci.arg = list(col = rgb(0,0,0,0.15), border = NA), lwd = 1.3, main = "Runoff",               xlab = "", ylab = "", las = 1); abline(h = 1, lty = 2, col = "gray40")
+plot(cp_snow_log,   type = "slices", var = 0.5, ci = "area", col = "black", ci.arg = list(col = rgb(0,0,0,0.15), border = NA), lwd = 1.3, main = "Snow Density",         xlab = "", ylab = "", las = 1); abline(h = 1, lty = 2, col = "gray40")
+plot(cp_soil_log,   type = "slices", var = 0.5, ci = "area", col = "black", ci.arg = list(col = rgb(0,0,0,0.15), border = NA), lwd = 1.3, main = "Soil Moisture",        xlab = "", ylab = "", las = 1); abline(h = 1, lty = 2, col = "gray40")
+plot(cp_temp_log,   type = "slices", var = 0.5, ci = "area", col = "black", ci.arg = list(col = rgb(0,0,0,0.15), border = NA), lwd = 1.3, main = "Temperature",          xlab = "", ylab = "", las = 1); abline(h = 1, lty = 2, col = "gray40")
+plot(cp_precip_log, type = "slices", var = 0.5, ci = "area", col = "black", ci.arg = list(col = rgb(0,0,0,0.15), border = NA), lwd = 1.3, main = "Precipitation",        xlab = "", ylab = "", las = 1); abline(h = 1, lty = 2, col = "gray40")
+plot(cp_wind_log,   type = "slices", var = 0.5, ci = "area", col = "black", ci.arg = list(col = rgb(0,0,0,0.15), border = NA), lwd = 1.3, main = "Wind Speed",           xlab = "", ylab = "", las = 1); abline(h = 1, lty = 2, col = "gray40")
+plot(cp_bird_log,   type = "slices", var = 0.5, ci = "area", col = "black", ci.arg = list(col = rgb(0,0,0,0.15), border = NA), lwd = 1.3, main = "Total Bird Abundance", xlab = "", ylab = "", las = 1); abline(h = 1, lty = 2, col = "gray40")
+
+mtext("Lag (days)",          side = 1, outer = TRUE, line = 0,   cex = 1.0)
+mtext("Odds Ratio (95% CI)", side = 2, outer = TRUE, line = 0,   cex = 1.0)
+mtext("Primary (uniform ns df=4)", side = 2, outer = TRUE, line = 3, at = 0.78, cex = 1.0)
+mtext("Logknots (ns 3 log-spaced)", side = 2, outer = TRUE, line = 3, at = 0.27, cex = 1.0)
+dev.off()
+```
+
+# 9. Weekly cumulative anchors (logknots)
+
+```{r weekly-anchors}
+weekly_cum_log <- function(cp, label) {
+  fit <- cp$cumRRfit["0.5", ]; lo <- cp$cumRRlow["0.5", ]; hi <- cp$cumRRhigh["0.5", ]
+  data.table(
+    predictor    = label,
+    `Cum ≤ 0 d`  = sprintf("%.2f (%.2f, %.2f)", fit["lag0"],  lo["lag0"],  hi["lag0"]),
+    `Cum ≤ 7 d`  = sprintf("%.2f (%.2f, %.2f)", fit["lag7"],  lo["lag7"],  hi["lag7"]),
+    `Cum ≤ 14 d` = sprintf("%.2f (%.2f, %.2f)", fit["lag14"], lo["lag14"], hi["lag14"]),
+    `Cum ≤ 21 d` = sprintf("%.2f (%.2f, %.2f)", fit["lag21"], lo["lag21"], hi["lag21"]),
+    `Cum ≤ 28 d` = sprintf("%.2f (%.2f, %.2f)", fit["lag28"], lo["lag28"], hi["lag28"])
+  )
+}
+
+weekly_log <- rbindlist(list(
+  weekly_cum_log(cp_runoff_log, "Runoff"),
+  weekly_cum_log(cp_snow_log,   "Snow Density"),
+  weekly_cum_log(cp_soil_log,   "Soil Moisture"),
+  weekly_cum_log(cp_temp_log,   "Temperature"),
+  weekly_cum_log(cp_precip_log, "Precipitation"),
+  weekly_cum_log(cp_wind_log,   "Wind Speed"),
+  weekly_cum_log(cp_bird_log,   "Total Bird Abundance")
+))
+print(weekly_log)
+
+ft_weekly <- weekly_log %>%
+  flextable() %>%
+  fontsize(size = 10, part = "all") %>%
+  autofit() %>%
+  align(align = "center", part = "all") %>%
+  theme_booktabs()
+
+doc <- read_docx() %>%
+  body_add_flextable(ft_weekly) %>%
+  body_add_par(
+    "Cumulative ORs at weekly lag anchors under the logknots arglag (3 log-spaced knots), per 0.5 SD.",
+    style = "Normal"
+  )
+print(doc, target = paste0(tables_sensitivity_folder, "Table_Logknots_Weekly.docx"))
+```
+
+# 10. Save logknots results bundle
+
+```{r save}
+saveRDS(list(
+  model_log       = model_log,
+  model_primary   = model_primary,
+  comparison      = comparison,
+  fit_compare     = fit_compare,
+  weekly_log      = weekly_log,
+  cp_log = list(runoff = cp_runoff_log, snow = cp_snow_log, soil = cp_soil_log,
+                temp = cp_temp_log, precip = cp_precip_log, wind = cp_wind_log,
+                bird = cp_bird_log),
+  cp_primary = list(runoff = cp_runoff_pri, snow = cp_snow_pri, soil = cp_soil_pri,
+                    temp = cp_temp_pri, precip = cp_precip_pri, wind = cp_wind_pri,
+                    bird = cp_bird_pri)
+), paste0(objects_folder, "logknots_sensitivity.RDS"))
+```

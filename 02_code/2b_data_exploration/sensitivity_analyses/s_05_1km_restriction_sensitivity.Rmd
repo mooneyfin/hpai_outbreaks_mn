@@ -1,0 +1,236 @@
+---
+title: "1km Spatial Restriction Sensitivity"
+output: html_document
+---
+
+# Sensitivity analysis using a 1km spatial independence threshold for control selection... testing whether tighter spatial restrictions change the estimated associations!
+
+```{r include=FALSE}
+rm(list=ls())
+project.folder = paste0(print(here::here()),'/')
+source(paste0(project.folder,'create_folder_structure.R'))
+source(paste0(functions.folder,'script_initiate.R'))
+```
+
+## Import dataframe
+
+```{r, import dataframe}
+case_crossover_df_1km <- readRDS(file.path(objects_folder, "case_crossover_df_1km.RDS"))
+
+cat("Total cases:", sum(case_crossover_df_1km$outbreak_binary == 1), "\n")
+cat("Total controls:", sum(case_crossover_df_1km$outbreak_binary == 0), "\n")
+```
+
+## Crossbasis Terms
+
+```{r, crossbasis 1km}
+cb_1km_runoff <- crossbasis(
+  x = as.matrix(case_crossover_df_1km[, paste0("runoff_Lag", 0:28)]),
+  lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 4)
+)
+
+cb_1km_snow_density <- crossbasis(
+  x = as.matrix(case_crossover_df_1km[, paste0("snow_density_Lag", 0:28)]),
+  lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 4)
+)
+
+cb_1km_soil_moisture <- crossbasis(
+  x = as.matrix(case_crossover_df_1km[, paste0("soil_moisture_Lag", 0:28)]),
+  lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 4)
+)
+
+cb_1km_temperature <- crossbasis(
+  x = as.matrix(case_crossover_df_1km[, paste0("temperature_Lag", 0:28)]),
+  lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 4)
+)
+
+cb_1km_precipitation <- crossbasis(
+  x = as.matrix(case_crossover_df_1km[, paste0("precipitation_Lag", 0:28)]),
+  lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 4)
+)
+
+cb_1km_wind_speed <- crossbasis(
+  x = as.matrix(case_crossover_df_1km[, paste0("wind_speed_Lag", 0:28)]),
+  lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 4)
+)
+
+cb_1km_total_bird_abundance <- crossbasis(
+  x = as.matrix(case_crossover_df_1km[, paste0("total_bird_abundance_Lag", 0:28)]),
+  lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 4)
+)
+```
+
+## Case-Crossover Model
+
+```{r, model 1km}
+model_1km <- clogit(
+  outbreak_binary ~
+    cb_1km_runoff + cb_1km_snow_density + cb_1km_soil_moisture + cb_1km_temperature +
+    cb_1km_precipitation + cb_1km_wind_speed + cb_1km_total_bird_abundance +
+    strata(stratum_id),
+  method = "efron",
+  data = case_crossover_df_1km
+)
+
+summary(model_1km)
+AIC(model_1km)
+saveRDS(model_1km, file.path(models_folder, "casecrossover_model_1km.RDS"))
+```
+
+## Crosspred Objects
+
+```{r, crosspred 1km}
+cp_1km_slice_runoff <- crosspred(cb_1km_runoff, model_1km, cen = 0, at = 0.5)
+cp_1km_slice_snow   <- crosspred(cb_1km_snow_density, model_1km, cen = 0, at = 0.5)
+cp_1km_slice_soil   <- crosspred(cb_1km_soil_moisture, model_1km, cen = 0, at = 0.5)
+cp_1km_slice_temp   <- crosspred(cb_1km_temperature, model_1km, cen = 0, at = 0.5)
+cp_1km_slice_precip <- crosspred(cb_1km_precipitation, model_1km, cen = 0, at = 0.5)
+cp_1km_slice_wind   <- crosspred(cb_1km_wind_speed, model_1km, cen = 0, at = 0.5)
+cp_1km_slice_bird   <- crosspred(cb_1km_total_bird_abundance, model_1km, cen = 0, at = 0.5)
+```
+
+## Lag-Specific Odds Ratio Table
+
+```{r, lag specific table 1km}
+extract_lag_ORs_wide <- function(cp_obj, varname, varval = "0.5", lags = 0:4) {
+  lag_labels <- paste0("lag", lags)
+  or   <- cp_obj$matRRfit[varval, lag_labels]
+  low  <- cp_obj$matRRlow[varval, lag_labels]
+  high <- cp_obj$matRRhigh[varval, lag_labels]
+  tibble(
+    Predictor = varname,
+    !!!setNames(as.list(or),   paste0("OR_Lag", lags)),
+    !!!setNames(as.list(low),  paste0("Low_Lag", lags)),
+    !!!setNames(as.list(high), paste0("High_Lag", lags)),
+    !!!setNames(as.list(sprintf("%.2f (%.2f, %.2f)", or, low, high)), paste0("Lag ", lags))
+  )
+}
+
+lags <- 0:4
+
+table_1km <- bind_rows(
+  extract_lag_ORs_wide(cp_1km_slice_runoff, "Runoff"),
+  extract_lag_ORs_wide(cp_1km_slice_snow, "Snow Density"),
+  extract_lag_ORs_wide(cp_1km_slice_soil, "Soil Moisture"),
+  extract_lag_ORs_wide(cp_1km_slice_temp, "Temperature"),
+  extract_lag_ORs_wide(cp_1km_slice_precip, "Precipitation"),
+  extract_lag_ORs_wide(cp_1km_slice_wind, "Wind Speed"),
+  extract_lag_ORs_wide(cp_1km_slice_bird, "Total Bird Abundance")
+)
+
+highlight_1km <- sapply(lags, function(i) {
+  table_1km[[paste0("Low_Lag", i)]] > 1 | table_1km[[paste0("High_Lag", i)]] < 1
+})
+colnames(highlight_1km) <- paste0("Lag ", lags)
+
+ft_1km <- table_1km %>%
+  select(Predictor, paste0("Lag ", lags)) %>%
+  flextable() %>%
+  set_header_labels(Predictor = "Predictor") %>%
+  add_header_row(values = c("Predictor", "Odds Ratio (95% CI)"), colwidths = c(1, length(lags))) %>%
+  fontsize(size = 11, part = "all") %>%
+  autofit() %>%
+  align(align = "center", part = "all") %>%
+  theme_booktabs()
+
+for (i in lags) {
+  ft_1km <- bold(ft_1km, i = which(highlight_1km[, paste0("Lag ", i)]), j = paste0("Lag ", i))
+}
+
+ft_1km
+```
+
+## Plots
+
+```{r, plots 1km}
+# Cumulative crosspreds for plots
+cp_1km_runoff <- crosspred(cb_1km_runoff, model_1km, cen = 0, at = 0.5, cumul = TRUE)
+cp_1km_snow   <- crosspred(cb_1km_snow_density, model_1km, cen = 0, at = 0.5, cumul = TRUE)
+cp_1km_soil   <- crosspred(cb_1km_soil_moisture, model_1km, cen = 0, at = 0.5, cumul = TRUE)
+cp_1km_temp   <- crosspred(cb_1km_temperature, model_1km, cen = 0, at = 0.5, cumul = TRUE)
+cp_1km_precip <- crosspred(cb_1km_precipitation, model_1km, cen = 0, at = 0.5, cumul = TRUE)
+cp_1km_wind   <- crosspred(cb_1km_wind_speed, model_1km, cen = 0, at = 0.5, cumul = TRUE)
+cp_1km_bird   <- crosspred(cb_1km_total_bird_abundance, model_1km, cen = 0, at = 0.5, cumul = TRUE)
+
+plot_cumulative <- function(cp, title) {
+  plot(cp, type = "cumulative", var = 0.5, ci = "area",
+       col = "black", ci.arg = list(col = rgb(0,0,0,0.1), border = NA),
+       lwd = 1.5, main = title, xlab = "", ylab = "", las = 1)
+  abline(h = 1, lty = 2, col = "gray40")
+}
+
+plot_slices <- function(cp, title) {
+  plot(cp, type = "slices", var = 0.5, ci = "area",
+       col = "black", ci.arg = list(col = rgb(0,0,0,0.1), border = NA),
+       lwd = 1.3, main = title, xlab = "", ylab = "", las = 1)
+  abline(h = 1, lty = 2, col = "gray40")
+}
+
+# Cumulative plot
+png(file.path(figures_sensitivity_folder, "figure_cumulative_ORs_casecrossover_1km.png"), width = 11, height = 7, units = "in", res = 300)
+
+par(
+  mfrow = c(2, 4),
+  mar = c(4.2, 4.2, 2.5, 1),
+  oma = c(3, 4, 0, 1),
+  cex.main = 1.2, cex.lab = 1.2, cex.axis = 1.1,
+  tcl = -0.3, mgp = c(2.5, 0.7, 0)
+)
+
+plot_cumulative(cp_1km_runoff, "Runoff")
+plot_cumulative(cp_1km_snow, "Snow Density")
+plot_cumulative(cp_1km_soil, "Soil Moisture")
+plot_cumulative(cp_1km_temp, "Temperature")
+plot_cumulative(cp_1km_precip, "Precipitation")
+plot_cumulative(cp_1km_wind, "Wind Speed")
+plot_cumulative(cp_1km_bird, "Total Bird Abundance")
+
+mtext("Lag (days)", side = 1, outer = TRUE, line = 0, cex = 1.2)
+mtext("Odds Ratio (95% CI)", side = 2, outer = TRUE, line = 0, cex = 1.2)
+
+dev.off()
+
+# Slice plot
+png(file.path(figures_sensitivity_folder, "figure_slice_ORs_casecrossover_1km.png"), width = 11, height = 7, units = "in", res = 300)
+
+par(
+  mfrow = c(2, 4),
+  mar = c(4.2, 4.2, 2.5, 1),
+  oma = c(3, 4, 0, 1),
+  cex.main = 1.2, cex.lab = 1.2, cex.axis = 1.1,
+  tcl = -0.3, mgp = c(2.5, 0.7, 0)
+)
+
+plot_slices(cp_1km_slice_runoff, "Runoff")
+plot_slices(cp_1km_slice_snow, "Snow Density")
+plot_slices(cp_1km_slice_soil, "Soil Moisture")
+plot_slices(cp_1km_slice_temp, "Temperature")
+plot_slices(cp_1km_slice_precip, "Precipitation")
+plot_slices(cp_1km_slice_wind, "Wind Speed")
+plot_slices(cp_1km_slice_bird, "Total Bird Abundance")
+
+mtext("Lag (days)", side = 1, outer = TRUE, line = 0, cex = 1.2)
+mtext("Odds Ratio (95% CI)", side = 2, outer = TRUE, line = 0, cex = 1.2)
+
+dev.off()
+```
+
+## Export Table
+
+```{r, export 1km table}
+n_cases_1km <- sum(case_crossover_df_1km$outbreak_binary == 1)
+
+doc <- read_docx() %>%
+  body_add_fpar(fpar(ftext(
+    paste0("Lag-specific odds ratios — 1km independence threshold (N = ", n_cases_1km, " cases)"),
+    fp_text(bold = TRUE, font.size = 11)
+  ))) %>%
+  body_add_flextable(ft_1km) %>%
+  body_add_par("", style = "Normal") %>%
+  body_add_par(
+    "Table: Sensitivity Analysis — Lag-Specific Odds Ratios for Case-Crossover Model Using 1km Spillover Independence Threshold. Estimates are per 0.5 standard deviation increase in each predictor. Statistically significant odds ratios are shown in bold.",
+    style = "Normal"
+  )
+
+print(doc, target = file.path(tables_sensitivity_folder, "Table_Sensitivity_LagSpecific_ORs_1km.docx"))
+```

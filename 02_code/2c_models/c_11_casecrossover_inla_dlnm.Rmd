@@ -1,0 +1,240 @@
+---
+title: "Bayesian case-crossover DLNM in INLA"
+author: "Fintan Mooney"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
+                      fig.align = "center", dev = "ragg_png", dpi = 150)
+```
+
+```{r initiate}
+rm(list = ls())
+project.folder = paste0(print(here::here()), '/')
+source(paste0(project.folder, 'create_folder_structure.R'))
+source(paste0(functions.folder, 'script_initiate.R'))
+stopifnot(requireNamespace("INLA", quietly = TRUE))
+library(INLA); library(Matrix)
+INLA::inla.setOption(num.threads = 1)
+source(paste0(functions.folder, 'inla_dlnm_helpers.R'))
+```
+
+Primary model. Main-text tables and figures are built in `d_05_main_results.Rmd`; this file
+fits the primary, documents why the design is what it is, and produces the SI sensitivities.
+
+**Design: symmetric bidirectional referents, daily, ±14 to ±28 d.** Every referent at −k has a
+matching one at +k, so a linear time trend cancels exactly — the referent mean equals the
+case-day value. A unidirectional design cannot do that: with every referent before the case,
+seasonal drift is read as exposure effect. That is not hypothetical here, it is most of what
+the unidirectional model was fitting (see §4).
+
+**Why a ±14 gap.** Compared directly against ±7 on the current panel (§6). WAIC cannot
+arbitrate — different referent sets are different data — so the comparison rests on two things
+that are comparable. The residual trend offset is marginally *lower* at ±7 (0.072 vs 0.088),
+but every estimate attenuates toward the null there (runoff 1.44 vs 1.80, waterfowl 1.46 vs
+1.66), which is what exposure-history overlap predicts: a referent 7 d out shares 21 of its 28
+lag-days with the case, against 14 at ±14. So ±7 is not more accurate, it is more attenuated,
+and 7 days is thin cover for depopulation plus cleaning. Directions are identical either way.
+
+**Why a 28-day lag window.** WAIC-selected against 14, 42 and 56 d at both gaps (§6): 905.2 at
+28 d versus 937.1, 914.5 and 928.1. Fitting out to 42 and 56 d also settles a worry about
+truncation — the waterfowl curve peaks at day 28 and falls back to ~1.0 by the boundary in
+both, so the 28-day window lands on the peak rather than cutting it off.
+
+Panel: 8-state grid, CSLT-excluded, no spatial restriction. Minnesota is the headline; the
+pooled flyway (which contains Minnesota) is context.
+
+```{r panels}
+PRIM  <- setDT(readRDS(paste0(objects_folder, "case_crossover_df_sym_g14.RDS")))
+SHORT <- setDT(readRDS(paste0(objects_folder, "case_crossover_df_sym_g14.RDS")))
+MN    <- PRIM[state == "Minnesota"]
+
+star <- function(s) {
+  p <- as.numeric(unlist(regmatches(s, gregexpr("[0-9.]+", s))))
+  if (length(p) < 3) return(s)
+  if (p[2] > 1 || p[3] < 1) paste0(s, " *") else s
+}
+show_tab <- function(f, o, kind, mx = 28) {
+  t <- lag_window_table(f, o, kind, labels = INLA_LABELS)
+  for (j in 2:ncol(t)) set(t, j = j, value = vapply(t[[j]], star, character(1)))
+  t[]
+}
+```
+
+# 1. Primary fit
+
+```{r primary}
+o_mn <- assemble_cc_dlnm(MN); f_mn <- fit_cc_inla_dlnm(o_mn)
+cat(sprintf("MN: %d cases, %d referents, WAIC %.1f\n", sum(o_mn$data$outbreak_binary == 1),
+            sum(o_mn$data$outbreak_binary == 0), f_mn$waic$waic))
+saveRDS(f_mn, paste0(models_folder, "casecrossover_inla_mn_symmetric.RDS"))
+print(show_tab(f_mn, o_mn, "cumulative"))
+print(show_tab(f_mn, o_mn, "lagspecific"))
+```
+
+# 2. Flyway context
+
+```{r flyway}
+for (nm in c("Pooled flyway", "Flyway excl. MN")) {
+  d <- if (nm == "Pooled flyway") PRIM else PRIM[state != "Minnesota"]
+  o <- assemble_cc_dlnm(d); f <- fit_cc_inla_dlnm(o)
+  cat("\n---", nm, "| n =", sum(o$data$outbreak_binary == 1), "---\n")
+  print(show_tab(f, o, "cumulative"))
+}
+```
+
+# 3. Zero-overlap model (SI)
+
+```{r zero-overlap}
+# lag 0-14 at the same +/-14 gap: the referent's exposure history no longer touches the
+# case's, so late-lag attenuation cannot happen here.
+o_zo <- assemble_cc_dlnm(SHORT[state == "Minnesota"], max_lag = 14, bird_knots = c(0, 7, 14))
+f_zo <- fit_cc_inla_dlnm(o_zo)
+cat(sprintf("MN zero-overlap: WAIC %.1f\n", f_zo$waic$waic))
+print(show_tab(f_zo, o_zo, "cumulative", 14))
+```
+
+# 4. Referent design (SI Table S2, backs Figure 4)
+
+The waterfowl row under **time-stratified** comes out flat: 1.28 at every window, with the RW1
+knot coefficients identical to three decimals. Not a null result and not a bad mode — full grid
+integration reproduces it (precision 5.4e4, WAIC 724.8 vs 723.9). The design just doesn't carry
+the contrast.
+
+Measured on the within-stratum bird lag matrix, which is all a case-crossover ever uses:
+
+| design | corr(Lag0, Lag28) | PC1 (level) | PC2 (tilt) |
+|---|---|---|---|
+| Time-stratified | −0.02 | 64% | 25% |
+| Symmetric ±14–28 d | −0.44 | 53% | 40% |
+| Unidirectional | −0.39 | 55% | 36% |
+
+Time-stratified leaves the two ends of the lag window uncorrelated and puts 64% of its
+within-stratum variance into one direction where all five knots move together. That is a level
+contrast with almost no tilt, and the RW1 penalty shrinks the little tilt there is to nothing.
+The symmetric design splits variance across a level *and* a tilt of comparable size, with the
+ends strongly anti-correlated, and that tilt is what identifies the lag shape. Read the
+time-stratified column as a level, not as evidence about lag structure.
+
+```{r design}
+DES <- list(
+  "Unidirectional"  = "case_crossover_df_multistate_daily_nospatial.RDS",
+  "Time-stratified" = "case_crossover_df_multistate_daily_bi_nospatial.RDS",
+  "Symmetric ±14–28 (primary)" = "case_crossover_df_sym_g14.RDS")
+des <- rbindlist(lapply(names(DES), function(nm) {
+  o <- assemble_cc_dlnm(setDT(readRDS(paste0(objects_folder, DES[[nm]])))[state == "Minnesota"])
+  f <- fit_cc_inla_dlnm(o)
+  t <- lag_window_table(f, o, "cumulative", labels = INLA_LABELS)
+  # where the lag shape isn't identified (time-stratified, see above) the four windows are the
+  # same number four times. keep the level in the first column, dash the rest, so the table
+  # doesn't read as four estimates that happen to agree.
+  for (v in o$weekly_vars) if (isFALSE(weekly_shape_identified(f, o, v))) {
+    r <- which(t$Predictor == unname(INLA_LABELS[v]))
+    for (j in names(INLA_LAG_WINDOWS)[-1]) set(t, r, j, "—")
+    t[r, shape_unidentified := TRUE]
+  }
+  t[, design := nm][] }), fill = TRUE)
+if (!"shape_unidentified" %in% names(des)) des[, shape_unidentified := NA]
+des[is.na(shape_unidentified), shape_unidentified := FALSE]
+print(dcast(des, Predictor ~ design, value.var = "Lag 0-7 d"))
+saveRDS(des, paste0(objects_folder, "si_referent_design.RDS"))
+```
+
+# 5. Case definition and spatial restriction (SI Table S3)
+
+```{r casedef}
+CD <- list("Primary (CSLT-excluded)" = "case_crossover_df_sym_g14.RDS",
+           "CSLT-inclusive"          = "case_crossover_df_sym_g14_cslt.RDS",
+           "Spatial 200 m"           = "case_crossover_df_sym_g14_s200m.RDS",
+           "Spatial 1 km"            = "case_crossover_df_sym_g14_s1km.RDS")
+cd <- rbindlist(lapply(names(CD), function(nm) {
+  d <- setDT(readRDS(paste0(objects_folder, CD[[nm]])))
+  o <- assemble_cc_dlnm(d[state == "Minnesota"]); f <- fit_cc_inla_dlnm(o)
+  lag_window_table(f, o, "cumulative", labels = INLA_LABELS)[
+    , `:=`(defn = nm, n = sum(o$data$outbreak_binary == 1))][] }))
+print(dcast(cd, Predictor ~ defn, value.var = "Lag 22-28 d"))
+saveRDS(cd, paste0(objects_folder, "si_case_definition.RDS"))
+```
+
+# 6. Model specification and sensitivity (SI Table S5)
+
+Every modelling decision in one place, each changed one at a time against the primary. Reported
+at contrasts that stay valid for every lag window: runoff and precipitation at 0-7 d, and the
+waterfowl term at whatever lag it peaks, since its window differs across rows.
+
+WAIC only. INLA's CPO, the usual leave-one-out route, is **not valid for this design**: with a
+free intercept per stratum, dropping a single observation materially changes the fit of its own
+stratum, and INLA flags every one of the 2,604 observations as a CPO failure (including all 85
+cases). Used anyway it ranks "no bird term" as the best model, the opposite of what WAIC and
+every effect estimate say. Cross-validation that respects the matched design — holding out whole
+strata — is in `c_14_crossvalidation.Rmd`.
+
+```{r spec}
+PANEL <- list(
+  primary = MN,
+  gap7    = setDT(readRDS(paste0(objects_folder, "case_crossover_df_sym_g7.RDS")))[state == "Minnesota"],
+  nolog   = setDT(readRDS(paste0(objects_folder, "case_crossover_df_sym_g14_nolog.RDS")))[state == "Minnesota"]
+)
+SKEW  <- c("runoff", "precipitation")
+ns_av <- function(k) setNames(lapply(SKEW, function(v) list(fun = "ns", df = k)), SKEW)
+
+spec <- list()
+add <- function(domain, lab, panel = "primary", max_lag = 28, fixed_prec = NULL, ...) {
+  args <- list(...)
+  o <- do.call(assemble_cc_dlnm,
+               c(list(PANEL[[panel]], max_lag = max_lag,
+                      bird_knots = seq(0, max_lag, 7)), args))
+  f <- if (is.null(fixed_prec)) fit_cc_inla_dlnm(o) else
+       fit_cc_inla_dlnm(o, fixed_prec = fixed_prec)
+  t <- lag_window_table(f, o, "cumulative", labels = INLA_LABELS)
+  # a zero-length data.table lookup silently drops the whole row rather than erroring, which
+  # is how the no-bird-term spec vanished from an earlier version of this table
+  pick <- function(pred, col) { v <- t[Predictor == pred][[col]]; if (length(v)) v else NA_character_ }
+  bird <- if (length(o$weekly_vars)) {
+    b <- weekly_lag_summary(f, o, o$weekly_vars[1])$lagspec
+    i <- which.max(b$OR)
+    sprintf("%.2f (%.2f, %.2f) @ %d d", b$OR[i], b$low[i], b$high[i], b$lag_day[i])
+  } else NA_character_
+  spec[[length(spec) + 1L]] <<- data.table(
+    Domain = domain, Specification = lab, WAIC = round(f$waic$waic, 1),
+    `Runoff 0-7 d` = pick("Surface Runoff", "Lag 0-7 d"),
+    `Precip 0-7 d` = pick("Precipitation", "Lag 0-7 d"),
+    `Waterfowl peak` = bird)
+}
+
+add("Reference",       "Primary")
+add("Prior precision", "vague (0.01)",              fixed_prec = 0.01)
+add("Prior precision", "N(0, 0.5^2)",               fixed_prec = 4)
+add("Prior precision", "N(0, 0.125^2)",             fixed_prec = 64)
+add("Lag basis",       "ns(df = 3)",                arglag = list(fun = "ns", df = 3))
+add("Lag basis",       "ns(df = 4)",                arglag = list(fun = "ns", df = 4))
+add("Lag window",      "14 d",  max_lag = 14)
+add("Lag window",      "42 d",  max_lag = 42)
+add("Lag window",      "56 d",  max_lag = 56)
+add("Referent gap",    "+/-7 d",                    panel = "gap7")
+add("Exposure scale",  "no log, scale only",        panel = "nolog")
+add("Exposure scale",  "no log + ns(df = 2)",       panel = "nolog", argvar_by_var = ns_av(2))
+add("Exposure scale",  "no log + ns(df = 3)",       panel = "nolog", argvar_by_var = ns_av(3))
+add("Exposure scale",  "log + ns(df = 2)",          argvar_by_var = ns_av(2))
+add("Temperature",     "linear",                    argvar_by_var = list(temperature = list(fun = "lin")))
+add("Temperature",     "bs(df = 3)",                argvar_by_var = list(temperature = list(fun = "bs", df = 3, degree = 2)))
+add("Bird smooth",     "RW2",                       bird_rw = "rw2")
+add("Bird terms",      "+ predators",               weekly_vars = c("anseriformes", "predators"))
+add("Bird terms",      "no bird term",              weekly_vars = character(0))
+
+spec_dt <- rbindlist(spec)
+print(spec_dt)
+saveRDS(spec_dt, paste0(objects_folder, "si_specification.RDS"))
+```
+
+Reading it: the waterfowl result survives everything (1.46-2.25 across all 19 rows that carry
+it). Runoff's early-lag magnitude is the shape-sensitive one — 1.80 under the primary but 1.13
+with a spline on the exposure axis, where the interval crosses 1. That belongs in the
+Discussion rather than being found by a reviewer.
+
+Dropping the bird term costs 24 WAIC points, far more than any other single change. The log
+survives three separate attempts to replace it: a spline on raw exposures is worse, a tighter
+prior on raw exposures is worse, and only the log reaches 905.2 — so it is a shape decision
+with evidence behind it, not a cosmetic fix for skew.

@@ -1,0 +1,950 @@
+---
+title: "Primary case-crossover DLNM model (daily)"
+author: "Fintan Mooney"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r initiate}
+rm(list = ls())
+# 0a.Declare root directory, folder location and load essential stuff
+project.folder = paste0(print(here::here()), '/')
+source(paste0(project.folder, 'create_folder_structure.R'))
+source(paste0(functions.folder, 'script_initiate.R'))
+```
+
+# 1. Load case-crossover dataframe
+
+```{r, import casecrossover df}
+
+case_crossover_df <- readRDS(file.path(objects_folder, "case_crossover_df.RDS"))
+
+```
+
+## DLNM specification (constants)
+
+```{r, dlnm config}
+
+# Lag dimension: 0–14 days, natural cubic spline with 4 df (Lu et al. 2020).
+# Exposure dimension: linear (per 0.5 SD), matching the submitted manuscript's
+# coefficient interpretation. The "flexible" variant raises arglag df to 5 and
+# allows polynomial argvar for selected predictors (sensitivity).
+MAX_LAG <- 28
+ARGLAG_PRIMARY <- list(fun = "ns", df = 3)
+ARGVAR_LIN     <- list(fun = "lin")
+
+make_cb <- function(varname, df_lag = 3, argvar = ARGVAR_LIN) {
+  X <- as.matrix(case_crossover_df[, paste0(varname, "_Lag", 0:MAX_LAG), with = FALSE])
+  crossbasis(X, lag = c(0, MAX_LAG),
+             argvar = argvar,
+             arglag = list(fun = "ns", df = df_lag))
+}
+
+```
+
+
+## Crossbasis Terms (lag 0–28 days, ns df=4 for met; strata weekly for bird)
+
+```{r, finalized crossbasis}
+
+cb_leaf_area_index      <- make_cb("leaf_area_index")
+cb_longwave_radiation   <- make_cb("longwave_radiation")
+cb_precipitation        <- make_cb("precipitation")
+cb_relative_humidity    <- make_cb("relative_humidity")
+cb_runoff               <- make_cb("runoff")
+cb_shortwave_radiation  <- make_cb("shortwave_radiation")
+cb_snow_cover           <- make_cb("snow_cover")
+cb_soil_moisture        <- make_cb("soil_moisture")
+cb_temperature          <- make_cb("temperature")
+cb_wind_speed           <- make_cb("wind_speed")
+
+# Bird abundance: weekly eBird linearly interpolated to daily, so daily values
+# are nearly collinear within each 7-day window. Use a piecewise-constant lag
+# basis with weekly breaks instead of a smooth spline.
+cb_anseriformes <- crossbasis(
+  as.matrix(case_crossover_df[, paste0("anseriformes_Lag", 0:MAX_LAG), with = FALSE]),
+  lag    = c(0, MAX_LAG),
+  argvar = ARGVAR_LIN,
+  arglag = list(fun = "strata", breaks = c(7, 14, 21))
+)
+
+```
+
+### Flexible crossbasis (higher df / polynomial argvar — sensitivity only)
+
+```{r, more flexible crossbasis terms}
+
+cb_flex_leaf_area_index      <- make_cb("leaf_area_index",      df_lag = 5)
+cb_flex_longwave_radiation   <- make_cb("longwave_radiation",   df_lag = 5)
+cb_flex_precipitation        <- make_cb("precipitation",        df_lag = 5)
+cb_flex_relative_humidity    <- make_cb("relative_humidity",    df_lag = 5)
+cb_flex_runoff               <- make_cb("runoff",               df_lag = 5)
+cb_flex_shortwave_radiation  <- make_cb("shortwave_radiation",  df_lag = 5)
+cb_flex_snow_cover           <- make_cb("snow_cover",           df_lag = 5)
+cb_flex_soil_moisture        <- make_cb("soil_moisture",        df_lag = 5)
+cb_flex_temperature          <- make_cb("temperature",          df_lag = 5)
+cb_flex_wind_speed           <- make_cb("wind_speed",           df_lag = 5)
+
+cb_flex_anseriformes <- crossbasis(
+  as.matrix(case_crossover_df[, paste0("anseriformes_Lag", 0:MAX_LAG), with = FALSE]),
+  lag    = c(0, MAX_LAG),
+  argvar = ARGVAR_LIN,
+  arglag = list(fun = "strata", breaks = c(7, 14, 21))
+)
+
+```
+
+
+## Case-Crossover Model
+
+```{r, casecrossover model}
+
+# ----------------------------
+# Model Fitting
+# ----------------------------
+final_model <- clogit(
+  outbreak_binary ~
+    cb_runoff + cb_soil_moisture + cb_temperature +
+    cb_precipitation + cb_wind_speed + cb_snow_cover + cb_anseriformes +
+    strata(stratum_id),
+  method = "efron",
+  data = case_crossover_df
+)
+
+summary(final_model)
+AIC(final_model)
+saveRDS(final_model, file.path(models_folder, "casecrossover_model.RDS"))
+
+```
+
+```{r, crosspred objects}
+# ----------------------------
+# Crosspred Objects
+# ----------------------------
+cp_runoff       <- crosspred(cb_runoff, final_model, cen = 0, at = 0.5, cumul = TRUE)
+cp_soil         <- crosspred(cb_soil_moisture, final_model, cen = 0, at = 0.5, cumul = TRUE)
+cp_temp         <- crosspred(cb_temperature, final_model, cen = 0, at = 0.5, cumul = TRUE)
+cp_precip       <- crosspred(cb_precipitation, final_model, cen = 0, at = 0.5, cumul = TRUE)
+cp_wind         <- crosspred(cb_wind_speed, final_model, cen = 0, at = 0.5, cumul = TRUE)
+cp_snow         <- crosspred(cb_snow_cover, final_model, cen = 0, at = 0.5, cumul = TRUE)
+cp_bird         <- crosspred(cb_anseriformes, final_model, cen = 0, at = 0.5, cumul = TRUE)
+
+cp_slice_runoff <- crosspred(cb_runoff, final_model, cen = 0, at = 0.5)
+cp_slice_soil   <- crosspred(cb_soil_moisture, final_model, cen = 0, at = 0.5)
+cp_slice_temp   <- crosspred(cb_temperature, final_model, cen = 0, at = 0.5)
+cp_slice_precip <- crosspred(cb_precipitation, final_model, cen = 0, at = 0.5)
+cp_slice_wind   <- crosspred(cb_wind_speed, final_model, cen = 0, at = 0.5)
+cp_slice_snow   <- crosspred(cb_snow_cover, final_model, cen = 0, at = 0.5)
+cp_slice_bird   <- crosspred(cb_anseriformes, final_model, cen = 0, at = 0.5)
+
+```
+
+## Casecrossover Plots
+```{r, plots casecrossover}
+# ----------------------------
+# Cumulative OR Summary Table
+# ----------------------------
+cumulative_summary <- tibble(
+  Predictor = c("Runoff", "Soil Moisture", "Temperature",
+                "Precipitation", "Wind Speed", "Anseriformes"),
+      OR = c(
+        cp_runoff$allRRfit["0.5"],
+        cp_soil$allRRfit["0.5"],
+        cp_temp$allRRfit["0.5"],
+        cp_precip$allRRfit["0.5"],
+        cp_wind$allRRfit["0.5"],
+        cp_bird$allRRfit["0.5"]
+      ),
+      CI_low = c(
+        cp_runoff$allRRlow["0.5"],
+        cp_soil$allRRlow["0.5"],
+        cp_temp$allRRlow["0.5"],
+        cp_precip$allRRlow["0.5"],
+        cp_wind$allRRlow["0.5"],
+        cp_bird$allRRlow["0.5"]
+      ),
+      CI_high = c(
+        cp_runoff$allRRhigh["0.5"],
+        cp_soil$allRRhigh["0.5"],
+        cp_temp$allRRhigh["0.5"],
+        cp_precip$allRRhigh["0.5"],
+        cp_wind$allRRhigh["0.5"],
+        cp_bird$allRRhigh["0.5"]
+      )
+) %>%
+  mutate(`OR (95% CI)` = sprintf("%.2f (%.2f, %.2f)", OR, CI_low, CI_high)) %>%
+  select(Predictor, `OR (95% CI)`) %>%
+  gt() %>%
+  tab_header(
+    title = md("**Case-Crossover Model: Cumulative Odds Ratios**"),
+    subtitle = "Per 0.5 SD Increase"
+  ) %>%
+  cols_label(`OR (95% CI)` = "Odds Ratio (95% Confidence Interval)") %>%
+  tab_options(
+    table.font.size = 14,
+    heading.title.font.size = 16,
+    heading.subtitle.font.size = 14,
+    data_row.padding = px(6)
+  )
+
+# ----------------------------
+# Plotting Functions
+# ----------------------------
+plot_cumulative <- function(cp, title) {
+  plot(cp, type = "cumulative", var = 0.5, ci = "area",
+       col = "black", ci.arg = list(col = rgb(0,0,0,0.1), border = NA),
+       lwd = 1.5, main = title, xlab = "", ylab = "", las = 1)
+  abline(h = 1, lty = 2, col = "gray40")
+}
+
+plot_slices <- function(cp, title) {
+  plot(cp, type = "slices", var = 0.5, ci = "area",
+       col = "black", ci.arg = list(col = rgb(0,0,0,0.1), border = NA),
+       lwd = 1.3, main = title, xlab = "", ylab = "", las = 1)
+  abline(h = 1, lty = 2, col = "gray40")
+}
+
+# ----------------------------
+# Save Cumulative Plot
+# ----------------------------
+png(file.path(figures_main_folder,"figure_cumulative_ORs_casecrossover.png"), width = 11, height = 7, units = "in", res = 300)
+
+par(
+  mfrow = c(2, 3),
+  mar = c(4.2, 4.2, 2.5, 1),
+  oma = c(3, 4, 0, 1),
+  cex.main = 1.2,
+  cex.lab = 1.2,
+  cex.axis = 1.1,
+  tcl = -0.3, mgp = c(2.5, 0.7, 0)
+)
+
+plot_cumulative(cp_runoff, "Runoff")
+plot_cumulative(cp_soil, "Soil Moisture")
+plot_cumulative(cp_temp, "Temperature")
+plot_cumulative(cp_precip, "Precipitation")
+plot_cumulative(cp_wind, "Wind Speed")
+plot_cumulative(cp_bird, "Anseriformes")
+
+mtext("Lag (days)", side = 1, outer = TRUE, line = 0, cex = 1.2)
+mtext("Odds Ratio (95% CI)", side = 2, outer = TRUE, line = 0, cex = 1.2)
+
+dev.off()
+
+# ----------------------------
+# Save Slices Plot
+# ----------------------------
+png(file.path(figures_main_folder,"figure_slice_ORs_casecrossover.png"), width = 11, height = 7, units = "in", res = 300)
+
+par(
+  mfrow = c(2, 3),
+  mar = c(4.2, 4.2, 2.5, 1),
+  oma = c(3, 4, 0, 1),
+  cex.main = 1.2,
+  cex.lab = 1.2,
+  cex.axis = 1.1,
+  tcl = -0.3, mgp = c(2.5, 0.7, 0)
+)
+
+plot_slices(cp_slice_runoff, "Runoff")
+plot_slices(cp_slice_soil, "Soil Moisture")
+plot_slices(cp_slice_temp, "Temperature")
+plot_slices(cp_slice_precip, "Precipitation")
+plot_slices(cp_slice_wind, "Wind Speed")
+plot_slices(cp_slice_bird, "Anseriformes")
+
+mtext("Lag (days)", side = 1, outer = TRUE, line = 0, cex = 1.2)
+mtext("Odds Ratio (95% CI)", side = 2, outer = TRUE, line = 0, cex = 1.2)
+
+dev.off()
+
+
+```
+
+
+## Lag Specific Odds Ratio Table (Daily — weekly anchor lags)
+
+```{r, lag specific odds ratio table}
+# Display lag-specific ORs at weekly anchor points (0, 7, 14 days).
+LAG_ANCHORS <- c(0, 7, 14, 21, 28)
+
+extract_lag_ORs_wide <- function(cp_obj, varname, varval = "0.5", lags = LAG_ANCHORS) {
+  lag_labels <- paste0("lag", lags)
+  or    <- cp_obj$matRRfit[varval, lag_labels]
+  low   <- cp_obj$matRRlow[varval, lag_labels]
+  high  <- cp_obj$matRRhigh[varval, lag_labels]
+  col_labels <- paste0("Lag ", lags, " d")
+  tibble(
+    Predictor = varname,
+    !!!setNames(as.list(or),   paste0("OR_Lag", lags)),
+    !!!setNames(as.list(low),  paste0("Low_Lag", lags)),
+    !!!setNames(as.list(high), paste0("High_Lag", lags)),
+    !!!setNames(as.list(sprintf("%.2f (%.2f, %.2f)", or, low, high)), col_labels)
+  )
+}
+
+table_lag_ORs <- bind_rows(
+  extract_lag_ORs_wide(cp_slice_runoff, "Runoff"),
+  extract_lag_ORs_wide(cp_slice_soil,   "Soil Moisture"),
+  extract_lag_ORs_wide(cp_slice_temp,   "Temperature"),
+  extract_lag_ORs_wide(cp_slice_precip, "Precipitation"),
+  extract_lag_ORs_wide(cp_slice_wind,   "Wind Speed"),
+  extract_lag_ORs_wide(cp_slice_bird,   "Anseriformes")
+)
+
+# Highlight significant rows
+col_labels <- paste0("Lag ", LAG_ANCHORS, " d")
+highlight_matrix <- sapply(LAG_ANCHORS, function(i) {
+  table_lag_ORs[[paste0("Low_Lag", i)]] > 1 | table_lag_ORs[[paste0("High_Lag", i)]] < 1
+})
+colnames(highlight_matrix) <- col_labels
+
+ft <- table_lag_ORs %>%
+  select(Predictor, all_of(col_labels)) %>%
+  flextable() %>%
+  set_header_labels(Predictor = "Predictor") %>%
+  add_header_row(values = c("Predictor", "Odds Ratio (95% CI)"),
+                 colwidths = c(1, length(col_labels))) %>%
+  fontsize(size = 11, part = "all") %>%
+  autofit() %>%
+  align(align = "center", part = "all") %>%
+  theme_booktabs()
+
+for (k in seq_along(LAG_ANCHORS)) {
+  ft <- bold(ft, i = which(highlight_matrix[, k]), j = col_labels[k])
+}
+
+doc <- read_docx() %>%
+  body_add_flextable(ft) %>%
+  body_add_par(
+    "Table: Lag-Specific Odds Ratios at Weekly Anchor Lags (0, 7, 14 days) for the Daily Time-Stratified Case-Crossover Model of HPAI Outbreaks in Minnesota, 2022. Estimates are per 0.5 standard deviation increase in each predictor. Statistically significant odds ratios are shown in bold.",
+    style = "Normal"
+  )
+
+print(doc, target = file.path(tables_main_folder, "Table_LagSpecific_OR_HPAI_Casecrossover_daily.docx"))
+
+ft
+```
+
+### Cumulative odds ratio table (cumulative through anchor lags)
+
+```{r, cumulative odds ratios}
+ft_lagspecific <- ft
+
+# Cumulative OR through each weekly anchor lag (0, 7, 14).
+extract_cum_ORs_wide <- function(cp_obj, varname, varval = "0.5", lags = LAG_ANCHORS) {
+  lag_labels <- paste0("lag", lags)
+  or    <- cp_obj$cumRRfit[varval, lag_labels]
+  low   <- cp_obj$cumRRlow[varval, lag_labels]
+  high  <- cp_obj$cumRRhigh[varval, lag_labels]
+  col_labels <- paste0("Cum ≤ ", lags, " d")
+  tibble(
+    Predictor = varname,
+    !!!setNames(as.list(or),   paste0("OR_Lag", lags)),
+    !!!setNames(as.list(low),  paste0("Low_Lag", lags)),
+    !!!setNames(as.list(high), paste0("High_Lag", lags)),
+    !!!setNames(as.list(sprintf("%.2f (%.2f, %.2f)", or, low, high)), col_labels)
+  )
+}
+
+table_lag_ORs_cum <- bind_rows(
+  extract_cum_ORs_wide(cp_runoff, "Runoff"),
+  extract_cum_ORs_wide(cp_soil,   "Soil Moisture"),
+  extract_cum_ORs_wide(cp_temp,   "Temperature"),
+  extract_cum_ORs_wide(cp_precip, "Precipitation"),
+  extract_cum_ORs_wide(cp_wind,   "Wind Speed"),
+  extract_cum_ORs_wide(cp_bird,   "Anseriformes")
+)
+
+col_labels_cum <- paste0("Cum ≤ ", LAG_ANCHORS, " d")
+highlight_matrix <- sapply(LAG_ANCHORS, function(i) {
+  table_lag_ORs_cum[[paste0("Low_Lag", i)]] > 1 | table_lag_ORs_cum[[paste0("High_Lag", i)]] < 1
+})
+colnames(highlight_matrix) <- col_labels_cum
+
+ft_cum <- table_lag_ORs_cum %>%
+  select(Predictor, all_of(col_labels_cum)) %>%
+  flextable() %>%
+  set_header_labels(Predictor = "Predictor") %>%
+  add_header_row(values = c("Predictor", "Cumulative Odds Ratio (95% CI)"),
+                 colwidths = c(1, length(col_labels_cum))) %>%
+  fontsize(size = 11, part = "all") %>%
+  autofit() %>%
+  align(align = "center", part = "all") %>%
+  theme_booktabs()
+
+for (k in seq_along(LAG_ANCHORS)) {
+  ft_cum <- bold(ft_cum, i = which(highlight_matrix[, k]), j = col_labels_cum[k])
+}
+
+doc <- read_docx() %>%
+  body_add_flextable(ft_cum) %>%
+  body_add_par(
+    "Table: Cumulative Odds Ratios through weekly anchor lags (≤0, ≤7, ≤14 days) for the daily time-stratified case-crossover model of HPAI outbreaks in Minnesota, 2022. Estimates are per 0.5 SD increase in each predictor. Statistically significant ORs in bold.",
+    style = "Normal"
+  )
+
+print(doc, target = file.path(tables_main_folder, "Table_Cumulative_OR_HPAI_Casscrossover_daily.docx"))
+
+ft_cum
+```
+
+#### Combine cumulative and lag-specific odds ratio tables
+
+```{r, combine and lagspecific odds ratio tables}
+
+panel_label <- function(txt, size = 11) {
+  fp <- fp_text(bold = TRUE, font.size = size)
+  fpar(ftext(txt, fp))
+}
+
+doc <- read_docx() %>%
+  # Panel A
+  body_add_fpar(panel_label("A. Lag-specific odds ratios (per +0.5 SD)")) %>%
+  body_add_flextable(ft_lagspecific) %>%
+  body_add_par("", style = "Normal") %>%   # spacer
+
+  # Panel B
+  body_add_fpar(panel_label("B. Cumulative odds ratios (per +0.5 SD)")) %>%
+  body_add_flextable(ft_cum)
+
+print(doc, target = file.path(tables_main_folder, "Table_LagSpecific_and_Cumulative_ORs_Casecrossover.docx"))
+
+
+```
+
+
+
+### Cumulative odds ratio by weekly lag window (0–7d, 8–14d, 15–21d, 22–28d)
+
+```{r, cumulative odds ratio lag sections}
+
+# Weekly lag windows expressed in days. Each window is fitted via a fresh
+# crosspred over the specified [from, to] daily lag range.
+lag_windows <- list(
+  "Lag 0–7 d"   = c(0, 7),
+  "Lag 8–14 d"  = c(8, 14),
+  "Lag 15–21 d" = c(15, 21),
+  "Lag 22–28 d" = c(22, 28)
+)
+
+# Met variables share the same ns(df=3) lag basis; bird abundance uses a
+# separate strata lag basis (weekly breaks), so its contrast vectors are
+# different.
+lag_seq        <- 0:28
+lag_basis_met  <- do.call(dlnm::onebasis, c(list(x = lag_seq), attr(cb_runoff, "arglag")))
+lag_basis_bird <- do.call(dlnm::onebasis, c(list(x = lag_seq), attr(cb_anseriformes, "arglag")))
+
+contrast_0_7        <- 0.5 * colSums(lag_basis_met[lag_seq  >=  0 & lag_seq <=  7, , drop = FALSE])
+contrast_8_14       <- 0.5 * colSums(lag_basis_met[lag_seq  >=  8 & lag_seq <= 14, , drop = FALSE])
+contrast_15_21      <- 0.5 * colSums(lag_basis_met[lag_seq  >= 15 & lag_seq <= 21, , drop = FALSE])
+contrast_22_28      <- 0.5 * colSums(lag_basis_met[lag_seq  >= 22 & lag_seq <= 28, , drop = FALSE])
+
+contrast_bird_0_7   <- 0.5 * colSums(lag_basis_bird[lag_seq >=  0 & lag_seq <=  7, , drop = FALSE])
+contrast_bird_8_14  <- 0.5 * colSums(lag_basis_bird[lag_seq >=  8 & lag_seq <= 14, , drop = FALSE])
+contrast_bird_15_21 <- 0.5 * colSums(lag_basis_bird[lag_seq >= 15 & lag_seq <= 21, , drop = FALSE])
+contrast_bird_22_28 <- 0.5 * colSums(lag_basis_bird[lag_seq >= 22 & lag_seq <= 28, , drop = FALSE])
+
+# Coefficients and vcov submatrix per crossbasis
+idx_runoff <- grep("^cb_runoffv",               names(coef(final_model))); b_runoff <- coef(final_model)[idx_runoff]; V_runoff <- vcov(final_model)[idx_runoff, idx_runoff]
+idx_soil   <- grep("^cb_soil_moisturev",        names(coef(final_model))); b_soil   <- coef(final_model)[idx_soil];   V_soil   <- vcov(final_model)[idx_soil,   idx_soil]
+idx_temp   <- grep("^cb_temperaturev",          names(coef(final_model))); b_temp   <- coef(final_model)[idx_temp];   V_temp   <- vcov(final_model)[idx_temp,   idx_temp]
+idx_precip <- grep("^cb_precipitationv",        names(coef(final_model))); b_precip <- coef(final_model)[idx_precip]; V_precip <- vcov(final_model)[idx_precip, idx_precip]
+idx_wind   <- grep("^cb_wind_speedv",           names(coef(final_model))); b_wind   <- coef(final_model)[idx_wind];   V_wind   <- vcov(final_model)[idx_wind,   idx_wind]
+idx_snow   <- grep("^cb_snow_coverv",           names(coef(final_model))); b_snow   <- coef(final_model)[idx_snow];   V_snow   <- vcov(final_model)[idx_snow,   idx_snow]
+idx_bird   <- grep("^cb_anseriformesv", names(coef(final_model))); b_bird   <- coef(final_model)[idx_bird];   V_bird   <- vcov(final_model)[idx_bird,   idx_bird]
+
+# Cumulative log-OR and SE for each (predictor, window)
+lo_runoff_0_7   <- sum(contrast_0_7   * b_runoff); se_runoff_0_7   <- sqrt(as.numeric(t(contrast_0_7)   %*% V_runoff %*% contrast_0_7))
+lo_runoff_8_14  <- sum(contrast_8_14  * b_runoff); se_runoff_8_14  <- sqrt(as.numeric(t(contrast_8_14)  %*% V_runoff %*% contrast_8_14))
+lo_runoff_15_21 <- sum(contrast_15_21 * b_runoff); se_runoff_15_21 <- sqrt(as.numeric(t(contrast_15_21) %*% V_runoff %*% contrast_15_21))
+lo_runoff_22_28 <- sum(contrast_22_28 * b_runoff); se_runoff_22_28 <- sqrt(as.numeric(t(contrast_22_28) %*% V_runoff %*% contrast_22_28))
+
+
+lo_soil_0_7   <- sum(contrast_0_7   * b_soil); se_soil_0_7   <- sqrt(as.numeric(t(contrast_0_7)   %*% V_soil %*% contrast_0_7))
+lo_soil_8_14  <- sum(contrast_8_14  * b_soil); se_soil_8_14  <- sqrt(as.numeric(t(contrast_8_14)  %*% V_soil %*% contrast_8_14))
+lo_soil_15_21 <- sum(contrast_15_21 * b_soil); se_soil_15_21 <- sqrt(as.numeric(t(contrast_15_21) %*% V_soil %*% contrast_15_21))
+lo_soil_22_28 <- sum(contrast_22_28 * b_soil); se_soil_22_28 <- sqrt(as.numeric(t(contrast_22_28) %*% V_soil %*% contrast_22_28))
+
+lo_temp_0_7   <- sum(contrast_0_7   * b_temp); se_temp_0_7   <- sqrt(as.numeric(t(contrast_0_7)   %*% V_temp %*% contrast_0_7))
+lo_temp_8_14  <- sum(contrast_8_14  * b_temp); se_temp_8_14  <- sqrt(as.numeric(t(contrast_8_14)  %*% V_temp %*% contrast_8_14))
+lo_temp_15_21 <- sum(contrast_15_21 * b_temp); se_temp_15_21 <- sqrt(as.numeric(t(contrast_15_21) %*% V_temp %*% contrast_15_21))
+lo_temp_22_28 <- sum(contrast_22_28 * b_temp); se_temp_22_28 <- sqrt(as.numeric(t(contrast_22_28) %*% V_temp %*% contrast_22_28))
+
+lo_precip_0_7   <- sum(contrast_0_7   * b_precip); se_precip_0_7   <- sqrt(as.numeric(t(contrast_0_7)   %*% V_precip %*% contrast_0_7))
+lo_precip_8_14  <- sum(contrast_8_14  * b_precip); se_precip_8_14  <- sqrt(as.numeric(t(contrast_8_14)  %*% V_precip %*% contrast_8_14))
+lo_precip_15_21 <- sum(contrast_15_21 * b_precip); se_precip_15_21 <- sqrt(as.numeric(t(contrast_15_21) %*% V_precip %*% contrast_15_21))
+lo_precip_22_28 <- sum(contrast_22_28 * b_precip); se_precip_22_28 <- sqrt(as.numeric(t(contrast_22_28) %*% V_precip %*% contrast_22_28))
+
+lo_wind_0_7   <- sum(contrast_0_7   * b_wind); se_wind_0_7   <- sqrt(as.numeric(t(contrast_0_7)   %*% V_wind %*% contrast_0_7))
+lo_wind_8_14  <- sum(contrast_8_14  * b_wind); se_wind_8_14  <- sqrt(as.numeric(t(contrast_8_14)  %*% V_wind %*% contrast_8_14))
+lo_wind_15_21 <- sum(contrast_15_21 * b_wind); se_wind_15_21 <- sqrt(as.numeric(t(contrast_15_21) %*% V_wind %*% contrast_15_21))
+lo_wind_22_28 <- sum(contrast_22_28 * b_wind); se_wind_22_28 <- sqrt(as.numeric(t(contrast_22_28) %*% V_wind %*% contrast_22_28))
+
+lo_snow_0_7   <- sum(contrast_0_7   * b_snow); se_snow_0_7   <- sqrt(as.numeric(t(contrast_0_7)   %*% V_snow %*% contrast_0_7))
+lo_snow_8_14  <- sum(contrast_8_14  * b_snow); se_snow_8_14  <- sqrt(as.numeric(t(contrast_8_14)  %*% V_snow %*% contrast_8_14))
+lo_snow_15_21 <- sum(contrast_15_21 * b_snow); se_snow_15_21 <- sqrt(as.numeric(t(contrast_15_21) %*% V_snow %*% contrast_15_21))
+lo_snow_22_28 <- sum(contrast_22_28 * b_snow); se_snow_22_28 <- sqrt(as.numeric(t(contrast_22_28) %*% V_snow %*% contrast_22_28))
+
+lo_bird_0_7   <- sum(contrast_bird_0_7   * b_bird); se_bird_0_7   <- sqrt(as.numeric(t(contrast_bird_0_7)   %*% V_bird %*% contrast_bird_0_7))
+lo_bird_8_14  <- sum(contrast_bird_8_14  * b_bird); se_bird_8_14  <- sqrt(as.numeric(t(contrast_bird_8_14)  %*% V_bird %*% contrast_bird_8_14))
+lo_bird_15_21 <- sum(contrast_bird_15_21 * b_bird); se_bird_15_21 <- sqrt(as.numeric(t(contrast_bird_15_21) %*% V_bird %*% contrast_bird_15_21))
+lo_bird_22_28 <- sum(contrast_bird_22_28 * b_bird); se_bird_22_28 <- sqrt(as.numeric(t(contrast_bird_22_28) %*% V_bird %*% contrast_bird_22_28))
+
+table_cum_ORs <- tibble(
+  Predictor = c("Surface Runoff", "Soil Moisture",
+                "Temperature", "Precipitation", "Wind Speed", "Snow Cover", "Anseriformes"),
+
+  `Lag 0–7 d` = c(
+    sprintf("%.2f (%.2f, %.2f)", exp(lo_runoff_0_7), exp(lo_runoff_0_7 - 1.96 * se_runoff_0_7), exp(lo_runoff_0_7 + 1.96 * se_runoff_0_7)),
+    sprintf("%.2f (%.2f, %.2f)", exp(lo_soil_0_7),   exp(lo_soil_0_7   - 1.96 * se_soil_0_7),   exp(lo_soil_0_7   + 1.96 * se_soil_0_7)),
+    sprintf("%.2f (%.2f, %.2f)", exp(lo_temp_0_7),   exp(lo_temp_0_7   - 1.96 * se_temp_0_7),   exp(lo_temp_0_7   + 1.96 * se_temp_0_7)),
+    sprintf("%.2f (%.2f, %.2f)", exp(lo_precip_0_7), exp(lo_precip_0_7 - 1.96 * se_precip_0_7), exp(lo_precip_0_7 + 1.96 * se_precip_0_7)),
+    sprintf("%.2f (%.2f, %.2f)", exp(lo_wind_0_7),   exp(lo_wind_0_7   - 1.96 * se_wind_0_7),   exp(lo_wind_0_7   + 1.96 * se_wind_0_7)),
+    sprintf("%.2f (%.2f, %.2f)", exp(lo_snow_0_7),   exp(lo_snow_0_7   - 1.96 * se_snow_0_7),   exp(lo_snow_0_7   + 1.96 * se_snow_0_7)),
+    sprintf("%.2f (%.2f, %.2f)", exp(lo_bird_0_7),   exp(lo_bird_0_7   - 1.96 * se_bird_0_7),   exp(lo_bird_0_7   + 1.96 * se_bird_0_7))
+  ),
+
+  `Lag 8–14 d` = c(
+    sprintf("%.2f (%.2f, %.2f)", exp(lo_runoff_8_14), exp(lo_runoff_8_14 - 1.96 * se_runoff_8_14), exp(lo_runoff_8_14 + 1.96 * se_runoff_8_14)),
+    sprintf("%.2f (%.2f, %.2f)", exp(lo_soil_8_14),   exp(lo_soil_8_14   - 1.96 * se_soil_8_14),   exp(lo_soil_8_14   + 1.96 * se_soil_8_14)),
+    sprintf("%.2f (%.2f, %.2f)", exp(lo_temp_8_14),   exp(lo_temp_8_14   - 1.96 * se_temp_8_14),   exp(lo_temp_8_14   + 1.96 * se_temp_8_14)),
+    sprintf("%.2f (%.2f, %.2f)", exp(lo_precip_8_14), exp(lo_precip_8_14 - 1.96 * se_precip_8_14), exp(lo_precip_8_14 + 1.96 * se_precip_8_14)),
+    sprintf("%.2f (%.2f, %.2f)", exp(lo_wind_8_14),   exp(lo_wind_8_14   - 1.96 * se_wind_8_14),   exp(lo_wind_8_14   + 1.96 * se_wind_8_14)),
+    sprintf("%.2f (%.2f, %.2f)", exp(lo_snow_8_14),   exp(lo_snow_8_14   - 1.96 * se_snow_8_14),   exp(lo_snow_8_14   + 1.96 * se_snow_8_14)),
+    sprintf("%.2f (%.2f, %.2f)", exp(lo_bird_8_14),   exp(lo_bird_8_14   - 1.96 * se_bird_8_14),   exp(lo_bird_8_14   + 1.96 * se_bird_8_14))
+  ),
+
+  `Lag 15–21 d` = c(
+    sprintf("%.2f (%.2f, %.2f)", exp(lo_runoff_15_21), exp(lo_runoff_15_21 - 1.96 * se_runoff_15_21), exp(lo_runoff_15_21 + 1.96 * se_runoff_15_21)),
+    sprintf("%.2f (%.2f, %.2f)", exp(lo_soil_15_21),   exp(lo_soil_15_21   - 1.96 * se_soil_15_21),   exp(lo_soil_15_21   + 1.96 * se_soil_15_21)),
+    sprintf("%.2f (%.2f, %.2f)", exp(lo_temp_15_21),   exp(lo_temp_15_21   - 1.96 * se_temp_15_21),   exp(lo_temp_15_21   + 1.96 * se_temp_15_21)),
+    sprintf("%.2f (%.2f, %.2f)", exp(lo_precip_15_21), exp(lo_precip_15_21 - 1.96 * se_precip_15_21), exp(lo_precip_15_21 + 1.96 * se_precip_15_21)),
+    sprintf("%.2f (%.2f, %.2f)", exp(lo_wind_15_21),   exp(lo_wind_15_21   - 1.96 * se_wind_15_21),   exp(lo_wind_15_21   + 1.96 * se_wind_15_21)),
+    sprintf("%.2f (%.2f, %.2f)", exp(lo_snow_15_21),   exp(lo_snow_15_21   - 1.96 * se_snow_15_21),   exp(lo_snow_15_21   + 1.96 * se_snow_15_21)),
+    sprintf("%.2f (%.2f, %.2f)", exp(lo_bird_15_21),   exp(lo_bird_15_21   - 1.96 * se_bird_15_21),   exp(lo_bird_15_21   + 1.96 * se_bird_15_21))
+  ),
+
+  `Lag 22–28 d` = c(
+    sprintf("%.2f (%.2f, %.2f)", exp(lo_runoff_22_28), exp(lo_runoff_22_28 - 1.96 * se_runoff_22_28), exp(lo_runoff_22_28 + 1.96 * se_runoff_22_28)),
+    sprintf("%.2f (%.2f, %.2f)", exp(lo_soil_22_28),   exp(lo_soil_22_28   - 1.96 * se_soil_22_28),   exp(lo_soil_22_28   + 1.96 * se_soil_22_28)),
+    sprintf("%.2f (%.2f, %.2f)", exp(lo_temp_22_28),   exp(lo_temp_22_28   - 1.96 * se_temp_22_28),   exp(lo_temp_22_28   + 1.96 * se_temp_22_28)),
+    sprintf("%.2f (%.2f, %.2f)", exp(lo_precip_22_28), exp(lo_precip_22_28 - 1.96 * se_precip_22_28), exp(lo_precip_22_28 + 1.96 * se_precip_22_28)),
+    sprintf("%.2f (%.2f, %.2f)", exp(lo_wind_22_28),   exp(lo_wind_22_28   - 1.96 * se_wind_22_28),   exp(lo_wind_22_28   + 1.96 * se_wind_22_28)),
+    sprintf("%.2f (%.2f, %.2f)", exp(lo_snow_22_28),   exp(lo_snow_22_28   - 1.96 * se_snow_22_28),   exp(lo_snow_22_28   + 1.96 * se_snow_22_28)),
+    sprintf("%.2f (%.2f, %.2f)", exp(lo_bird_22_28),   exp(lo_bird_22_28   - 1.96 * se_bird_22_28),   exp(lo_bird_22_28   + 1.96 * se_bird_22_28))
+  )
+)
+
+# Highlight significant cells
+parse_ci <- function(s) {
+  parts <- as.numeric(unlist(strsplit(gsub("[()]", "", s), "[ ,]+")))
+  c(low = parts[2], high = parts[3])
+}
+highlight_matrix <- sapply(names(lag_windows), function(w) {
+  vapply(table_cum_ORs[[w]], function(s) {
+    ci <- parse_ci(s); ci["low"] > 1 | ci["high"] < 1
+  }, logical(1))
+})
+colnames(highlight_matrix) <- names(lag_windows)
+
+ft_cum <- table_cum_ORs %>%
+  flextable() %>%
+  set_header_labels(Predictor = "Predictor") %>%
+  add_header_row(values = c("Predictor", "Cumulative Odds Ratio (95% CI)"),
+                 colwidths = c(1, length(lag_windows))) %>%
+  fontsize(size = 11, part = "all") %>%
+  autofit() %>%
+  align(align = "center", part = "all") %>%
+  theme_booktabs()
+
+for (w in names(lag_windows)) {
+  ft_cum <- bold(ft_cum, i = which(highlight_matrix[, w]), j = w)
+}
+
+doc <- read_docx() %>%
+  body_add_flextable(ft_cum) %>%
+  body_add_par(
+    "Table: Cumulative Odds Ratios by Weekly Lag Window for the Daily Time-Stratified Case-Crossover Model of HPAI Outbreaks in Minnesota, 2022. Each cell reports the cumulative OR over the specified daily lag window per 0.5 SD increase in each predictor. Statistically significant associations are shown in bold.",
+    style = "Normal"
+  )
+
+print(doc, target = file.path(tables_main_folder, "Table_Cumulative_OR_HPAI_Minnesota_daily.docx"))
+
+ft_cum
+```
+
+## Case-Crossover Model with Flexible Crossbasis
+
+```{r, casecrossover flex model}
+
+# ----------------------------
+# Model Fitting
+# ----------------------------
+final_model_flex <- clogit(
+  outbreak_binary ~
+    cb_flex_runoff + cb_flex_soil_moisture + cb_flex_temperature +
+    cb_flex_precipitation + cb_flex_wind_speed + cb_flex_snow_cover +
+    cb_flex_anseriformes +
+    strata(stratum_id),
+  method = "efron",
+  data = case_crossover_df
+)
+
+summary(final_model_flex)
+AIC(final_model_flex)
+saveRDS(final_model_flex, file.path(models_folder, "casecrossover_flexible_model.RDS"))
+
+```
+
+```{r, crosspred objects for flex model}
+# ----------------------------
+# Crosspred Objects
+# ----------------------------
+cp_flex_runoff       <- crosspred(cb_flex_runoff, final_model_flex, cen = 0, at = 0.5, cumul = TRUE)
+cp_flex_soil         <- crosspred(cb_flex_soil_moisture, final_model_flex, cen = 0, at = 0.5, cumul = TRUE)
+cp_flex_temp         <- crosspred(cb_flex_temperature, final_model_flex, cen = 0, at = 0.5, cumul = TRUE)
+cp_flex_precip       <- crosspred(cb_flex_precipitation, final_model_flex, cen = 0, at = 0.5, cumul = TRUE)
+cp_flex_wind         <- crosspred(cb_flex_wind_speed, final_model_flex, cen = 0, at = 0.5, cumul = TRUE)
+cp_flex_bird         <- crosspred(cb_flex_anseriformes, final_model_flex, cen = 0, at = 0.5, cumul = TRUE)
+
+cp_flex_slice_runoff <- crosspred(cb_flex_runoff, final_model_flex, cen = 0, at = 0.5)
+cp_flex_slice_soil   <- crosspred(cb_flex_soil_moisture, final_model_flex, cen = 0, at = 0.5)
+cp_flex_slice_temp   <- crosspred(cb_flex_temperature, final_model_flex, cen = 0, at = 0.5)
+cp_flex_slice_precip <- crosspred(cb_flex_precipitation, final_model_flex, cen = 0, at = 0.5)
+cp_flex_slice_wind   <- crosspred(cb_flex_wind_speed, final_model_flex, cen = 0, at = 0.5)
+cp_flex_slice_bird   <- crosspred(cb_flex_anseriformes, final_model_flex, cen = 0, at = 0.5)
+
+```
+
+## Casecrossover Plots
+```{r, plots casecrossover flex}
+# ----------------------------
+# Cumulative OR Summary Table
+# ----------------------------
+cumulative_summary <- tibble(
+  Predictor = c("Surface Runoff", "Soil Moisture", "Temperature",
+                "Precipitation", "Wind Speed", "Anseriformes"),
+      OR = c(
+        cp_flex_runoff$allRRfit["0.5"],
+        cp_flex_soil$allRRfit["0.5"],
+        cp_flex_temp$allRRfit["0.5"],
+        cp_flex_precip$allRRfit["0.5"],
+        cp_flex_wind$allRRfit["0.5"],
+        cp_flex_bird$allRRfit["0.5"]
+      ),
+      CI_low = c(
+        cp_flex_runoff$allRRlow["0.5"],
+        cp_flex_soil$allRRlow["0.5"],
+        cp_flex_temp$allRRlow["0.5"],
+        cp_flex_precip$allRRlow["0.5"],
+        cp_flex_wind$allRRlow["0.5"],
+        cp_flex_bird$allRRlow["0.5"]
+      ),
+      CI_high = c(
+        cp_flex_runoff$allRRhigh["0.5"],
+        cp_flex_soil$allRRhigh["0.5"],
+        cp_flex_temp$allRRhigh["0.5"],
+        cp_flex_precip$allRRhigh["0.5"],
+        cp_flex_wind$allRRhigh["0.5"],
+        cp_flex_bird$allRRhigh["0.5"]
+      )
+) %>%
+  mutate(`OR (95% CI)` = sprintf("%.2f (%.2f, %.2f)", OR, CI_low, CI_high)) %>%
+  select(Predictor, `OR (95% CI)`) %>%
+  gt() %>%
+  tab_header(
+    title = md("**Case-Crossover Model: Cumulative Odds Ratios**"),
+    subtitle = "Per 0.5 SD Increase"
+  ) %>%
+  cols_label(`OR (95% CI)` = "Odds Ratio (95% Confidence Interval)") %>%
+  tab_options(
+    table.font.size = 14,
+    heading.title.font.size = 16,
+    heading.subtitle.font.size = 14,
+    data_row.padding = px(6)
+  )
+
+cumulative_summary
+
+# ----------------------------
+# Plotting Functions
+# ----------------------------
+plot_cumulative <- function(cp_flex_, title) {
+  plot(cp_flex_, type = "cumulative", var = 0.5, ci = "area",
+       col = "black", ci.arg = list(col = rgb(0,0,0,0.1), border = NA),
+       lwd = 1.5, main = title, xlab = "", ylab = "", las = 1)
+  abline(h = 1, lty = 2, col = "gray40")
+}
+
+plot_slices <- function(cp_flex_, title) {
+  plot(cp_flex_, type = "slices", var = 0.5, ci = "area",
+       col = "black", ci.arg = list(col = rgb(0,0,0,0.1), border = NA),
+       lwd = 1.3, main = title, xlab = "", ylab = "", las = 1)
+  abline(h = 1, lty = 2, col = "gray40")
+}
+
+# ----------------------------
+# Save Cumulative Plot
+# ----------------------------
+png(file.path(figures_main_folder,"figure_cumulative_ORs_casecrossover_flexmodel.png"), width = 11, height = 7, units = "in", res = 300)
+
+par(
+  mfrow = c(2, 3),
+  mar = c(4.2, 4.2, 2.5, 1),
+  oma = c(3, 4, 0, 1),
+  cex.main = 1.2,
+  cex.lab = 1.2,
+  cex.axis = 1.1,
+  tcl = -0.3, mgp = c(2.5, 0.7, 0)
+)
+
+plot_cumulative(cp_flex_runoff, "Runoff")
+plot_cumulative(cp_flex_soil, "Soil Moisture")
+plot_cumulative(cp_flex_temp, "Temperature")
+plot_cumulative(cp_flex_precip, "Precipitation")
+plot_cumulative(cp_flex_wind, "Wind Speed")
+plot_cumulative(cp_flex_bird, "Anseriformes")
+
+mtext("Lag (days)", side = 1, outer = TRUE, line = 0, cex = 1.2)
+mtext("Odds Ratio (95% CI)", side = 2, outer = TRUE, line = 0, cex = 1.2)
+
+dev.off()
+
+# ----------------------------
+# Save Slices Plot
+# ----------------------------
+png(file.path(figures_main_folder,"figure_slice_ORs_casecrossover_flexmodel.png"), width = 11, height = 7, units = "in", res = 300)
+
+par(
+  mfrow = c(2, 3),
+  mar = c(4.2, 4.2, 2.5, 1),
+  oma = c(3, 4, 0, 1),
+  cex.main = 1.2,
+  cex.lab = 1.2,
+  cex.axis = 1.1,
+  tcl = -0.3, mgp = c(2.5, 0.7, 0)
+)
+
+plot_slices(cp_flex_slice_runoff, "Runoff")
+plot_slices(cp_flex_slice_soil, "Soil Moisture")
+plot_slices(cp_flex_slice_temp, "Temperature")
+plot_slices(cp_flex_slice_precip, "Precipitation")
+plot_slices(cp_flex_slice_wind, "Wind Speed")
+plot_slices(cp_flex_slice_bird, "Anseriformes")
+
+mtext("Lag (days)", side = 1, outer = TRUE, line = 0, cex = 1.2)
+mtext("Odds Ratio (95% CI)", side = 2, outer = TRUE, line = 0, cex = 1.2)
+
+dev.off()
+
+```
+
+
+## Lag-Specific Table (Flex Model — weekly anchor lags)
+
+```{r, lag specific odds ratio table for flex model}
+extract_lag_ORs_wide <- function(cp_flex_obj, varname, varval = "0.5", lags = LAG_ANCHORS) {
+  lag_labels <- paste0("lag", lags)
+  or    <- cp_flex_obj$matRRfit[varval, lag_labels]
+  low   <- cp_flex_obj$matRRlow[varval, lag_labels]
+  high  <- cp_flex_obj$matRRhigh[varval, lag_labels]
+  col_labels <- paste0("Lag ", lags, " d")
+  tibble(
+    Predictor = varname,
+    !!!setNames(as.list(or),   paste0("OR_Lag", lags)),
+    !!!setNames(as.list(low),  paste0("Low_Lag", lags)),
+    !!!setNames(as.list(high), paste0("High_Lag", lags)),
+    !!!setNames(as.list(sprintf("%.2f (%.2f, %.2f)", or, low, high)), col_labels)
+  )
+}
+
+table_lag_ORs <- bind_rows(
+  extract_lag_ORs_wide(cp_flex_slice_runoff, "Runoff"),
+  extract_lag_ORs_wide(cp_flex_slice_soil,   "Soil Moisture"),
+  extract_lag_ORs_wide(cp_flex_slice_temp,   "Temperature"),
+  extract_lag_ORs_wide(cp_flex_slice_precip, "Precipitation"),
+  extract_lag_ORs_wide(cp_flex_slice_wind,   "Wind Speed"),
+  extract_lag_ORs_wide(cp_flex_slice_bird,   "Anseriformes")
+)
+
+col_labels <- paste0("Lag ", LAG_ANCHORS, " d")
+highlight_matrix <- sapply(LAG_ANCHORS, function(i) {
+  table_lag_ORs[[paste0("Low_Lag", i)]] > 1 | table_lag_ORs[[paste0("High_Lag", i)]] < 1
+})
+colnames(highlight_matrix) <- col_labels
+
+ft <- table_lag_ORs %>%
+  select(Predictor, all_of(col_labels)) %>%
+  flextable() %>%
+  set_header_labels(Predictor = "Predictor") %>%
+  add_header_row(values = c("Predictor", "Odds Ratio (95% CI)"),
+                 colwidths = c(1, length(col_labels))) %>%
+  fontsize(size = 11, part = "all") %>%
+  autofit() %>%
+  align(align = "center", part = "all") %>%
+  theme_booktabs()
+
+for (k in seq_along(LAG_ANCHORS)) {
+  ft <- bold(ft, i = which(highlight_matrix[, k]), j = col_labels[k])
+}
+
+doc <- read_docx() %>%
+  body_add_flextable(ft) %>%
+  body_add_par(
+    "Table: Lag-Specific Odds Ratios at Weekly Anchor Lags (Flexible DLNM) for HPAI Outbreaks in Minnesota, 2022. Estimates are per 0.5 SD increase in each predictor. Statistically significant odds ratios are shown in bold.",
+    style = "Normal"
+  )
+
+print(doc, target = file.path(tables_main_folder, "Table_LagSpecific_OR_HPAI_Minnesota_flexmodel_daily.docx"))
+
+ft
+```
+
+
+
+## Cumulative odds ratio by weekly lag window (Flex Model)
+
+```{r, cumulative odds ratio lag sections flex}
+
+# Flex model uses arglag ns df=5 so the lag basis is rebuilt from cb_flex_runoff
+lag_seq        <- 0:28
+lag_basis_flex      <- do.call(dlnm::onebasis, c(list(x = lag_seq), attr(cb_flex_runoff, "arglag")))
+lag_basis_flex_bird <- do.call(dlnm::onebasis, c(list(x = lag_seq), attr(cb_flex_anseriformes, "arglag")))
+
+contrast_0_7        <- 0.5 * colSums(lag_basis_flex[lag_seq      >=  0 & lag_seq <=  7, , drop = FALSE])
+contrast_8_14       <- 0.5 * colSums(lag_basis_flex[lag_seq      >=  8 & lag_seq <= 14, , drop = FALSE])
+contrast_15_21      <- 0.5 * colSums(lag_basis_flex[lag_seq      >= 15 & lag_seq <= 21, , drop = FALSE])
+contrast_22_28      <- 0.5 * colSums(lag_basis_flex[lag_seq      >= 22 & lag_seq <= 28, , drop = FALSE])
+
+contrast_bird_0_7   <- 0.5 * colSums(lag_basis_flex_bird[lag_seq >=  0 & lag_seq <=  7, , drop = FALSE])
+contrast_bird_8_14  <- 0.5 * colSums(lag_basis_flex_bird[lag_seq >=  8 & lag_seq <= 14, , drop = FALSE])
+contrast_bird_15_21 <- 0.5 * colSums(lag_basis_flex_bird[lag_seq >= 15 & lag_seq <= 21, , drop = FALSE])
+contrast_bird_22_28 <- 0.5 * colSums(lag_basis_flex_bird[lag_seq >= 22 & lag_seq <= 28, , drop = FALSE])
+
+idx_runoff <- grep("^cb_flex_runoffv",               names(coef(final_model_flex))); b_runoff <- coef(final_model_flex)[idx_runoff]; V_runoff <- vcov(final_model_flex)[idx_runoff, idx_runoff]
+idx_soil   <- grep("^cb_flex_soil_moisturev",        names(coef(final_model_flex))); b_soil   <- coef(final_model_flex)[idx_soil];   V_soil   <- vcov(final_model_flex)[idx_soil,   idx_soil]
+idx_temp   <- grep("^cb_flex_temperaturev",          names(coef(final_model_flex))); b_temp   <- coef(final_model_flex)[idx_temp];   V_temp   <- vcov(final_model_flex)[idx_temp,   idx_temp]
+idx_precip <- grep("^cb_flex_precipitationv",        names(coef(final_model_flex))); b_precip <- coef(final_model_flex)[idx_precip]; V_precip <- vcov(final_model_flex)[idx_precip, idx_precip]
+idx_wind   <- grep("^cb_flex_wind_speedv",           names(coef(final_model_flex))); b_wind   <- coef(final_model_flex)[idx_wind];   V_wind   <- vcov(final_model_flex)[idx_wind,   idx_wind]
+idx_snow   <- grep("^cb_flex_snow_coverv",           names(coef(final_model_flex))); b_snow   <- coef(final_model_flex)[idx_snow];   V_snow   <- vcov(final_model_flex)[idx_snow,   idx_snow]
+idx_bird   <- grep("^cb_flex_anseriformesv", names(coef(final_model_flex))); b_bird   <- coef(final_model_flex)[idx_bird];   V_bird   <- vcov(final_model_flex)[idx_bird,   idx_bird]
+
+lo_runoff_0_7   <- sum(contrast_0_7   * b_runoff); se_runoff_0_7   <- sqrt(as.numeric(t(contrast_0_7)   %*% V_runoff %*% contrast_0_7))
+lo_runoff_8_14  <- sum(contrast_8_14  * b_runoff); se_runoff_8_14  <- sqrt(as.numeric(t(contrast_8_14)  %*% V_runoff %*% contrast_8_14))
+lo_runoff_15_21 <- sum(contrast_15_21 * b_runoff); se_runoff_15_21 <- sqrt(as.numeric(t(contrast_15_21) %*% V_runoff %*% contrast_15_21))
+lo_runoff_22_28 <- sum(contrast_22_28 * b_runoff); se_runoff_22_28 <- sqrt(as.numeric(t(contrast_22_28) %*% V_runoff %*% contrast_22_28))
+
+
+lo_soil_0_7   <- sum(contrast_0_7   * b_soil); se_soil_0_7   <- sqrt(as.numeric(t(contrast_0_7)   %*% V_soil %*% contrast_0_7))
+lo_soil_8_14  <- sum(contrast_8_14  * b_soil); se_soil_8_14  <- sqrt(as.numeric(t(contrast_8_14)  %*% V_soil %*% contrast_8_14))
+lo_soil_15_21 <- sum(contrast_15_21 * b_soil); se_soil_15_21 <- sqrt(as.numeric(t(contrast_15_21) %*% V_soil %*% contrast_15_21))
+lo_soil_22_28 <- sum(contrast_22_28 * b_soil); se_soil_22_28 <- sqrt(as.numeric(t(contrast_22_28) %*% V_soil %*% contrast_22_28))
+
+lo_temp_0_7   <- sum(contrast_0_7   * b_temp); se_temp_0_7   <- sqrt(as.numeric(t(contrast_0_7)   %*% V_temp %*% contrast_0_7))
+lo_temp_8_14  <- sum(contrast_8_14  * b_temp); se_temp_8_14  <- sqrt(as.numeric(t(contrast_8_14)  %*% V_temp %*% contrast_8_14))
+lo_temp_15_21 <- sum(contrast_15_21 * b_temp); se_temp_15_21 <- sqrt(as.numeric(t(contrast_15_21) %*% V_temp %*% contrast_15_21))
+lo_temp_22_28 <- sum(contrast_22_28 * b_temp); se_temp_22_28 <- sqrt(as.numeric(t(contrast_22_28) %*% V_temp %*% contrast_22_28))
+
+lo_precip_0_7   <- sum(contrast_0_7   * b_precip); se_precip_0_7   <- sqrt(as.numeric(t(contrast_0_7)   %*% V_precip %*% contrast_0_7))
+lo_precip_8_14  <- sum(contrast_8_14  * b_precip); se_precip_8_14  <- sqrt(as.numeric(t(contrast_8_14)  %*% V_precip %*% contrast_8_14))
+lo_precip_15_21 <- sum(contrast_15_21 * b_precip); se_precip_15_21 <- sqrt(as.numeric(t(contrast_15_21) %*% V_precip %*% contrast_15_21))
+lo_precip_22_28 <- sum(contrast_22_28 * b_precip); se_precip_22_28 <- sqrt(as.numeric(t(contrast_22_28) %*% V_precip %*% contrast_22_28))
+
+lo_wind_0_7   <- sum(contrast_0_7   * b_wind); se_wind_0_7   <- sqrt(as.numeric(t(contrast_0_7)   %*% V_wind %*% contrast_0_7))
+lo_wind_8_14  <- sum(contrast_8_14  * b_wind); se_wind_8_14  <- sqrt(as.numeric(t(contrast_8_14)  %*% V_wind %*% contrast_8_14))
+lo_wind_15_21 <- sum(contrast_15_21 * b_wind); se_wind_15_21 <- sqrt(as.numeric(t(contrast_15_21) %*% V_wind %*% contrast_15_21))
+lo_wind_22_28 <- sum(contrast_22_28 * b_wind); se_wind_22_28 <- sqrt(as.numeric(t(contrast_22_28) %*% V_wind %*% contrast_22_28))
+
+lo_snow_0_7   <- sum(contrast_0_7   * b_snow); se_snow_0_7   <- sqrt(as.numeric(t(contrast_0_7)   %*% V_snow %*% contrast_0_7))
+lo_snow_8_14  <- sum(contrast_8_14  * b_snow); se_snow_8_14  <- sqrt(as.numeric(t(contrast_8_14)  %*% V_snow %*% contrast_8_14))
+lo_snow_15_21 <- sum(contrast_15_21 * b_snow); se_snow_15_21 <- sqrt(as.numeric(t(contrast_15_21) %*% V_snow %*% contrast_15_21))
+lo_snow_22_28 <- sum(contrast_22_28 * b_snow); se_snow_22_28 <- sqrt(as.numeric(t(contrast_22_28) %*% V_snow %*% contrast_22_28))
+
+lo_bird_0_7   <- sum(contrast_bird_0_7   * b_bird); se_bird_0_7   <- sqrt(as.numeric(t(contrast_bird_0_7)   %*% V_bird %*% contrast_bird_0_7))
+lo_bird_8_14  <- sum(contrast_bird_8_14  * b_bird); se_bird_8_14  <- sqrt(as.numeric(t(contrast_bird_8_14)  %*% V_bird %*% contrast_bird_8_14))
+lo_bird_15_21 <- sum(contrast_bird_15_21 * b_bird); se_bird_15_21 <- sqrt(as.numeric(t(contrast_bird_15_21) %*% V_bird %*% contrast_bird_15_21))
+lo_bird_22_28 <- sum(contrast_bird_22_28 * b_bird); se_bird_22_28 <- sqrt(as.numeric(t(contrast_bird_22_28) %*% V_bird %*% contrast_bird_22_28))
+
+table_cum_ORs <- tibble(
+  Predictor = c("Surface Runoff", "Soil Moisture",
+                "Temperature", "Precipitation", "Wind Speed", "Snow Cover", "Anseriformes"),
+
+  `Lag 0–7 d` = c(
+    sprintf("%.2f (%.2f, %.2f)", exp(lo_runoff_0_7), exp(lo_runoff_0_7 - 1.96 * se_runoff_0_7), exp(lo_runoff_0_7 + 1.96 * se_runoff_0_7)),
+    sprintf("%.2f (%.2f, %.2f)", exp(lo_soil_0_7),   exp(lo_soil_0_7   - 1.96 * se_soil_0_7),   exp(lo_soil_0_7   + 1.96 * se_soil_0_7)),
+    sprintf("%.2f (%.2f, %.2f)", exp(lo_temp_0_7),   exp(lo_temp_0_7   - 1.96 * se_temp_0_7),   exp(lo_temp_0_7   + 1.96 * se_temp_0_7)),
+    sprintf("%.2f (%.2f, %.2f)", exp(lo_precip_0_7), exp(lo_precip_0_7 - 1.96 * se_precip_0_7), exp(lo_precip_0_7 + 1.96 * se_precip_0_7)),
+    sprintf("%.2f (%.2f, %.2f)", exp(lo_wind_0_7),   exp(lo_wind_0_7   - 1.96 * se_wind_0_7),   exp(lo_wind_0_7   + 1.96 * se_wind_0_7)),
+    sprintf("%.2f (%.2f, %.2f)", exp(lo_snow_0_7),   exp(lo_snow_0_7   - 1.96 * se_snow_0_7),   exp(lo_snow_0_7   + 1.96 * se_snow_0_7)),
+    sprintf("%.2f (%.2f, %.2f)", exp(lo_bird_0_7),   exp(lo_bird_0_7   - 1.96 * se_bird_0_7),   exp(lo_bird_0_7   + 1.96 * se_bird_0_7))
+  ),
+
+  `Lag 8–14 d` = c(
+    sprintf("%.2f (%.2f, %.2f)", exp(lo_runoff_8_14), exp(lo_runoff_8_14 - 1.96 * se_runoff_8_14), exp(lo_runoff_8_14 + 1.96 * se_runoff_8_14)),
+    sprintf("%.2f (%.2f, %.2f)", exp(lo_soil_8_14),   exp(lo_soil_8_14   - 1.96 * se_soil_8_14),   exp(lo_soil_8_14   + 1.96 * se_soil_8_14)),
+    sprintf("%.2f (%.2f, %.2f)", exp(lo_temp_8_14),   exp(lo_temp_8_14   - 1.96 * se_temp_8_14),   exp(lo_temp_8_14   + 1.96 * se_temp_8_14)),
+    sprintf("%.2f (%.2f, %.2f)", exp(lo_precip_8_14), exp(lo_precip_8_14 - 1.96 * se_precip_8_14), exp(lo_precip_8_14 + 1.96 * se_precip_8_14)),
+    sprintf("%.2f (%.2f, %.2f)", exp(lo_wind_8_14),   exp(lo_wind_8_14   - 1.96 * se_wind_8_14),   exp(lo_wind_8_14   + 1.96 * se_wind_8_14)),
+    sprintf("%.2f (%.2f, %.2f)", exp(lo_snow_8_14),   exp(lo_snow_8_14   - 1.96 * se_snow_8_14),   exp(lo_snow_8_14   + 1.96 * se_snow_8_14)),
+    sprintf("%.2f (%.2f, %.2f)", exp(lo_bird_8_14),   exp(lo_bird_8_14   - 1.96 * se_bird_8_14),   exp(lo_bird_8_14   + 1.96 * se_bird_8_14))
+  ),
+
+  `Lag 15–21 d` = c(
+    sprintf("%.2f (%.2f, %.2f)", exp(lo_runoff_15_21), exp(lo_runoff_15_21 - 1.96 * se_runoff_15_21), exp(lo_runoff_15_21 + 1.96 * se_runoff_15_21)),
+    sprintf("%.2f (%.2f, %.2f)", exp(lo_soil_15_21),   exp(lo_soil_15_21   - 1.96 * se_soil_15_21),   exp(lo_soil_15_21   + 1.96 * se_soil_15_21)),
+    sprintf("%.2f (%.2f, %.2f)", exp(lo_temp_15_21),   exp(lo_temp_15_21   - 1.96 * se_temp_15_21),   exp(lo_temp_15_21   + 1.96 * se_temp_15_21)),
+    sprintf("%.2f (%.2f, %.2f)", exp(lo_precip_15_21), exp(lo_precip_15_21 - 1.96 * se_precip_15_21), exp(lo_precip_15_21 + 1.96 * se_precip_15_21)),
+    sprintf("%.2f (%.2f, %.2f)", exp(lo_wind_15_21),   exp(lo_wind_15_21   - 1.96 * se_wind_15_21),   exp(lo_wind_15_21   + 1.96 * se_wind_15_21)),
+    sprintf("%.2f (%.2f, %.2f)", exp(lo_snow_15_21),   exp(lo_snow_15_21   - 1.96 * se_snow_15_21),   exp(lo_snow_15_21   + 1.96 * se_snow_15_21)),
+    sprintf("%.2f (%.2f, %.2f)", exp(lo_bird_15_21),   exp(lo_bird_15_21   - 1.96 * se_bird_15_21),   exp(lo_bird_15_21   + 1.96 * se_bird_15_21))
+  ),
+
+  `Lag 22–28 d` = c(
+    sprintf("%.2f (%.2f, %.2f)", exp(lo_runoff_22_28), exp(lo_runoff_22_28 - 1.96 * se_runoff_22_28), exp(lo_runoff_22_28 + 1.96 * se_runoff_22_28)),
+    sprintf("%.2f (%.2f, %.2f)", exp(lo_soil_22_28),   exp(lo_soil_22_28   - 1.96 * se_soil_22_28),   exp(lo_soil_22_28   + 1.96 * se_soil_22_28)),
+    sprintf("%.2f (%.2f, %.2f)", exp(lo_temp_22_28),   exp(lo_temp_22_28   - 1.96 * se_temp_22_28),   exp(lo_temp_22_28   + 1.96 * se_temp_22_28)),
+    sprintf("%.2f (%.2f, %.2f)", exp(lo_precip_22_28), exp(lo_precip_22_28 - 1.96 * se_precip_22_28), exp(lo_precip_22_28 + 1.96 * se_precip_22_28)),
+    sprintf("%.2f (%.2f, %.2f)", exp(lo_wind_22_28),   exp(lo_wind_22_28   - 1.96 * se_wind_22_28),   exp(lo_wind_22_28   + 1.96 * se_wind_22_28)),
+    sprintf("%.2f (%.2f, %.2f)", exp(lo_snow_22_28),   exp(lo_snow_22_28   - 1.96 * se_snow_22_28),   exp(lo_snow_22_28   + 1.96 * se_snow_22_28)),
+    sprintf("%.2f (%.2f, %.2f)", exp(lo_bird_22_28),   exp(lo_bird_22_28   - 1.96 * se_bird_22_28),   exp(lo_bird_22_28   + 1.96 * se_bird_22_28))
+  )
+)
+
+highlight_matrix <- sapply(names(lag_windows), function(w) {
+  vapply(table_cum_ORs[[w]], function(s) {
+    ci <- parse_ci(s); ci["low"] > 1 | ci["high"] < 1
+  }, logical(1))
+})
+colnames(highlight_matrix) <- names(lag_windows)
+
+ft_cum <- table_cum_ORs %>%
+  flextable() %>%
+  set_header_labels(Predictor = "Predictor") %>%
+  add_header_row(values = c("Predictor", "Cumulative Odds Ratio (95% CI)"),
+                 colwidths = c(1, length(lag_windows))) %>%
+  fontsize(size = 11, part = "all") %>%
+  autofit() %>%
+  align(align = "center", part = "all") %>%
+  theme_booktabs()
+
+for (w in names(lag_windows)) {
+  ft_cum <- bold(ft_cum, i = which(highlight_matrix[, w]), j = w)
+}
+
+doc <- read_docx() %>%
+  body_add_flextable(ft_cum) %>%
+  body_add_par(
+    "Table: Cumulative Odds Ratios by Weekly Lag Window (Flexible DLNM) for HPAI Outbreaks in Minnesota, 2022. Each cell reports the cumulative OR over the specified daily lag window per 0.5 SD increase. Significant ORs in bold.",
+    style = "Normal"
+  )
+
+print(doc, target = file.path(tables_main_folder, "Table_Cumulative_OR_HPAI_Minnesota_flexmodel_daily.docx"))
+
+ft_cum
+```
+

@@ -1,0 +1,191 @@
+---
+title: "Multi-state gridded case-crossover DLNM — weekly (independent events)"
+author: "Fintan Mooney"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r initiate}
+rm(list = ls())
+# 0a. Declare root directory, folder location and load essential stuff
+project.folder = paste0(print(here::here()), '/')
+source(paste0(project.folder, 'create_folder_structure.R'))
+source(paste0(functions.folder, 'script_initiate.R'))
+
+# 0b. lubridate owns the date accessors under the project's conflicted setup.
+conflict_prefer("year",  "lubridate", quiet = TRUE)
+conflict_prefer("month", "lubridate", quiet = TRUE)
+```
+
+Weekly gridded case-crossover DLNM for the 7 flyway study states (IA, IL, IN, MI, MN, OH, WI),
+**independent introductions only** (cross-farm CSLT/NOSEQ and spatio-temporal non-independent
+events already removed upstream in `a_03`). ISO-week ERA5 + native weekly bird abundance, lag
+0–4 weeks. Self-contained: fits the model and writes the lag-specific + cumulative **plots**
+and the **Word table** of lag-specific + cumulative odds ratios (per +0.5 SD). The daily
+counterpart is `c_05_casecrossover_multistate_daily.Rmd`.
+
+# 1. Load the weekly independent case-crossover dataframe
+
+```{r load}
+case_crossover_df <- readRDS(paste0(objects_folder, "case_crossover_df_multistate_weekly.RDS"))
+setDT(case_crossover_df)
+n_cases <- sum(case_crossover_df$outbreak_binary == 1)
+cat("Weekly independent case-crossover: ", n_cases, " cases / ",
+    sum(case_crossover_df$outbreak_binary == 0), " controls, ",
+    uniqueN(case_crossover_df$stratum_id), " strata\n", sep = "")
+```
+
+# 2. DLNM crossbases (lag 0–4 wk)
+
+```{r crossbasis}
+MAX_LAG    <- 4
+predictors <- c("runoff", "soil_moisture", "temperature", "precipitation",
+                "wind_speed", "snow_cover", "anseriformes")
+pred_labels <- c(runoff = "Runoff", soil_moisture = "Soil Moisture",
+                 temperature = "Temperature", precipitation = "Precipitation",
+                 wind_speed = "Wind Speed", snow_cover = "Snow Cover",
+                 anseriformes = "Anseriformes")
+
+# Linear exposure–response; lag basis ns(df=2) over the 0–4-week window for every
+# exposure (weekly bird is native, so no strata basis is needed here).
+make_cb <- function(v) {
+  X <- as.matrix(case_crossover_df[, paste0(v, "_Lag", 0:MAX_LAG), with = FALSE])
+  crossbasis(X, lag = c(0, MAX_LAG), argvar = list(fun = "lin"),
+             arglag = list(fun = "ns", df = 2))
+}
+cbs <- setNames(lapply(predictors, make_cb), paste0("cb_", predictors))
+list2env(cbs, environment())
+```
+
+# 3. Fit the conditional-logistic DLNM
+
+```{r fit}
+final_model <- clogit(
+  as.formula(paste("outbreak_binary ~", paste(names(cbs), collapse = " + "),
+                   "+ strata(stratum_id)")),
+  method = "efron", data = case_crossover_df)
+
+saveRDS(final_model, paste0(models_folder, "casecrossover_multistate_weekly.RDS"))
+cat("AIC:", round(AIC(final_model), 1), "\n")
+```
+
+# 4. Lag-response extraction (per +0.5 SD at every lag)
+
+```{r extract}
+# Per-lag and cumulative-through-lag ORs from the coefficients + vcov (robust; avoids
+# crosspred's name-matching). For a linear argvar, the +0.5 SD effect at lag set S is
+# exp(0.5 * colSums(lagbasis[S]) %*% beta), with the delta-method SE from vcov.
+beta <- coef(final_model); V <- vcov(final_model); lags <- 0:MAX_LAG
+
+extract_one <- function(v) {
+  ix <- grep(paste0("^cb_", v, "v"), names(beta)); b <- beta[ix]; Vs <- V[ix, ix, drop = FALSE]
+  lb <- do.call(dlnm::onebasis, c(list(x = lags), attr(cbs[[paste0("cb_", v)]], "arglag")))
+  or_ci <- function(ct) {
+    lo <- sum(ct * b); se <- sqrt(as.numeric(t(ct) %*% Vs %*% ct))
+    c(OR = exp(lo), lcl = exp(lo - 1.96 * se), ucl = exp(lo + 1.96 * se))
+  }
+  rbindlist(lapply(seq_along(lags), function(k) {
+    p  <- or_ci(0.5 * lb[k, ])
+    cu <- or_ci(0.5 * colSums(lb[1:k, , drop = FALSE]))
+    data.table(predictor = v, label = pred_labels[[v]], lag = lags[k],
+               per_OR = p["OR"], per_lcl = p["lcl"], per_ucl = p["ucl"],
+               cum_OR = cu["OR"], cum_lcl = cu["lcl"], cum_ucl = cu["ucl"])
+  }))
+}
+curves <- rbindlist(lapply(predictors, extract_one))
+curves[, label := factor(label, levels = pred_labels[predictors])]
+```
+
+# 5. Lag-specific OR plot
+
+```{r plot-lagspecific, fig.width = 10, fig.height = 7}
+WK_COL <- "#B2182B"
+lag_plot <- function(ycol, locol, hicol, title, ylab) {
+  ggplot(curves, aes(lag, .data[[ycol]])) +
+    geom_hline(yintercept = 1, linetype = "dashed", colour = "grey40") +
+    geom_ribbon(aes(ymin = .data[[locol]], ymax = .data[[hicol]]), fill = WK_COL, alpha = 0.13) +
+    geom_line(colour = WK_COL, linewidth = 0.7) +
+    geom_point(colour = WK_COL, size = 1.7) +
+    facet_wrap(~ label, ncol = 3) +
+    scale_x_continuous(breaks = 0:4) +
+    coord_cartesian(ylim = c(0, 4.4)) +
+    labs(title = title,
+         subtitle = "Multi-state weekly case-crossover, lag 0–4 wk, ns(df=2); independent events",
+         x = "Lag (weeks)", y = ylab) +
+    theme_minimal(base_family = "Avenir") +
+    theme(plot.title = element_text(family = "Avenir Heavy"),
+          strip.text = element_text(family = "Avenir Heavy"),
+          panel.grid.minor = element_blank())
+}
+
+fig_per <- lag_plot("per_OR", "per_lcl", "per_ucl",
+                    "Lag-specific OR — multi-state weekly DLNM",
+                    "Odds Ratio (95% CI), per +0.5 SD in that lag week")
+ggsave(paste0(figures_main_folder, "figure_multistate_weekly_lagspecific_OR.png"),
+       fig_per, width = 10, height = 7, dpi = 300, bg = "white")
+fig_per
+```
+
+# 6. Cumulative OR plot
+
+```{r plot-cumulative, fig.width = 10, fig.height = 7}
+fig_cum <- lag_plot("cum_OR", "cum_lcl", "cum_ucl",
+                    "Cumulative OR — multi-state weekly DLNM",
+                    "Cumulative OR (95% CI), per +0.5 SD across lags 0…k") +
+  labs(x = "Cumulative through lag (weeks)")
+ggsave(paste0(figures_main_folder, "figure_multistate_weekly_cumulative_OR.png"),
+       fig_cum, width = 10, height = 7, dpi = 300, bg = "white")
+fig_cum
+```
+
+# 7. Word table — lag-specific (Panel A) and cumulative (Panel B) ORs
+
+```{r table}
+anchors <- 0:4                      # weekly anchor lags, in weeks
+fmt_ci  <- function(or, lo, hi) sprintf("%.2f (%.2f, %.2f)", or, lo, hi)
+
+# Build a wide flextable for one OR type, bolding cells whose 95% CI excludes 1.
+make_ft <- function(orc, loc, hic, col_prefix, unit, header) {
+  collabs <- paste0(col_prefix, " ", anchors, " ", unit)
+  w   <- data.table(Predictor = unname(pred_labels[predictors]))
+  sig <- matrix(FALSE, nrow = length(predictors), ncol = length(anchors))
+  for (k in seq_along(anchors)) {
+    rows <- curves[lag == anchors[k]][match(predictors, predictor)]
+    w[[collabs[k]]] <- fmt_ci(rows[[orc]], rows[[loc]], rows[[hic]])
+    sig[, k] <- rows[[loc]] > 1 | rows[[hic]] < 1
+  }
+  ft <- flextable(w) |>
+    add_header_row(values = c("Predictor", header), colwidths = c(1, length(collabs))) |>
+    fontsize(size = 10, part = "all") |> align(align = "center", part = "all") |>
+    theme_booktabs() |> autofit()
+  for (k in seq_along(collabs)) {
+    r <- which(sig[, k]); if (length(r)) ft <- bold(ft, i = r, j = collabs[k])
+  }
+  ft
+}
+
+ft_per <- make_ft("per_OR", "per_lcl", "per_ucl", "Lag",   "wk", "Lag-specific OR (95% CI)")
+ft_cum <- make_ft("cum_OR", "cum_lcl", "cum_ucl", "Cum ≤", "wk", "Cumulative OR (95% CI)")
+
+panel   <- function(txt) fpar(ftext(txt, fp_text(bold = TRUE, font.size = 11)))
+caption <- sprintf(paste0("Lag-specific (Panel A) and cumulative (Panel B) odds ratios, per ",
+  "+0.5 SD, from the gridded multi-state (7-state) weekly time-stratified case-crossover DLNM ",
+  "of HPAI spillover, 2022 — independent introductions only (n = %d cases). 95%% CIs ",
+  "excluding 1 are bold."), n_cases)
+
+read_docx() |>
+  body_add_fpar(panel("A. Lag-specific odds ratios (per +0.5 SD)")) |>
+  body_add_flextable(ft_per) |>
+  body_add_par("", style = "Normal") |>
+  body_add_fpar(panel("B. Cumulative odds ratios (per +0.5 SD)")) |>
+  body_add_flextable(ft_cum) |>
+  body_add_par(caption, style = "Normal") |>
+  print(target = paste0(tables_main_folder,
+                        "Table_LagSpecific_and_Cumulative_ORs_Multistate_weekly.docx"))
+
+ft_cum
+```

@@ -1,0 +1,292 @@
+---
+title: "Profile-likelihood and bootstrap intervals (small-sample-robust)"
+author: "Fintan Mooney"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r initiate}
+rm(list = ls())
+# 0a.Declare root directory, folder location and load essential stuff
+project.folder = paste0(print(here::here()), '/')
+source(paste0(project.folder, 'create_folder_structure.R'))
+source(paste0(functions.folder, 'script_initiate.R'))
+```
+
+# 1. Load case-crossover dataframe
+
+```{r load}
+case_crossover_df <- readRDS(paste0(objects_folder, "case_crossover_df.RDS"))
+setDT(case_crossover_df)
+```
+
+# 2. Build crossbases (primary spec)
+
+```{r crossbases}
+cb_runoff <- crossbasis(
+  as.matrix(case_crossover_df[, paste0("runoff_Lag", 0:28), with = FALSE]),
+  lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 3)
+)
+cb_soil_moisture <- crossbasis(
+  as.matrix(case_crossover_df[, paste0("soil_moisture_Lag", 0:28), with = FALSE]),
+  lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 3)
+)
+cb_temperature <- crossbasis(
+  as.matrix(case_crossover_df[, paste0("temperature_Lag", 0:28), with = FALSE]),
+  lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 3)
+)
+cb_precipitation <- crossbasis(
+  as.matrix(case_crossover_df[, paste0("precipitation_Lag", 0:28), with = FALSE]),
+  lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 3)
+)
+cb_wind_speed <- crossbasis(
+  as.matrix(case_crossover_df[, paste0("wind_speed_Lag", 0:28), with = FALSE]),
+  lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 3)
+)
+cb_anseriformes <- crossbasis(
+  as.matrix(case_crossover_df[, paste0("anseriformes_Lag", 0:28), with = FALSE]),
+  lag = c(0, 28), argvar = list(fun = "lin"),
+  arglag = list(fun = "strata", breaks = c(7, 14, 21))
+)
+```
+
+# 3. Fit primary clogit and extract Wald CIs
+
+```{r fit-wald}
+freq_model <- clogit(
+  outbreak_binary ~
+    cb_runoff + cb_soil_moisture + cb_temperature +
+    cb_precipitation + cb_wind_speed + cb_anseriformes +
+    strata(stratum_id),
+  method = "efron", data = case_crossover_df
+)
+
+beta_hat <- coef(freq_model)
+V_hat    <- vcov(freq_model)
+
+lag_seq        <- 0:28
+lag_basis_met  <- do.call(dlnm::onebasis, c(list(x = lag_seq), attr(cb_runoff,       "arglag")))
+lag_basis_bird <- do.call(dlnm::onebasis, c(list(x = lag_seq), attr(cb_anseriformes, "arglag")))
+contrast_met   <- 0.5 * colSums(lag_basis_met)
+contrast_bird  <- 0.5 * colSums(lag_basis_bird)
+
+predictor_specs <- list(
+  "Runoff"        = list(prefix = "cb_runoff",        is_bird = FALSE),
+  "Soil Moisture" = list(prefix = "cb_soil_moisture", is_bird = FALSE),
+  "Temperature"   = list(prefix = "cb_temperature",   is_bird = FALSE),
+  "Precipitation" = list(prefix = "cb_precipitation", is_bird = FALSE),
+  "Wind Speed"    = list(prefix = "cb_wind_speed",    is_bird = FALSE),
+  "Anseriformes"  = list(prefix = "cb_anseriformes",  is_bird = TRUE)
+)
+
+wald_tbl <- rbindlist(lapply(names(predictor_specs), function(name) {
+  spec <- predictor_specs[[name]]
+  contrast <- if (spec$is_bird) contrast_bird else contrast_met
+  cols <- grep(paste0("^", spec$prefix, "v"), names(beta_hat))
+  b    <- beta_hat[cols]; V <- V_hat[cols, cols]
+  lo   <- as.numeric(contrast %*% b)
+  se   <- sqrt(as.numeric(t(contrast) %*% V %*% contrast))
+  data.table(
+    Predictor = name,
+    `Wald OR (95% CI)` = sprintf("%.2f (%.2f, %.2f)",
+                                exp(lo), exp(lo - 1.96 * se), exp(lo + 1.96 * se))
+  )
+}))
+```
+
+# 4. Profile-likelihood CIs on each crossbasis coefficient
+
+```{r profile-ci}
+# Profile-likelihood CIs are computed per individual coefficient by survival::confint.
+# For each predictor we then need a small-sample-robust CI on the cumulative log-OR
+# (a linear combination of basis coefficients). Two equivalent approaches:
+#  (a) Profile-likelihood CI per coefficient, then propagate via contrast vector
+#      using a delta-method-equivalent: this is approximate.
+#  (b) Reparameterize the model so the contrast is a single coefficient and profile that.
+# We use (b) — the cleaner approach — by adding a single linear-combination column
+# directly to the design matrix and profiling that.
+
+profile_ci_for_predictor <- function(prefix, contrast) {
+  cols <- grep(paste0("^", prefix, "v"), names(beta_hat))
+  # Build the linear-combination column: sum_j contrast[j] * X_{:,col_j}
+  # Then a model with this single column has slope = log-OR at +0.5 SD cumulative.
+  X_all <- model.matrix(freq_model)
+  cb_cols <- X_all[, cols, drop = FALSE]
+  lc <- as.numeric(cb_cols %*% contrast)
+
+  # Drop the original crossbasis columns and replace with the linear-combination
+  other_cols <- setdiff(seq_len(ncol(X_all)), cols)
+  Xnew <- cbind(lc, X_all[, other_cols, drop = FALSE])
+  colnames(Xnew)[1] <- "linear_combo"
+
+  # Fit reparameterized clogit using survival::coxph trick — pass via formula
+  df_reparam <- copy(case_crossover_df)
+  df_reparam[, linear_combo := lc]
+  other_terms <- setdiff(names(beta_hat), names(beta_hat)[cols])
+
+  # Build formula
+  rhs <- paste(c("linear_combo", paste0("`", other_terms, "`")), collapse = " + ")
+  # Reassign the rest of the crossbasis matrix as data columns
+  for (j in other_cols) {
+    df_reparam[[colnames(X_all)[j]]] <- X_all[, j]
+  }
+  form <- as.formula(paste0("outbreak_binary ~ ", rhs, " + strata(stratum_id)"))
+
+  m_reparam <- clogit(form, method = "efron", data = df_reparam)
+  ci <- tryCatch(suppressMessages(confint(m_reparam, parm = "linear_combo")),
+                 error = function(e) NA_real_)
+  if (is.na(ci[1])) {
+    return(c(NA_real_, NA_real_))
+  }
+  ci
+}
+
+profile_tbl <- rbindlist(lapply(names(predictor_specs), function(name) {
+  spec <- predictor_specs[[name]]
+  contrast <- if (spec$is_bird) contrast_bird else contrast_met
+  cols <- grep(paste0("^", spec$prefix, "v"), names(beta_hat))
+  b    <- beta_hat[cols]
+  lo_point <- as.numeric(contrast %*% b)
+  ci <- profile_ci_for_predictor(spec$prefix, contrast)
+  data.table(
+    Predictor = name,
+    `Profile-LR OR (95% CI)` = sprintf("%.2f (%.2f, %.2f)",
+                                      exp(lo_point), exp(ci[1]), exp(ci[2]))
+  )
+}))
+```
+
+# 5. Cluster bootstrap CIs (stratum-level resampling)
+
+```{r bootstrap-ci}
+set.seed(2026)
+n_boot <- 500
+strata_unique <- unique(case_crossover_df$stratum_id)
+
+boot_one <- function() {
+  sampled <- sample(strata_unique, size = length(strata_unique), replace = TRUE)
+  # Build bootstrap dataset by stacking sampled strata with renamed IDs
+  boot_df <- rbindlist(lapply(seq_along(sampled), function(j) {
+    rows <- case_crossover_df[stratum_id == sampled[j]]
+    rows[, stratum_id := paste0("boot_", j)]
+    rows
+  }))
+
+  cb_runoff_b <- crossbasis(
+    as.matrix(boot_df[, paste0("runoff_Lag", 0:28), with = FALSE]),
+    lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 3)
+  )
+  cb_soil_b <- crossbasis(
+    as.matrix(boot_df[, paste0("soil_moisture_Lag", 0:28), with = FALSE]),
+    lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 3)
+  )
+  cb_temp_b <- crossbasis(
+    as.matrix(boot_df[, paste0("temperature_Lag", 0:28), with = FALSE]),
+    lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 3)
+  )
+  cb_precip_b <- crossbasis(
+    as.matrix(boot_df[, paste0("precipitation_Lag", 0:28), with = FALSE]),
+    lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 3)
+  )
+  cb_wind_b <- crossbasis(
+    as.matrix(boot_df[, paste0("wind_speed_Lag", 0:28), with = FALSE]),
+    lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 3)
+  )
+  cb_bird_b <- crossbasis(
+    as.matrix(boot_df[, paste0("anseriformes_Lag", 0:28), with = FALSE]),
+    lag = c(0, 28), argvar = list(fun = "lin"),
+    arglag = list(fun = "strata", breaks = c(7, 14, 21))
+  )
+
+  m_b <- tryCatch(clogit(
+    outbreak_binary ~ cb_runoff_b + cb_soil_b + cb_temp_b +
+                      cb_precip_b + cb_wind_b + cb_bird_b +
+                      strata(stratum_id),
+    method = "efron", data = boot_df
+  ), error = function(e) NULL)
+
+  if (is.null(m_b)) return(rep(NA_real_, length(predictor_specs)))
+
+  b_b <- coef(m_b)
+  out <- sapply(names(predictor_specs), function(name) {
+    spec <- predictor_specs[[name]]
+    contrast <- if (spec$is_bird) contrast_bird else contrast_met
+    # The bootstrap model's coef names end in _b, e.g. cb_runoff_bv1.l1
+    prefix_b <- paste0(spec$prefix, "_bv")
+    # Bird suffix differs: cb_anseriformes -> cb_bird_b in bootstrap
+    if (spec$is_bird) prefix_b <- "cb_bird_bv"
+    if (spec$prefix == "cb_soil_moisture")    prefix_b <- "cb_soil_bv"
+    if (spec$prefix == "cb_temperature")      prefix_b <- "cb_temp_bv"
+    if (spec$prefix == "cb_precipitation")    prefix_b <- "cb_precip_bv"
+    if (spec$prefix == "cb_wind_speed")       prefix_b <- "cb_wind_bv"
+    if (spec$prefix == "cb_anseriformes")     prefix_b <- "cb_bird_bv"
+    if (spec$prefix == "cb_runoff")           prefix_b <- "cb_runoff_bv"
+    cols <- grep(paste0("^", prefix_b), names(b_b))
+    if (length(cols) == 0) return(NA_real_)
+    b_sub <- b_b[cols]
+    as.numeric(contrast %*% b_sub)
+  })
+  out
+}
+
+boot_mat <- do.call(rbind, lapply(seq_len(n_boot), function(i) boot_one()))
+colnames(boot_mat) <- names(predictor_specs)
+
+boot_tbl <- rbindlist(lapply(names(predictor_specs), function(name) {
+  spec <- predictor_specs[[name]]
+  contrast <- if (spec$is_bird) contrast_bird else contrast_met
+  cols <- grep(paste0("^", spec$prefix, "v"), names(beta_hat))
+  b    <- beta_hat[cols]
+  point <- as.numeric(contrast %*% b)
+  log_or_boot <- boot_mat[, name]
+  log_or_boot <- log_or_boot[is.finite(log_or_boot)]
+  ci <- quantile(log_or_boot, c(0.025, 0.975), na.rm = TRUE)
+  data.table(
+    Predictor = name,
+    `Bootstrap OR (95% CI)` = sprintf("%.2f (%.2f, %.2f)",
+                                     exp(point), exp(ci[1]), exp(ci[2])),
+    `Bootstrap N` = length(log_or_boot)
+  )
+}))
+```
+
+# 6. Side-by-side: Wald / Profile-LR / Bootstrap
+
+```{r combine}
+combined <- Reduce(function(a, b) merge(a, b, by = "Predictor"),
+                   list(wald_tbl, profile_tbl, boot_tbl))
+print(combined)
+
+ft <- combined %>%
+  flextable() %>%
+  fontsize(size = 10, part = "all") %>%
+  autofit() %>%
+  align(align = "center", part = "all") %>%
+  theme_booktabs()
+
+doc <- read_docx() %>%
+  body_add_flextable(ft) %>%
+  body_add_par(
+    paste0(
+      "Cumulative OR estimates (per +0.5 SD, lag 0-28 d) for the primary 6-variable case-crossover DLNM under three interval-estimation methods. Wald: asymptotic standard error from the model fit. Profile likelihood: reparameterized clogit with the cumulative contrast as a single coefficient, profile-LR interval. Bootstrap: 500 cluster-bootstrap resamples (stratum as cluster), refit primary model on each, percentile interval. Profile-LR and bootstrap intervals are more accurate than Wald at small samples (N = ", nrow(case_crossover_df), " case-zone-days)."
+    ),
+    style = "Normal"
+  )
+print(doc, target = paste0(tables_sensitivity_folder, "Table_ProfileLR_Bootstrap_CI.docx"))
+```
+
+# 7. Save
+
+```{r save}
+saveRDS(list(
+  wald_tbl    = wald_tbl,
+  profile_tbl = profile_tbl,
+  boot_tbl    = boot_tbl,
+  combined    = combined,
+  boot_mat    = boot_mat
+), paste0(objects_folder, "profile_lr_bootstrap.RDS"))
+```

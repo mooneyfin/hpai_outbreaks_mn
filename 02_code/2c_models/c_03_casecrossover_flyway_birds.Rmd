@@ -1,0 +1,395 @@
+---
+title: "Multi-state case-crossover DLNM — Mississippi-flyway bird abundance & HPAI spillover"
+author: "Fintan Mooney"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r initiate}
+rm(list = ls())
+# 0a. Declare root directory, folder location and load essential stuff
+project.folder = paste0(print(here::here()), '/')
+source(paste0(project.folder, 'create_folder_structure.R'))
+source(paste0(functions.folder, 'script_initiate.R'))
+
+# 0b. Resolve the year()/month() ambiguity (lubridate vs data.table) for the
+#     project's conflicted setup; we use lubridate's date accessors below.
+conflict_prefer("year",  "lubridate", quiet = TRUE)
+conflict_prefer("month", "lubridate", quiet = TRUE)
+```
+
+This script extends the Minnesota weekly case-crossover (`c_01_casecrossover_weekly.Rmd`)
+to the Mississippi-flyway states for which eBird relative-abundance was extracted
+(MN, IA, WI, MI, OH, IL, IN). The input is already in spillover-event case-crossover form:
+each outbreak premises carries its full surrounding weekly series, with `is_case_week`
+flagging the outbreak week and `lag_weeks_from_case` the offset. The exposure here is
+bird abundance only (no meteorology), so the two referent designs are fit on the bird
+crossbasis alone. We retain the manuscript's two matching schemes but name them plainly:
+
+  * **unidirectional**  — 1:4 matching, controls at the four weeks before each case week.
+  * **time-stratified** — controls are the other weeks in the case's calendar month (2022).
+
+# 1. Load spillover-event panel and apply the independence filter
+
+```{r load-filter}
+# 1a. Read the study-region case-crossover panel (eBird abundance already joined).
+cc <- fread(paste0(bird_abundance_data,
+                   "study_spillover_events_casecrossover_2022_abundance_060326.csv"))
+
+# 1b. Keep only independent (IND) and INR-linked outbreaks, dropping contiguous-
+#     spread (CSLT) and unsequenced (NOSEQ) events. This matches the manuscript's
+#     independence criterion and the flyway EDA panel (b_06). `link` is constant
+#     within an outbreak, so we can filter on the whole premises series at once.
+keep_ids <- cc[is_case_week == 1 & link %in% c("IND", "INR"), unique(outbreak_id)]
+cc <- cc[outbreak_id %in% keep_ids]
+
+# Derive the modeled-state set from the data so counts/labels never go stale as
+# the input CSV grows (states are added upstream as bird abundance is extracted).
+study_states   <- sort(unique(cc[is_case_week == 1, state]))
+n_study_states <- length(study_states)
+
+# 1c. Order each premises' weekly series so within-outbreak lags (shift) are correct.
+cc[, week_start := as.Date(week_start)]
+setorder(cc, outbreak_id, week_start)
+
+cat("Outbreaks (IND+INR): ", length(keep_ids),
+    " across ", uniqueN(cc$state), " states\n", sep = "")
+print(cc[is_case_week == 1, .N, by = state][order(-N)])
+```
+
+```{r exposure-vars}
+# 1d. Define the exposures. anseri_abd (anseriformes aggregate) is primary and
+#     mirrors the MN "anseriformes" predictor; total_abd (all 15 species) is a
+#     secondary aggregate; the 15 individual species drive a univariate screen.
+species_codes <- c("mallar3", "cangoo", "wooduc", "truswa", "hoomer", "buwtea",
+                   "comgol", "commer", "buffle", "norsho", "rethaw", "grhowl",
+                   "baleag", "amwpel", "snogoo")
+agg_vars      <- c("anseri_abd", "total_abd")
+exposure_vars <- c(agg_vars, species_codes)
+
+# 1e. Common-name map for tables/figures. The project lookup covers most codes;
+#     hoomer and snogoo are not in it, so add them explicitly.
+spec_lookup <- fread(paste0(bird_abundance_data, "mn-ebird-names-lookup-050225.csv"))
+name_map <- setNames(spec_lookup$common_name, spec_lookup$species_code)
+name_map["hoomer"] <- "Hooded Merganser"
+name_map["snogoo"] <- "Snow Goose"
+name_map["anseri_abd"] <- "Anseriformes (aggregate)"
+name_map["total_abd"]  <- "All species (aggregate)"
+
+# Waterfowl vs. other HPAI-detected birds (raptors + pelican) for forest grouping.
+non_anseri_spp <- c("rethaw", "grhowl", "baleag", "amwpel")
+```
+
+# 2. Transform exposures and build the weekly lag matrix (lag 0–4 weeks)
+
+```{r scale-and-lag}
+# 2a. log1p the right-skewed abundances, then z-scale each across all weekly rows
+#     of the retained outbreaks (a stable space-time SD for the study region).
+#     Effects are reported per +0.5 SD, matching the manuscript's scale.
+for (v in exposure_vars) {
+  cc[, (v) := as.numeric(scale(log1p(get(v))))]
+}
+
+# 2b. For each exposure, create lag-0..4-week columns by shifting within outbreak.
+#     The series is consecutive weeks per premises, so shift() gives true weekly
+#     lags. Cells reaching into late-2021 (pre-eBird-join) become NA and are
+#     dropped per-stratum below.
+MAX_LAG_WK <- 4
+for (v in exposure_vars) {
+  cc[, (paste0(v, "_Lag", 0:MAX_LAG_WK)) :=
+       shift(.SD[[1]], n = 0:MAX_LAG_WK, type = "lag"),
+     by = outbreak_id, .SDcols = v]
+}
+```
+
+# 3. Assemble the two referent designs
+
+```{r build-designs}
+# 3a. unidirectional (1:4): case week + the four weeks immediately before it.
+design_uni <- cc[lag_weeks_from_case %in% c(0, -1, -2, -3, -4)]
+design_uni[, stratum_id := paste0("uni_", outbreak_id)]
+
+# 3b. time-stratified: all weeks sharing the case week's calendar year + month.
+case_month <- cc[is_case_week == 1,
+                 .(outbreak_id,
+                   c_year  = year(week_start),
+                   c_month = month(week_start))]
+design_ts <- merge(cc, case_month, by = "outbreak_id")
+design_ts <- design_ts[year(week_start) == c_year & month(week_start) == c_month]
+design_ts[, stratum_id := paste0("ts_", outbreak_id)]
+
+# 3c. Per-exposure stratum prep: keep rows whose lag-0..4 are all observed, then
+#     retain only strata that still hold a case AND >=1 control (clogit needs the
+#     contrast). Returned fresh per exposure since the NA pattern differs by var.
+prep_strata <- function(dd, var) {
+  lag_cols <- paste0(var, "_Lag", 0:MAX_LAG_WK)
+  dd <- dd[complete.cases(dd[, ..lag_cols])]
+  ok <- dd[, .(nc = sum(is_case_week == 1L), nk = sum(is_case_week == 0L)),
+           by = stratum_id][nc >= 1L & nk >= 1L, stratum_id]
+  dd[stratum_id %in% ok]
+}
+
+cat("unidirectional rows: ", nrow(design_uni),
+    " | time-stratified rows: ", nrow(design_ts), "\n", sep = "")
+```
+
+# 4. Core fit + extraction helper (single-exposure clogit DLNM)
+
+```{r fit-helper}
+# 4a. Weekly crossbasis: linear exposure-response, natural-spline lag (df = 2)
+#     over 0–4 weeks — identical specification to the MN weekly model.
+make_cb_weekly <- function(dd, var) {
+  crossbasis(
+    as.matrix(dd[, paste0(var, "_Lag", 0:MAX_LAG_WK), with = FALSE]),
+    lag = c(0, MAX_LAG_WK),
+    argvar = list(fun = "lin"),
+    arglag = list(fun = "ns", df = 2)
+  )
+}
+
+# 4b. Fit one conditional logistic DLNM and extract cumulative + per-lag ORs at
+#     +0.5 SD. Cumulative contrast sums the lag basis (whole 0–4-wk window); the
+#     per-lag contrast evaluates a single lag week. Wrapped in tryCatch so an
+#     under-powered stratum set (e.g. a small state) degrades to NA, not an error.
+fit_cc <- function(dd, var, design, scope = "pooled") {
+  dd <- prep_strata(dd, var)
+  out <- tryCatch({
+    cb <- make_cb_weekly(dd, var)
+    m  <- clogit(is_case_week ~ cb + strata(stratum_id),
+                 method = "efron", data = dd)
+    beta <- coef(m); V <- vcov(m); ix <- grep("^cb", names(beta))
+    b <- beta[ix]; Vsub <- V[ix, ix, drop = FALSE]
+    lag_basis <- do.call(dlnm::onebasis,
+                         c(list(x = 0:MAX_LAG_WK), attr(cb, "arglag")))
+
+    or_ci <- function(contrast) {
+      lo <- as.numeric(contrast %*% b)
+      se <- sqrt(as.numeric(t(contrast) %*% Vsub %*% contrast))
+      c(OR = exp(lo), lcl = exp(lo - 1.96 * se), ucl = exp(lo + 1.96 * se))
+    }
+    cum <- or_ci(0.5 * colSums(lag_basis))
+    per_lag <- rbindlist(lapply(0:MAX_LAG_WK, function(k) {
+      v <- or_ci(0.5 * lag_basis[k + 1, ])
+      data.table(lag_wk = k, OR = v["OR"], lcl = v["lcl"], ucl = v["ucl"])
+    }))
+    list(model = m,
+         cumulative = data.table(OR = cum["OR"], lcl = cum["lcl"], ucl = cum["ucl"]),
+         per_lag = per_lag,
+         n_strata = uniqueN(dd$stratum_id))
+  }, error = function(e) list(model = NULL,
+                              cumulative = data.table(OR = NA_real_, lcl = NA_real_, ucl = NA_real_),
+                              per_lag = NULL, n_strata = uniqueN(dd$stratum_id)))
+
+  meta <- data.table(exposure = var, label = unname(name_map[var]),
+                     design = design, scope = scope, n_strata = out$n_strata)
+  out$cum_row <- cbind(meta, out$cumulative)
+  if (!is.null(out$per_lag)) out$per_lag <- cbind(meta, out$per_lag)
+  out
+}
+
+# 4c. Tidy OR (95% CI) string helper for tables.
+fmt_or <- function(OR, lcl, ucl) ifelse(is.na(OR), "—",
+  sprintf("%.2f (%.2f, %.2f)", OR, lcl, ucl))
+
+# 4d. Write one styled flextable + caption to a .docx. All section-8 tables share
+#     the same booktabs styling and read_docx → caption → print flow, so they
+#     differ only in the data, font size, footnote, and target path.
+write_docx_table <- function(tbl, caption, target, font_size = 11) {
+  ft <- flextable(tbl) |>
+    fontsize(size = font_size, part = "all") |> autofit() |>
+    align(align = "center", part = "all") |> theme_booktabs()
+  read_docx() |>
+    body_add_flextable(ft) |>
+    body_add_par(caption, style = "Normal") |>
+    print(target = target)
+}
+```
+
+# 5. Primary + secondary aggregates (anseriformes, total) — both designs
+
+```{r fit-aggregates}
+designs <- list(unidirectional = design_uni, `time-stratified` = design_ts)
+
+agg_fits <- list()
+for (d in names(designs)) {
+  for (v in agg_vars) {
+    agg_fits[[paste(d, v)]] <- fit_cc(designs[[d]], v, d)
+  }
+}
+
+# 5a. Save the two primary anseriformes models for downstream reuse.
+saveRDS(agg_fits[["unidirectional anseri_abd"]]$model,
+        paste0(models_folder, "flyway_anseri_unidirectional.RDS"))
+saveRDS(agg_fits[["time-stratified anseri_abd"]]$model,
+        paste0(models_folder, "flyway_anseri_timestrat.RDS"))
+
+agg_cum   <- rbindlist(lapply(agg_fits, `[[`, "cum_row"))
+agg_perlag <- rbindlist(lapply(agg_fits, `[[`, "per_lag"))
+print(agg_cum[, .(design, label, n_strata,
+                  `OR (95% CI)` = fmt_or(OR, lcl, ucl))])
+```
+
+# 6. Species-specific univariate screen — both designs
+
+```{r fit-species}
+# Each species fit on its own (a single 15-species clogit would be badly
+# collinear on ~165 strata); these are an exploratory screen, not adjusted
+# effects. Cumulative OR per +0.5 SD over the 0–4-week window.
+species_fits <- list()
+for (d in names(designs)) {
+  for (v in species_codes) {
+    species_fits[[paste(d, v)]] <- fit_cc(designs[[d]], v, d)
+  }
+}
+species_cum <- rbindlist(lapply(species_fits, `[[`, "cum_row"))
+species_cum[, group := fifelse(exposure %in% non_anseri_spp,
+                               "Other HPAI-detected", "Waterfowl (Anseriformes)")]
+```
+
+# 7. State sensitivity — pooled vs. per-state anseriformes (unidirectional)
+
+```{r fit-states}
+# Pooled is the primary estimate; per-state shown where n supports it. Small
+# states (OH, IL, IN; n < 15) can't stand alone, so the per-state set is the
+# larger states (MN/IA/WI/MI) — derived by the n >= 15 threshold, not hardcoded.
+pooled_label <- sprintf("Pooled (%d states)", n_study_states)
+state_n     <- design_uni[is_case_week == 1, .N, by = state]
+state_keep  <- state_n[N >= 15, state]                 # MN, IA, WI, MI
+state_fits  <- list(fit_cc(design_uni, "anseri_abd", "unidirectional", pooled_label))
+for (s in state_keep) {
+  state_fits[[length(state_fits) + 1]] <-
+    fit_cc(design_uni[state == s], "anseri_abd", "unidirectional", s)
+}
+state_cum <- rbindlist(lapply(state_fits, `[[`, "cum_row"))
+state_cum[, scope := factor(scope, levels = rev(c(pooled_label, state_keep)))]
+print(state_cum[, .(scope, n_strata, `OR (95% CI)` = fmt_or(OR, lcl, ucl))])
+```
+
+# 8. Tables (Word) — main and sensitivity
+
+```{r tables}
+# 8a. MAIN — aggregate cumulative ORs, unidirectional vs. time-stratified.
+agg_cum[, OR_CI := fmt_or(OR, lcl, ucl)]
+tbl_agg <- dcast(agg_cum, label ~ design, value.var = "OR_CI")
+setcolorder(tbl_agg, c("label", "unidirectional", "time-stratified"))
+setnames(tbl_agg, "label", "Exposure (per +0.5 SD)")
+write_docx_table(
+  tbl_agg,
+  sprintf(paste0("Cumulative odds ratios (per +0.5 SD, lag 0–4 weeks) for bird ",
+                 "abundance and HPAI spillover across %d Mississippi-flyway states ",
+                 "(%s; IND+INR events only). unidirectional = ",
+                 "1:4 matching (controls at weeks -1 to -4); time-stratified = controls ",
+                 "in the case's calendar month. N strata (unidirectional) = %d."),
+          n_study_states, paste(study_states, collapse = ", "),
+          agg_fits[["unidirectional anseri_abd"]]$n_strata),
+  paste0(tables_main_folder, "Table_Flyway_Bird_Cumulative_OR.docx"))
+
+# 8b. MAIN — anseriformes per-lag-week ORs.
+anseri_lag <- agg_perlag[exposure == "anseri_abd"]
+anseri_lag[, OR_CI := fmt_or(OR, lcl, ucl)]
+tbl_lag <- dcast(anseri_lag, design ~ lag_wk, value.var = "OR_CI")
+setnames(tbl_lag, c("0", "1", "2", "3", "4"),
+         paste0("Lag ", 0:4, " wk"))
+setnames(tbl_lag, "design", "Referent design")
+write_docx_table(
+  tbl_lag,
+  "Per-lag-week odds ratios (per +0.5 SD) for anseriformes abundance, weekly DLNM (lag 0–4 wk, ns df = 2).",
+  paste0(tables_main_folder, "Table_Flyway_Anseri_PerLagWeek.docx"))
+
+# 8c. SENSITIVITY — species cumulative ORs, both designs.
+species_cum[, OR_CI := fmt_or(OR, lcl, ucl)]
+tbl_spp <- dcast(species_cum, label + group ~ design, value.var = "OR_CI")
+setorder(tbl_spp, group, label)
+setnames(tbl_spp, c("label", "group"), c("Species", "Group"))
+write_docx_table(
+  tbl_spp,
+  "Univariate species-specific cumulative ORs (per +0.5 SD, lag 0–4 wk). Exploratory screen; species abundances are spatially correlated, so estimates are unadjusted for co-occurring species.",
+  paste0(tables_sensitivity_folder, "Table_Flyway_Species_Cumulative_OR.docx"),
+  font_size = 10)
+
+# 8d. SENSITIVITY — pooled vs. per-state anseriformes.
+state_tbl <- copy(state_cum)
+state_tbl[, OR_CI := fmt_or(OR, lcl, ucl)]
+state_tbl <- state_tbl[order(-as.integer(scope)),
+                       .(State = as.character(scope), `N strata` = n_strata,
+                         `OR (95% CI)` = OR_CI)]
+write_docx_table(
+  state_tbl,
+  "Pooled vs. per-state cumulative ORs for anseriformes abundance (per +0.5 SD, unidirectional design). Per-state estimates limited to states with >=15 outbreaks.",
+  paste0(tables_sensitivity_folder, "Table_Flyway_State_Cumulative_OR.docx"))
+```
+
+# 9. Figures (SPARK theme, Avenir, 300 DPI)
+
+```{r figures}
+# 9. All figures export at the SPARK-standard 300 DPI on a white background; this
+#    wrapper fixes those so each call differs only in plot, path, and dimensions.
+save_fig <- function(plot, target, width, height) {
+  ggsave(target, plot, width = width, height = height, dpi = 300, bg = "white")
+}
+
+# 9a. MAIN — anseriformes lag-response curve, both designs. One palette feeds both
+#     the line/point colour and the ribbon fill so the two designs match across them.
+design_pal <- c(unidirectional = "#32135C", `time-stratified` = "#C9405A")
+fig_lag <- ggplot(agg_perlag[exposure == "anseri_abd"],
+                  aes(lag_wk, OR, colour = design, fill = design)) +
+  geom_hline(yintercept = 1, linetype = "dashed", colour = "grey50") +
+  geom_ribbon(aes(ymin = lcl, ymax = ucl), alpha = 0.15, colour = NA) +
+  geom_line(linewidth = 0.7) +
+  geom_point(size = 1.8) +
+  scale_colour_manual(values = design_pal, name = NULL) +
+  scale_fill_manual(values = design_pal, name = NULL) +
+  labs(x = "Lag (weeks)", y = "Odds ratio (per +0.5 SD)",
+       title = "Anseriformes abundance and HPAI spillover, six-state flyway") +
+  theme_spark()
+save_fig(fig_lag, paste0(figures_main_folder, "figure_flyway_anseri_lag_response.png"),
+         width = 7, height = 5)
+
+# 9b. SENSITIVITY — species cumulative-OR forest (unidirectional), grouped.
+spp_forest <- species_cum[design == "unidirectional"][order(group, OR)]
+spp_forest[, label := factor(label, levels = label)]
+fig_spp <- ggplot(spp_forest, aes(OR, label, colour = group)) +
+  geom_vline(xintercept = 1, linetype = "dashed", colour = "grey50") +
+  geom_errorbarh(aes(xmin = lcl, xmax = ucl), height = 0.25, linewidth = 0.5) +
+  geom_point(size = 2) +
+  scale_colour_manual(values = c("Waterfowl (Anseriformes)" = "#2D6FA3",
+                                 "Other HPAI-detected" = "#C9405A"), name = NULL) +
+  labs(x = "Cumulative OR (per +0.5 SD, lag 0–4 wk)", y = NULL,
+       title = "Species-specific abundance and HPAI spillover") +
+  theme_spark() +
+  theme(axis.text.x = element_text(angle = 0, hjust = 0.5))
+save_fig(fig_spp, paste0(figures_sensitivity_folder, "figure_flyway_species_forest.png"),
+         width = 8, height = 6)
+
+# 9c. SENSITIVITY — pooled vs. per-state anseriformes forest.
+fig_state <- ggplot(state_cum, aes(OR, scope)) +
+  geom_vline(xintercept = 1, linetype = "dashed", colour = "grey50") +
+  geom_errorbarh(aes(xmin = lcl, xmax = ucl), height = 0.2, linewidth = 0.5,
+                 colour = "#32135C") +
+  geom_point(size = 2.4, colour = "#32135C") +
+  labs(x = "Cumulative OR (per +0.5 SD, lag 0–4 wk)", y = NULL,
+       title = "Anseriformes abundance: pooled vs. per-state") +
+  theme_spark() +
+  theme(axis.text.x = element_text(angle = 0, hjust = 0.5))
+save_fig(fig_state, paste0(figures_sensitivity_folder, "figure_flyway_state_forest.png"),
+         width = 7, height = 4.5)
+```
+
+# 10. Save result bundle
+
+```{r save-bundle}
+saveRDS(list(
+  agg_cum     = agg_cum,
+  agg_perlag  = agg_perlag,
+  species_cum = species_cum,
+  state_cum   = state_cum,
+  n_outbreaks = length(keep_ids),
+  designs     = list(unidirectional = design_uni, time_stratified = design_ts)
+), paste0(objects_folder, "flyway_bird_casecrossover.RDS"))
+
+cat("Done — flyway bird case-crossover models, tables, and figures written.\n")
+```

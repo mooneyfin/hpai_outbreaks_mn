@@ -1,0 +1,318 @@
+---
+title: "Andersen–Gill recurrent-event Cox sensitivity (daily zone × day panel)"
+author: "Fintan Mooney"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r initiate}
+rm(list = ls())
+# 0a.Declare root directory, folder location and load essential stuff
+project.folder = paste0(print(here::here()), '/')
+source(paste0(project.folder, 'create_folder_structure.R'))
+source(paste0(functions.folder, 'script_initiate.R'))
+```
+
+# 1. Load daily timeseries (modeling version)
+
+```{r load}
+daily <- readRDS(paste0(objects_folder, "fishnet_timeseries_daily_modeling.RDS"))
+setDT(daily)
+setkey(daily, zone_id, date)
+
+case_window_start <- as.Date("2022-01-01")
+case_window_end   <- as.Date("2022-12-31")
+
+daily <- daily[date >= case_window_start & date <= case_window_end]
+```
+
+# 2. Transform exposures (match case-crossover scale)
+
+```{r transform}
+stopifnot(
+  "runoff already in mm — reload `daily` before re-running" =
+    max(daily$runoff,        na.rm = TRUE) < 1,
+  "precipitation already in mm — reload `daily` before re-running" =
+    max(daily$precipitation, na.rm = TRUE) < 1
+)
+daily[, runoff        := runoff        * 1000]
+daily[, precipitation := precipitation * 1000]
+
+daily[, anseriformes := log1p(anseriformes)]
+daily[, runoff               := log1p(runoff)]
+daily[, precipitation        := log1p(precipitation)]
+daily[, anseriformes         := log1p(anseriformes)]
+daily[, predators            := log1p(predators)]
+
+daily[, temperature          := as.numeric(scale(temperature))]
+daily[, dewpoint             := as.numeric(scale(dewpoint))]
+daily[, relative_humidity    := as.numeric(scale(relative_humidity))]
+daily[, wind_speed           := as.numeric(scale(wind_speed))]
+daily[, soil_moisture        := as.numeric(scale(soil_moisture))]
+daily[, precipitation        := as.numeric(scale(precipitation))]
+daily[, runoff               := as.numeric(scale(runoff))]
+daily[, evapotranspiration   := as.numeric(scale(evapotranspiration))]
+daily[, leaf_area_index      := as.numeric(scale(leaf_area_index))]
+daily[, shortwave_radiation  := as.numeric(scale(shortwave_radiation))]
+daily[, longwave_radiation   := as.numeric(scale(longwave_radiation))]
+daily[, surface_pressure     := as.numeric(scale(surface_pressure))]
+daily[, anseriformes := as.numeric(scale(anseriformes))]
+daily[, anseriformes         := as.numeric(scale(anseriformes))]
+daily[, predators            := as.numeric(scale(predators))]
+```
+
+# 3. Build (start, stop, event) interval panel
+
+```{r intervals}
+setorder(daily, zone_id, date)
+daily[, `:=`(
+  tstart = seq_len(.N) - 1L,
+  tstop  = seq_len(.N),
+  event  = as.integer(outbreak_binary)
+), by = zone_id]
+
+case_zones <- daily[event == 1, unique(zone_id)]
+ag_panel   <- daily[zone_id %in% case_zones]
+ag_panel[, stratum_month := lubridate::month(date)]
+```
+
+# 4. Build crossbasis terms (group = zone_id so lag does not cross zones)
+
+```{r crossbasis}
+cb_runoff <- crossbasis(
+  ag_panel$runoff, lag = c(0, 14),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 2),
+  group  = ag_panel$zone_id
+)
+cb_soil_moisture <- crossbasis(
+  ag_panel$soil_moisture, lag = c(0, 14),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 2),
+  group  = ag_panel$zone_id
+)
+cb_temperature <- crossbasis(
+  ag_panel$temperature, lag = c(0, 14),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 2),
+  group  = ag_panel$zone_id
+)
+cb_precipitation <- crossbasis(
+  ag_panel$precipitation, lag = c(0, 14),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 2),
+  group  = ag_panel$zone_id
+)
+cb_wind_speed <- crossbasis(
+  ag_panel$wind_speed, lag = c(0, 14),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 2),
+  group  = ag_panel$zone_id
+)
+cb_anseriformes <- crossbasis(
+  ag_panel$anseriformes, lag = c(0, 14),
+  argvar = list(fun = "lin"),
+  arglag = list(fun = "strata", breaks = c(7)),
+  group  = ag_panel$zone_id
+)
+```
+
+# 5. Fit Andersen–Gill recurrent-event Cox model
+
+```{r fit}
+ag_model <- coxph(
+  Surv(tstart, tstop, event) ~
+    cb_runoff + cb_soil_moisture + cb_temperature +
+    cb_precipitation + cb_wind_speed + cb_anseriformes +
+    strata(stratum_month),
+  data    = ag_panel,
+  ties    = "efron",
+  cluster = zone_id
+)
+saveRDS(ag_model, paste0(models_folder, "casecrossover_model_cox_ag.RDS"))
+
+print(summary(ag_model))
+```
+
+# 6. Cumulative hazard ratios (lag 0–14 d)
+
+```{r cumulative-hr}
+cp_runoff_ag <- crosspred(cb_runoff,               ag_model, cen = 0, at = 0.5, cumul = TRUE)
+cp_soil_ag   <- crosspred(cb_soil_moisture,        ag_model, cen = 0, at = 0.5, cumul = TRUE)
+cp_temp_ag   <- crosspred(cb_temperature,          ag_model, cen = 0, at = 0.5, cumul = TRUE)
+cp_precip_ag <- crosspred(cb_precipitation,        ag_model, cen = 0, at = 0.5, cumul = TRUE)
+cp_wind_ag   <- crosspred(cb_wind_speed,           ag_model, cen = 0, at = 0.5, cumul = TRUE)
+cp_bird_ag   <- crosspred(cb_anseriformes, ag_model, cen = 0, at = 0.5, cumul = TRUE)
+
+n <- ncol(cp_runoff_ag$cumRRfit)
+hr_runoff <- sprintf("%.2f (%.2f, %.2f)", cp_runoff_ag$cumRRfit["0.5", n], cp_runoff_ag$cumRRlow["0.5", n], cp_runoff_ag$cumRRhigh["0.5", n])
+hr_soil   <- sprintf("%.2f (%.2f, %.2f)", cp_soil_ag$cumRRfit["0.5", n],   cp_soil_ag$cumRRlow["0.5", n],   cp_soil_ag$cumRRhigh["0.5", n])
+hr_temp   <- sprintf("%.2f (%.2f, %.2f)", cp_temp_ag$cumRRfit["0.5", n],   cp_temp_ag$cumRRlow["0.5", n],   cp_temp_ag$cumRRhigh["0.5", n])
+hr_precip <- sprintf("%.2f (%.2f, %.2f)", cp_precip_ag$cumRRfit["0.5", n], cp_precip_ag$cumRRlow["0.5", n], cp_precip_ag$cumRRhigh["0.5", n])
+hr_wind   <- sprintf("%.2f (%.2f, %.2f)", cp_wind_ag$cumRRfit["0.5", n],   cp_wind_ag$cumRRlow["0.5", n],   cp_wind_ag$cumRRhigh["0.5", n])
+hr_bird   <- sprintf("%.2f (%.2f, %.2f)", cp_bird_ag$cumRRfit["0.5", n],   cp_bird_ag$cumRRlow["0.5", n],   cp_bird_ag$cumRRhigh["0.5", n])
+
+cum_hr <- tibble(
+  predictor = c("Runoff", "Soil Moisture", "Temperature",
+                "Precipitation", "Wind Speed", "Anseriformes"),
+  HR_CI     = c(hr_runoff, hr_soil, hr_temp, hr_precip, hr_wind, hr_bird)
+)
+
+ft <- cum_hr %>%
+  flextable() %>%
+  set_header_labels(predictor = "Predictor",
+                    HR_CI     = "Cumulative HR (95% CI), lag 0–14 d") %>%
+  fontsize(size = 11, part = "all") %>%
+  autofit() %>%
+  align(align = "center", part = "all") %>%
+  theme_booktabs()
+
+doc <- read_docx() %>%
+  body_add_flextable(ft) %>%
+  body_add_par(
+    "Cumulative hazard ratios from Andersen-Gill recurrent-event Cox model on the daily zone × day panel, per 0.5 SD increase in each predictor. Baseline hazard stratified by calendar month; cluster-robust SEs clustered on zone.",
+    style = "Normal"
+  )
+print(doc, target = paste0(tables_sensitivity_folder, "Table_Cox_AG_Cumulative_HR.docx"))
+
+print(cum_hr)
+```
+
+# 7. Side-by-side with the time-stratified case-crossover
+
+```{r compare}
+primary_model     <- readRDS(paste0(models_folder, "casecrossover_model.RDS"))
+case_crossover_df <- readRDS(paste0(objects_folder, "case_crossover_df.RDS"))
+
+# Crosspreds for the primary model need cb_ names matching its formula terms;
+# wrap in local() so these reassignments don't clobber the AG-sized globals.
+cc_cp <- local({
+  cb_runoff <- crossbasis(
+    as.matrix(case_crossover_df[, paste0("runoff_Lag", 0:28), with = FALSE]),
+    lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 3)
+  )
+  cb_soil_moisture <- crossbasis(
+    as.matrix(case_crossover_df[, paste0("soil_moisture_Lag", 0:28), with = FALSE]),
+    lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 3)
+  )
+  cb_temperature <- crossbasis(
+    as.matrix(case_crossover_df[, paste0("temperature_Lag", 0:28), with = FALSE]),
+    lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 3)
+  )
+  cb_precipitation <- crossbasis(
+    as.matrix(case_crossover_df[, paste0("precipitation_Lag", 0:28), with = FALSE]),
+    lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 3)
+  )
+  cb_wind_speed <- crossbasis(
+    as.matrix(case_crossover_df[, paste0("wind_speed_Lag", 0:28), with = FALSE]),
+    lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 3)
+  )
+  cb_anseriformes <- crossbasis(
+    as.matrix(case_crossover_df[, paste0("anseriformes_Lag", 0:28), with = FALSE]),
+    lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "strata", breaks = c(7, 14, 21))
+  )
+  list(
+    runoff = crosspred(cb_runoff,               primary_model, cen = 0, at = 0.5, cumul = TRUE),
+    soil   = crosspred(cb_soil_moisture,        primary_model, cen = 0, at = 0.5, cumul = TRUE),
+    temp   = crosspred(cb_temperature,          primary_model, cen = 0, at = 0.5, cumul = TRUE),
+    precip = crosspred(cb_precipitation,        primary_model, cen = 0, at = 0.5, cumul = TRUE),
+    wind   = crosspred(cb_wind_speed,           primary_model, cen = 0, at = 0.5, cumul = TRUE),
+    bird   = crosspred(cb_anseriformes, primary_model, cen = 0, at = 0.5, cumul = TRUE)
+  )
+})
+cp_runoff_cc <- cc_cp$runoff
+cp_soil_cc   <- cc_cp$soil
+cp_temp_cc   <- cc_cp$temp
+cp_precip_cc <- cc_cp$precip
+cp_wind_cc   <- cc_cp$wind
+cp_bird_cc   <- cc_cp$bird
+
+n_cc <- ncol(cp_runoff_cc$cumRRfit)
+or_runoff_cc <- sprintf("%.2f (%.2f, %.2f)", cp_runoff_cc$cumRRfit["0.5", n_cc], cp_runoff_cc$cumRRlow["0.5", n_cc], cp_runoff_cc$cumRRhigh["0.5", n_cc])
+or_soil_cc   <- sprintf("%.2f (%.2f, %.2f)", cp_soil_cc$cumRRfit["0.5", n_cc],   cp_soil_cc$cumRRlow["0.5", n_cc],   cp_soil_cc$cumRRhigh["0.5", n_cc])
+or_temp_cc   <- sprintf("%.2f (%.2f, %.2f)", cp_temp_cc$cumRRfit["0.5", n_cc],   cp_temp_cc$cumRRlow["0.5", n_cc],   cp_temp_cc$cumRRhigh["0.5", n_cc])
+or_precip_cc <- sprintf("%.2f (%.2f, %.2f)", cp_precip_cc$cumRRfit["0.5", n_cc], cp_precip_cc$cumRRlow["0.5", n_cc], cp_precip_cc$cumRRhigh["0.5", n_cc])
+or_wind_cc   <- sprintf("%.2f (%.2f, %.2f)", cp_wind_cc$cumRRfit["0.5", n_cc],   cp_wind_cc$cumRRlow["0.5", n_cc],   cp_wind_cc$cumRRhigh["0.5", n_cc])
+or_bird_cc   <- sprintf("%.2f (%.2f, %.2f)", cp_bird_cc$cumRRfit["0.5", n_cc],   cp_bird_cc$cumRRlow["0.5", n_cc],   cp_bird_cc$cumRRhigh["0.5", n_cc])
+
+comparison <- tibble(
+  Predictor                     = c("Runoff", "Soil Moisture", "Temperature",
+                                    "Precipitation", "Wind Speed", "Anseriformes"),
+  `Case-crossover OR (95% CI)`  = c(or_runoff_cc, or_soil_cc, or_temp_cc, or_precip_cc, or_wind_cc, or_bird_cc),
+  `Cox AG HR (95% CI)`          = c(hr_runoff, hr_soil, hr_temp, hr_precip, hr_wind, hr_bird)
+)
+
+ft_compare <- comparison %>%
+  flextable() %>%
+  fontsize(size = 11, part = "all") %>%
+  autofit() %>%
+  align(align = "center", part = "all") %>%
+  theme_booktabs()
+
+doc <- read_docx() %>%
+  body_add_flextable(ft_compare) %>%
+  body_add_par(
+    "Cumulative effect estimates (per 0.5 SD) for the time-stratified case-crossover model (lag 0–28 d) and the Andersen-Gill Cox sensitivity model (lag 0–14 d, reduced for identifiability).",
+    style = "Normal"
+  )
+print(doc, target = paste0(tables_sensitivity_folder, "Table_Cox_AG_vs_CaseCrossover.docx"))
+
+print(comparison)
+```
+
+# 8. Lag-response slice figure
+
+```{r plot, fig.width = 12, fig.height = 7}
+png(paste0(figures_sensitivity_folder, "figure_cox_ag_slices.png"),
+    width = 12, height = 7, units = "in", res = 300)
+
+par(mfrow = c(2, 3), mar = c(4.2, 4.2, 2.5, 1), oma = c(3, 4, 0, 1),
+    cex.main = 1.0, cex.lab = 1.0, cex.axis = 0.9)
+
+plot(cp_runoff_ag, type = "slices", var = 0.5, ci = "area", col = "black", ci.arg = list(col = rgb(0,0,0,0.15), border = NA), lwd = 1.3, main = "Runoff", xlab = "", ylab = "", las = 1); abline(h = 1, lty = 2, col = "gray40")
+plot(cp_soil_ag,   type = "slices", var = 0.5, ci = "area", col = "black", ci.arg = list(col = rgb(0,0,0,0.15), border = NA), lwd = 1.3, main = "Soil Moisture", xlab = "", ylab = "", las = 1); abline(h = 1, lty = 2, col = "gray40")
+plot(cp_temp_ag,   type = "slices", var = 0.5, ci = "area", col = "black", ci.arg = list(col = rgb(0,0,0,0.15), border = NA), lwd = 1.3, main = "Temperature", xlab = "", ylab = "", las = 1); abline(h = 1, lty = 2, col = "gray40")
+plot(cp_precip_ag, type = "slices", var = 0.5, ci = "area", col = "black", ci.arg = list(col = rgb(0,0,0,0.15), border = NA), lwd = 1.3, main = "Precipitation", xlab = "", ylab = "", las = 1); abline(h = 1, lty = 2, col = "gray40")
+plot(cp_wind_ag,   type = "slices", var = 0.5, ci = "area", col = "black", ci.arg = list(col = rgb(0,0,0,0.15), border = NA), lwd = 1.3, main = "Wind Speed", xlab = "", ylab = "", las = 1); abline(h = 1, lty = 2, col = "gray40")
+plot(cp_bird_ag,   type = "slices", var = 0.5, ci = "area", col = "black", ci.arg = list(col = rgb(0,0,0,0.15), border = NA), lwd = 1.3, main = "Anseriformes", xlab = "", ylab = "", las = 1); abline(h = 1, lty = 2, col = "gray40")
+
+mtext("Lag (days)",            side = 1, outer = TRUE, line = 0, cex = 1.0)
+mtext("Hazard Ratio (95% CI)", side = 2, outer = TRUE, line = 0, cex = 1.0)
+dev.off()
+```
+
+# 9. Proportional hazards diagnostic
+
+```{r ph-test}
+zph_test <- cox.zph(ag_model, transform = "identity")
+print(zph_test)
+
+png(paste0(figures_sensitivity_folder, "figure_cox_ag_ph_diagnostic.png"),
+    width = 12, height = 9, units = "in", res = 300)
+par(mfrow = c(3, 3), mar = c(4, 4, 2.5, 1))
+plot(zph_test)
+dev.off()
+
+ph_summary <- as.data.frame(zph_test$table) %>%
+  tibble::rownames_to_column("term") %>%
+  mutate(across(c(chisq, df, p), ~ signif(.x, 3)))
+
+ft_ph <- ph_summary %>%
+  flextable() %>%
+  fontsize(size = 11, part = "all") %>%
+  autofit() %>%
+  align(align = "center", part = "all") %>%
+  theme_booktabs()
+
+doc <- read_docx() %>%
+  body_add_flextable(ft_ph) %>%
+  body_add_par(
+    "Schoenfeld residual test for the proportional hazards assumption. Low p-values indicate a time-varying effect (PH violation).",
+    style = "Normal"
+  )
+print(doc, target = paste0(tables_sensitivity_folder, "Table_Cox_AG_PH_Test.docx"))
+```

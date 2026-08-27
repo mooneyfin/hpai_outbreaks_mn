@@ -1,0 +1,386 @@
+---
+title: "Penalized conditional logistic LASSO across all candidate exposures"
+author: "Fintan Mooney"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r initiate}
+rm(list = ls())
+# 0a.Declare root directory, folder location and load essential stuff
+project.folder = paste0(print(here::here()), '/')
+source(paste0(project.folder, 'create_folder_structure.R'))
+source(paste0(functions.folder, 'script_initiate.R'))
+```
+
+# 1. Load case-crossover dataset
+
+```{r load}
+case_crossover_df <- readRDS(paste0(objects_folder, "case_crossover_df.RDS"))
+setDT(case_crossover_df)
+```
+
+# 2. Build crossbases (primary spec: met = ns(df=4); bird = weekly strata)
+
+```{r crossbasis-met}
+cb_temperature <- crossbasis(
+  as.matrix(case_crossover_df[, paste0("temperature_Lag", 0:28), with = FALSE]),
+  lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 4)
+)
+cb_dewpoint <- crossbasis(
+  as.matrix(case_crossover_df[, paste0("dewpoint_Lag", 0:28), with = FALSE]),
+  lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 4)
+)
+cb_relative_humidity <- crossbasis(
+  as.matrix(case_crossover_df[, paste0("relative_humidity_Lag", 0:28), with = FALSE]),
+  lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 4)
+)
+cb_wind_speed <- crossbasis(
+  as.matrix(case_crossover_df[, paste0("wind_speed_Lag", 0:28), with = FALSE]),
+  lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 4)
+)
+cb_soil_moisture <- crossbasis(
+  as.matrix(case_crossover_df[, paste0("soil_moisture_Lag", 0:28), with = FALSE]),
+  lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 4)
+)
+cb_snow_density <- crossbasis(
+  as.matrix(case_crossover_df[, paste0("snow_density_Lag", 0:28), with = FALSE]),
+  lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 4)
+)
+cb_precipitation <- crossbasis(
+  as.matrix(case_crossover_df[, paste0("precipitation_Lag", 0:28), with = FALSE]),
+  lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 4)
+)
+cb_runoff <- crossbasis(
+  as.matrix(case_crossover_df[, paste0("runoff_Lag", 0:28), with = FALSE]),
+  lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 4)
+)
+cb_evapotranspiration <- crossbasis(
+  as.matrix(case_crossover_df[, paste0("evapotranspiration_Lag", 0:28), with = FALSE]),
+  lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 4)
+)
+cb_leaf_area_index <- crossbasis(
+  as.matrix(case_crossover_df[, paste0("leaf_area_index_Lag", 0:28), with = FALSE]),
+  lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 4)
+)
+cb_shortwave_radiation <- crossbasis(
+  as.matrix(case_crossover_df[, paste0("shortwave_radiation_Lag", 0:28), with = FALSE]),
+  lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 4)
+)
+cb_longwave_radiation <- crossbasis(
+  as.matrix(case_crossover_df[, paste0("longwave_radiation_Lag", 0:28), with = FALSE]),
+  lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 4)
+)
+cb_surface_pressure <- crossbasis(
+  as.matrix(case_crossover_df[, paste0("surface_pressure_Lag", 0:28), with = FALSE]),
+  lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 4)
+)
+```
+
+```{r crossbasis-bird}
+cb_total_bird_abundance <- crossbasis(
+  as.matrix(case_crossover_df[, paste0("total_bird_abundance_Lag", 0:28), with = FALSE]),
+  lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "strata", breaks = c(7, 14, 21))
+)
+cb_anseriformes <- crossbasis(
+  as.matrix(case_crossover_df[, paste0("anseriformes_Lag", 0:28), with = FALSE]),
+  lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "strata", breaks = c(7, 14, 21))
+)
+cb_predators <- crossbasis(
+  as.matrix(case_crossover_df[, paste0("predators_Lag", 0:28), with = FALSE]),
+  lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "strata", breaks = c(7, 14, 21))
+)
+```
+
+# 3. Lag-0 correlation matrix across all 16 candidates
+
+```{r correlation}
+vars_lag0 <- c(
+  "temperature", "dewpoint", "relative_humidity", "wind_speed",
+  "soil_moisture", "snow_density", "precipitation", "runoff",
+  "evapotranspiration", "leaf_area_index", "shortwave_radiation",
+  "longwave_radiation", "surface_pressure",
+  "total_bird_abundance", "anseriformes", "predators"
+)
+cor_matrix <- cor(
+  case_crossover_df[, paste0(vars_lag0, "_Lag0"), with = FALSE],
+  use = "complete.obs"
+)
+colnames(cor_matrix) <- vars_lag0
+rownames(cor_matrix) <- vars_lag0
+cor_matrix <- round(cor_matrix, 2)
+
+png(paste0(figures_sensitivity_folder, "figure_correlation_matrix_lag0.png"),
+    width = 10, height = 10, units = "in", res = 300)
+corrplot(
+  cor_matrix, method = "color", type = "upper",
+  addCoef.col = "black", tl.col = "black", tl.srt = 45,
+  number.cex = 0.6,
+  col = colorRampPalette(c("purple4", "white", "darkgreen"))(200),
+  mar = c(0, 0, 2, 0)
+)
+title("Correlation Matrix of Lag-0 Predictors", line = -1)
+dev.off()
+
+print(cor_matrix)
+```
+
+# 4. Assemble LASSO design matrix
+
+```{r build-X}
+X_temperature          <- as.matrix(unclass(cb_temperature));          colnames(X_temperature)          <- paste0("cb_temperature_l",          seq_len(ncol(X_temperature)))
+X_dewpoint             <- as.matrix(unclass(cb_dewpoint));             colnames(X_dewpoint)             <- paste0("cb_dewpoint_l",             seq_len(ncol(X_dewpoint)))
+X_relative_humidity    <- as.matrix(unclass(cb_relative_humidity));    colnames(X_relative_humidity)    <- paste0("cb_relative_humidity_l",    seq_len(ncol(X_relative_humidity)))
+X_wind_speed           <- as.matrix(unclass(cb_wind_speed));           colnames(X_wind_speed)           <- paste0("cb_wind_speed_l",           seq_len(ncol(X_wind_speed)))
+X_soil_moisture        <- as.matrix(unclass(cb_soil_moisture));        colnames(X_soil_moisture)        <- paste0("cb_soil_moisture_l",        seq_len(ncol(X_soil_moisture)))
+X_snow_density         <- as.matrix(unclass(cb_snow_density));         colnames(X_snow_density)         <- paste0("cb_snow_density_l",         seq_len(ncol(X_snow_density)))
+X_precipitation        <- as.matrix(unclass(cb_precipitation));        colnames(X_precipitation)        <- paste0("cb_precipitation_l",        seq_len(ncol(X_precipitation)))
+X_runoff               <- as.matrix(unclass(cb_runoff));               colnames(X_runoff)               <- paste0("cb_runoff_l",               seq_len(ncol(X_runoff)))
+X_evapotranspiration   <- as.matrix(unclass(cb_evapotranspiration));   colnames(X_evapotranspiration)   <- paste0("cb_evapotranspiration_l",   seq_len(ncol(X_evapotranspiration)))
+X_leaf_area_index      <- as.matrix(unclass(cb_leaf_area_index));      colnames(X_leaf_area_index)      <- paste0("cb_leaf_area_index_l",      seq_len(ncol(X_leaf_area_index)))
+X_shortwave_radiation  <- as.matrix(unclass(cb_shortwave_radiation));  colnames(X_shortwave_radiation)  <- paste0("cb_shortwave_radiation_l",  seq_len(ncol(X_shortwave_radiation)))
+X_longwave_radiation   <- as.matrix(unclass(cb_longwave_radiation));   colnames(X_longwave_radiation)   <- paste0("cb_longwave_radiation_l",   seq_len(ncol(X_longwave_radiation)))
+X_surface_pressure     <- as.matrix(unclass(cb_surface_pressure));     colnames(X_surface_pressure)     <- paste0("cb_surface_pressure_l",     seq_len(ncol(X_surface_pressure)))
+X_total_bird_abundance <- as.matrix(unclass(cb_total_bird_abundance)); colnames(X_total_bird_abundance) <- paste0("cb_total_bird_abundance_l", seq_len(ncol(X_total_bird_abundance)))
+X_anseriformes         <- as.matrix(unclass(cb_anseriformes));         colnames(X_anseriformes)         <- paste0("cb_anseriformes_l",         seq_len(ncol(X_anseriformes)))
+X_predators            <- as.matrix(unclass(cb_predators));            colnames(X_predators)            <- paste0("cb_predators_l",            seq_len(ncol(X_predators)))
+
+X <- cbind(
+  X_temperature, X_dewpoint, X_relative_humidity, X_wind_speed,
+  X_soil_moisture, X_snow_density, X_precipitation, X_runoff,
+  X_evapotranspiration, X_leaf_area_index,
+  X_shortwave_radiation, X_longwave_radiation, X_surface_pressure,
+  X_total_bird_abundance, X_anseriformes, X_predators
+)
+
+y      <- case_crossover_df$outbreak_binary
+strata <- case_crossover_df$stratum_id
+
+# 4a.Keep only strata with at least one case and one control
+keep_strata <- names(which(tapply(y, strata, function(z) length(unique(z))) == 2))
+sel    <- strata %in% keep_strata
+X      <- X[sel, , drop = FALSE]
+y      <- y[sel]
+strata <- strata[sel]
+```
+
+# 5. Cross-validated penalized conditional logistic regression
+
+```{r lasso}
+set.seed(2026)
+fit   <- clogitL1(x = X, y = y, strata = strata,
+                  numLambda = 50, minLambdaRatio = 0.001, alpha = 1)
+cvfit <- cv.clogitL1(fit, numFolds = 10)
+
+png(paste0(figures_sensitivity_folder, "figure_clogitL1_model_stability.png"),
+    width = 8, height = 6, units = "in", res = 300)
+plot(cvfit)
+title("Cross-validated Penalized Conditional Logistic Regression (Model Stability)", line = 1)
+dev.off()
+
+plot(cvfit)
+title("Cross-validated Penalized Conditional Logistic Regression (Model Stability)", line = 1)
+
+best_lambda <- cvfit$minCV_lambda
+idx_best    <- which.min(abs(fit$lambda - best_lambda))
+beta_best   <- fit$beta[idx_best, ]
+names(beta_best) <- colnames(X)
+```
+
+# 6. Parent-variable summary of selected coefficients
+
+```{r summary}
+parent_of <- function(v) fcase(
+  grepl("^cb_temperature_",          v), "Temperature",
+  grepl("^cb_dewpoint_",             v), "Dewpoint",
+  grepl("^cb_relative_humidity_",    v), "Relative Humidity",
+  grepl("^cb_wind_speed_",           v), "Wind Speed",
+  grepl("^cb_soil_moisture_",        v), "Soil Moisture",
+  grepl("^cb_snow_density_",         v), "Snow Density",
+  grepl("^cb_precipitation_",        v), "Precipitation",
+  grepl("^cb_runoff_",               v), "Runoff",
+  grepl("^cb_evapotranspiration_",   v), "Evapotranspiration",
+  grepl("^cb_leaf_area_index_",      v), "Leaf Area Index",
+  grepl("^cb_shortwave_radiation_",  v), "Shortwave Radiation",
+  grepl("^cb_longwave_radiation_",   v), "Longwave Radiation",
+  grepl("^cb_surface_pressure_",     v), "Surface Pressure",
+  grepl("^cb_total_bird_abundance_", v), "Total Bird Abundance",
+  grepl("^cb_anseriformes_",         v), "Anseriformes",
+  grepl("^cb_predators_",            v), "Predators"
+)
+
+all_cols    <- data.table(variable = colnames(X), parent_var = parent_of(colnames(X)))
+block_sizes <- all_cols[, .(n_basis_total = .N), by = parent_var]
+
+coef_dt <- data.table(variable = names(beta_best), beta = beta_best,
+                      parent_var = parent_of(names(beta_best)))
+
+summary_vars <- coef_dt[beta != 0,
+  .(n_active      = .N,
+    n_positive    = sum(beta > 0),
+    n_negative    = sum(beta < 0),
+    mean_beta     = mean(beta),
+    mean_abs_beta = mean(abs(beta)),
+    max_abs_beta  = max(abs(beta)),
+    sum_abs_beta  = sum(abs(beta))),
+  by = parent_var]
+
+summary_vars <- block_sizes[summary_vars, on = "parent_var"]
+summary_vars[is.na(n_active),      n_active      := 0L]
+summary_vars[is.na(n_positive),    n_positive    := 0L]
+summary_vars[is.na(n_negative),    n_negative    := 0L]
+summary_vars[is.na(mean_beta),     mean_beta     := 0]
+summary_vars[is.na(mean_abs_beta), mean_abs_beta := 0]
+summary_vars[is.na(max_abs_beta),  max_abs_beta  := 0]
+summary_vars[is.na(sum_abs_beta),  sum_abs_beta  := 0]
+summary_vars[, prop_active := n_active / n_basis_total]
+
+# 6a.Append zeroed-out parents so the table is exhaustive
+all_parents <- unique(all_cols$parent_var)
+missing_parents <- setdiff(all_parents, summary_vars$parent_var)
+if (length(missing_parents) > 0) {
+  pad <- block_sizes[parent_var %in% missing_parents, .(parent_var, n_basis_total)]
+  pad[, `:=`(n_active = 0L, n_positive = 0L, n_negative = 0L,
+             mean_beta = 0, mean_abs_beta = 0, max_abs_beta = 0,
+             sum_abs_beta = 0, prop_active = 0)]
+  summary_vars <- rbind(summary_vars, pad, fill = TRUE)
+}
+
+summary_vars <- summary_vars[order(-sum_abs_beta)]
+summary_vars_export <- copy(summary_vars)
+summary_vars_export[, `:=`(
+  mean_beta     = round(mean_beta,     3),
+  mean_abs_beta = round(mean_abs_beta, 3),
+  max_abs_beta  = round(max_abs_beta,  3),
+  sum_abs_beta  = round(sum_abs_beta,  3),
+  prop_active   = round(prop_active,   3)
+)]
+
+print(summary_vars_export)
+```
+
+# 7. Export LASSO selection table
+
+```{r export-table}
+ft_stability <- summary_vars_export[, .(parent_var, n_active, prop_active,
+                                        mean_beta, mean_abs_beta, sum_abs_beta)] %>%
+  regulartable() %>%
+  set_header_labels(
+    parent_var    = "Variable",
+    n_active      = "Active Terms (β ≠ 0)",
+    prop_active   = "Proportion Active",
+    mean_beta     = "Mean β",
+    mean_abs_beta = "Mean |β|",
+    sum_abs_beta  = "Σ |β|"
+  ) %>%
+  align(part = "header", align = "center") %>%
+  align(j = c("n_active", "prop_active", "mean_beta", "mean_abs_beta", "sum_abs_beta"),
+        align = "right", part = "body") %>%
+  autofit()
+
+doc <- read_docx() %>%
+  body_add_par("Table Sx. Variable-level LASSO selection summary for crossbasis predictors", style = "Normal") %>%
+  body_add_par("Summary of non-zero penalized conditional logistic regression coefficients at the optimal lambda across all 16 candidate exposures. Strata: zone x year x calendar month x day-of-week.",
+               style = "Normal") %>%
+  body_add_flextable(ft_stability)
+print(doc, target = paste0(tables_sensitivity_folder, "Table_ClogitL1_Model_Stability.docx"))
+
+saveRDS(list(fit = fit, cvfit = cvfit, beta_best = beta_best,
+             summary_vars = summary_vars_export),
+        paste0(objects_folder, "lasso_screen.RDS"))
+```
+
+# 8. Reduced clogit using LASSO-active parents
+
+```{r reduced-fit}
+parent_to_cb <- c(
+  "Temperature"          = "cb_temperature",
+  "Dewpoint"             = "cb_dewpoint",
+  "Relative Humidity"    = "cb_relative_humidity",
+  "Wind Speed"           = "cb_wind_speed",
+  "Soil Moisture"        = "cb_soil_moisture",
+  "Snow Density"         = "cb_snow_density",
+  "Precipitation"        = "cb_precipitation",
+  "Runoff"               = "cb_runoff",
+  "Evapotranspiration"   = "cb_evapotranspiration",
+  "Leaf Area Index"      = "cb_leaf_area_index",
+  "Shortwave Radiation"  = "cb_shortwave_radiation",
+  "Longwave Radiation"   = "cb_longwave_radiation",
+  "Surface Pressure"     = "cb_surface_pressure",
+  "Total Bird Abundance" = "cb_total_bird_abundance",
+  "Anseriformes"         = "cb_anseriformes",
+  "Predators"            = "cb_predators"
+)
+active_parents <- summary_vars[n_active > 0, parent_var]
+active_cb      <- parent_to_cb[active_parents]
+print(active_cb)
+
+reduced_form  <- as.formula(paste0("outbreak_binary ~ ",
+                                   paste(active_cb, collapse = " + "),
+                                   " + strata(stratum_id)"))
+reduced_model <- clogit(reduced_form, data = case_crossover_df, method = "efron")
+saveRDS(reduced_model, paste0(models_folder, "casecrossover_model_lasso_reduced.RDS"))
+
+print(summary(reduced_model))
+```
+
+# 9. Cumulative ORs for reduced-model predictors (per 0.5 SD, lag 0–28 d)
+
+```{r reduced-results}
+cp_list <- list()
+for (cb_name in active_cb) {
+  cp_list[[cb_name]] <- eval(parse(text = sprintf(
+    "crosspred(%s, reduced_model, cen = 0, at = 0.5, cumul = TRUE)",
+    cb_name
+  )))
+}
+names(cp_list) <- active_parents
+
+reduced_tbl <- rbindlist(lapply(names(cp_list), function(label) {
+  cp <- cp_list[[label]]
+  n  <- ncol(cp$cumRRfit)
+  data.table(
+    predictor = label,
+    OR_CI = sprintf("%.2f (%.2f, %.2f)",
+                    cp$cumRRfit["0.5",  n],
+                    cp$cumRRlow["0.5",  n],
+                    cp$cumRRhigh["0.5", n])
+  )
+}))
+print(reduced_tbl)
+
+ft_reduced <- reduced_tbl %>%
+  flextable() %>%
+  set_header_labels(predictor = "Predictor",
+                    OR_CI     = "Cumulative OR (95% CI), lag 0–28 d") %>%
+  fontsize(size = 11, part = "all") %>%
+  autofit() %>%
+  align(align = "center", part = "all") %>%
+  theme_booktabs()
+
+doc <- read_docx() %>%
+  body_add_flextable(ft_reduced) %>%
+  body_add_par(
+    "Cumulative odds ratios from the LASSO-reduced case-crossover model, retaining parent variables with at least one non-zero penalized coefficient at the optimal lambda. Per 0.5 SD increase.",
+    style = "Normal"
+  )
+print(doc, target = paste0(tables_sensitivity_folder, "Table_LASSO_Reduced_Cumulative_OR.docx"))
+```
+
+# 10. AIC comparison vs full primary model
+
+```{r aic-compare}
+full_model <- clogit(
+  outbreak_binary ~
+    cb_runoff + cb_snow_density + cb_soil_moisture + cb_temperature +
+    cb_precipitation + cb_wind_speed + cb_total_bird_abundance +
+    strata(stratum_id),
+  data = case_crossover_df, method = "efron"
+)
+aic_compare <- AIC(reduced_model, full_model)
+print(aic_compare)
+```

@@ -1,86 +1,60 @@
 ---
-title: "Create Daily Timeseries Dataframe + Independence Flagging"
+title: "Daily timeseries panel and non-independence flagging"
 author: "Fintan Mooney"
-date: "2026-05-12"
+date: "`r Sys.Date()`"
 output: html_document
 ---
 
-# NOTE: This script requires confidential HPAI spillover point-location data
-# (not publicly available). The processed grid-cell level output is provided
-# in data/ and downstream analyses can be run without this file.
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
 
-# Builds the DAILY zone × date timeseries panel and flags non-independent spillovers
-# using pairwise distance × day-gap thresholds (200m / 500m / 1km × 28 days).
-# Climate-anomaly computations have been moved to a standalone Rmd
-# (02_code/2b_data_exploration/b_00_climate_anomaly_setup.Rmd) so the primary daily pipeline
-# is no longer entangled with 25-year baselines.
-
-# Major revision (May 2026): all temporal logic at day resolution. Day-gap
-# threshold is 28 days (matches the prior 4-week threshold). Outputs:
-#   - fishnet_timeseries_daily.RDS      — full daily panel + flags
-#   - fishnet_timeseries_daily_modeling.RDS — model-ready (non-independent removed)
-#   - spillover_summary.RDS             — sample-size cascade for the CONSORT figure
-
-```{r 0a-initiate, include=FALSE}
-# 0a. Declare root directory, folder locations, and load packages + helpers
+```{r initiate}
 rm(list = ls())
+# 0a.Declare root directory, folder location and load essential stuff
 project.folder = paste0(print(here::here()), '/')
 source(paste0(project.folder, 'create_folder_structure.R'))
 source(paste0(functions.folder, 'script_initiate.R'))
 ```
 
-## 1. Load daily fishnet
+# 1. Load daily fishnet
 
-```{r 1a-load-daily-fishnet}
-
-daily_fishnet <- readRDS(file.path(objects_folder, "mn_fishnet_daily_processed.rds"))
+```{r fishnet}
+daily_fishnet <- readRDS(paste0(objects_folder, "mn_fishnet_daily_processed.rds"))
 setDT(daily_fishnet)
 setkey(daily_fishnet, zone_id, date)
-
-cat("Daily fishnet:\n")
-cat("  Rows :", nrow(daily_fishnet), "\n")
-cat("  Zones:", uniqueN(daily_fishnet$zone_id), "\n")
-cat("  Date range:", paste(range(daily_fishnet$date), collapse = " — "), "\n")
-
 ```
 
-## 2. Build outbreak summary by day for independence checks
+# 2. Outbreak summary by day (2022 case window)
 
-```{r 2a-outbreak-day-summary}
-
-# 2022-only case window — leading 2021 days are control-exposure history, not cases
+```{r outbreaks}
 case_window_start <- as.Date("2022-01-01")
 case_window_end   <- as.Date("2022-12-31")
 
 zone_outbreaks <- daily_fishnet[
   outbreak_binary == 1 & date >= case_window_start & date <= case_window_end
-] %>%
-  .[order(zone_id, date)]
-
-cat("\nOutbreak zone-days (in 2022 case window):", nrow(zone_outbreaks), "\n")
-cat("Unique outbreak zones:", uniqueN(zone_outbreaks, by = "zone_id"), "\n")
-cat("Total outbreak events :", sum(zone_outbreaks$outbreak_count), "\n")
-
+][order(zone_id, date)]
 ```
 
-## 3. Pairwise distance × day-gap between spillover events for independence flagging
+# 3. Pairwise distance × day-gap between events
 
-```{r 3a-pairwise-distances}
-
-# Reload raw spillover points (one row per event, with lat/lon)
-spillover_file <- file.path(spillover_data, "hpai-outbreaks-clean-placeholder-032124.csv")
-if (!file.exists(spillover_file)) {
-  stop("This script needs the confidential spillover data (hpai-outbreaks-clean-placeholder-032124.csv).")
-}
+```{r pairwise}
+spillover_file <- paste0(spillover_data, "hpai-outbreaks-clean-placeholder-032124.csv")
+if (!file.exists(spillover_file)) stop("Missing ", spillover_file)
 hpai_raw <- read_csv(spillover_file)
+
+# 3a.Keep IND (independent introduction) and INR; exclude CSLT (common source lateral transfer)
+hpai_raw <- hpai_raw %>% filter(link %in% c("IND", "INR"))
+
+# 3b.Use date_confirmed as case_date (USDA surveillance convention).
+hpai_raw <- hpai_raw %>% mutate(case_date = date_confirmed)
 
 hpai_mn_2022 <- hpai_raw %>%
   filter(state == "MN",
-         dplyr::between(date_confirmed, case_window_start, case_window_end))
+         dplyr::between(case_date, case_window_start, case_window_end))
 
-# Get the same CRS used in the fishnet
-fishnet_raw <- st_read(file.path(spatial_data, "fishnet_10km_timeseries.gpkg"))
-target_crs <- st_crs(fishnet_raw)
+fishnet_raw     <- st_read(paste0(spatial_data, "fishnet_10km_timeseries.gpkg"))
+target_crs      <- st_crs(fishnet_raw)
 fishnet_geom_sf <- fishnet_raw %>% distinct(zone_id, geom)
 
 hpai_sf <- hpai_mn_2022 %>%
@@ -88,7 +62,7 @@ hpai_sf <- hpai_mn_2022 %>%
   st_transform(crs = target_crs) %>%
   st_join(fishnet_geom_sf, join = st_within)
 
-# ---- Within-cell pairwise distance × day-gap ----
+# 3a.Within-cell pairwise distance × day-gap
 multi_outbreak_zones <- hpai_sf %>%
   st_drop_geometry() %>%
   count(zone_id) %>%
@@ -97,40 +71,34 @@ multi_outbreak_zones <- hpai_sf %>%
 
 pairwise_results <- list()
 for (z in multi_outbreak_zones) {
-  zone_pts <- hpai_sf %>% filter(zone_id == z) %>% arrange(date_confirmed)
+  zone_pts <- hpai_sf %>% filter(zone_id == z) %>% arrange(case_date)
   n <- nrow(zone_pts)
   if (n < 2) next
   for (i in 1:(n - 1)) {
     for (j in (i + 1):n) {
-      dist_m <- as.numeric(st_distance(zone_pts[i, ], zone_pts[j, ]))
-      days_apart <- as.numeric(zone_pts$date_confirmed[j] - zone_pts$date_confirmed[i])
+      dist_m     <- as.numeric(st_distance(zone_pts[i, ], zone_pts[j, ]))
+      days_apart <- as.numeric(zone_pts$case_date[j] - zone_pts$case_date[i])
       pairwise_results[[length(pairwise_results) + 1]] <- tibble(
-        zone_id        = z,
-        outbreak_id_1  = zone_pts$outbreak_id[i],
-        outbreak_id_2  = zone_pts$outbreak_id[j],
-        distance_km    = dist_m / 1000,
-        days_apart     = days_apart,
-        same_farm      = dist_m < 100
+        zone_id       = z,
+        outbreak_id_1 = zone_pts$outbreak_id[i],
+        outbreak_id_2 = zone_pts$outbreak_id[j],
+        distance_km   = dist_m / 1000,
+        days_apart    = days_apart,
+        same_farm     = dist_m < 100
       )
     }
   }
 }
 pairwise_df <- bind_rows(pairwise_results) %>% arrange(distance_km, days_apart)
 
-cat("\n--- Within-cell pairwise event summary ---\n")
-cat("Pairs at <200m & <28d:", sum(pairwise_df$distance_km < 0.2 & pairwise_df$days_apart < 28 & !pairwise_df$same_farm), "\n")
-cat("Pairs at <500m & <28d:", sum(pairwise_df$distance_km < 0.5 & pairwise_df$days_apart < 28 & !pairwise_df$same_farm), "\n")
-cat("Pairs at <1km  & <28d:", sum(pairwise_df$distance_km < 1.0 & pairwise_df$days_apart < 28 & !pairwise_df$same_farm), "\n")
-cat("Same-farm repeat pairs <28d:", sum(pairwise_df$same_farm & pairwise_df$days_apart < 28), "\n")
-
-# ---- Cross-cell pairs within 1 km & 28 days ----
-hpai_sf <- hpai_sf %>% arrange(date_confirmed)
-n_evt <- nrow(hpai_sf)
+# 3b.Cross-cell pairs within 1 km and 28 days
+hpai_sf <- hpai_sf %>% arrange(case_date)
+n_evt   <- nrow(hpai_sf)
 cross_cell_results <- list()
 for (i in 1:(n_evt - 1)) {
   for (j in (i + 1):n_evt) {
     if (hpai_sf$zone_id[i] == hpai_sf$zone_id[j]) next
-    days_apart <- as.numeric(hpai_sf$date_confirmed[j] - hpai_sf$date_confirmed[i])
+    days_apart <- as.numeric(hpai_sf$case_date[j] - hpai_sf$case_date[i])
     if (days_apart > 28) next
     dist_m <- as.numeric(st_distance(hpai_sf[i, ], hpai_sf[j, ]))
     if (dist_m > 1000) next
@@ -147,17 +115,11 @@ for (i in 1:(n_evt - 1)) {
 cross_cell_df <- if (length(cross_cell_results) > 0) bind_rows(cross_cell_results) else
   tibble(zone_id_1=integer(), zone_id_2=integer(), outbreak_id_1=integer(),
          outbreak_id_2=integer(), distance_km=numeric(), days_apart=numeric())
-
-cat("\nCross-cell pairs within 1km & 28d:", nrow(cross_cell_df), "\n")
-
 ```
 
-## 4. Flag the second outbreak in each non-independent pair (within-cell + cross-cell)
+# 4. Flag the second outbreak in each non-independent pair
 
-```{r 4a-flag-non-independent}
-
-# IDs of the *later* outbreak in each non-independent pair, by distance threshold,
-# combining same-farm repeats with proximity-based pairs.
+```{r flag}
 build_flag_ids <- function(within_df, cross_df, dist_km, day_gap = 28) {
   within_ids <- within_df %>%
     filter(days_apart < day_gap, (distance_km < dist_km | same_farm)) %>%
@@ -172,22 +134,12 @@ ids_200m <- build_flag_ids(pairwise_df, cross_cell_df, 0.2)
 ids_500m <- build_flag_ids(pairwise_df, cross_cell_df, 0.5)
 ids_1km  <- build_flag_ids(pairwise_df, cross_cell_df, 1.0)
 
-cat("\nFlagged event IDs (later event in each non-independent pair):\n")
-cat("  <200m & <28d:", length(ids_200m), "\n")
-cat("  <500m & <28d:", length(ids_500m), "\n")
-cat("  <1km  & <28d:", length(ids_1km),  "\n")
-
-# Annotate the daily panel — a zone-day flag is TRUE if any outbreak_id in that
-# zone-day appears in the flag set. (Multi-event zone-days keep their stratum
-# unless every event is flagged.)
 contains_flagged <- function(id_str, flagged_ids) {
   if (is.na(id_str)) return(FALSE)
   ids <- as.numeric(trimws(unlist(strsplit(id_str, ","))))
   any(ids %in% flagged_ids)
 }
 
-# Per-row count of flagged outbreak_ids — used both for the season cascade and
-# for outbreak_count adjustment in the modeling panel below.
 count_flagged_ids <- function(id_str, flagged_ids) {
   if (is.na(id_str)) return(0L)
   ids <- as.numeric(trimws(unlist(strsplit(id_str, ","))))
@@ -199,22 +151,18 @@ daily_fishnet[, `:=`(
   flag_nearby_500m = vapply(outbreak_id, contains_flagged, logical(1), flagged_ids = ids_500m),
   flag_nearby_1km  = vapply(outbreak_id, contains_flagged, logical(1), flagged_ids = ids_1km)
 )]
-
-cat("\nflag_nearby_500m (primary):", sum(daily_fishnet$flag_nearby_500m), "zone-days\n")
-
 ```
 
-## 5. Time covariates for downstream models
+# 5. Time covariates
 
-```{r 5a-time-covariates}
-
+```{r time-covs}
 daily_fishnet[, `:=`(
-  month         = lubridate::month(date),
-  month_factor  = factor(lubridate::month(date)),
-  warm_season   = as.integer(lubridate::month(date) %in% 5:9),
-  spring        = as.integer(lubridate::month(date) %in% 3:5),
-  spring_fall   = as.integer(lubridate::month(date) %in% c(3:5, 9:11)),
-  season        = factor(
+  month        = lubridate::month(date),
+  month_factor = factor(lubridate::month(date)),
+  warm_season  = as.integer(lubridate::month(date) %in% 5:9),
+  spring       = as.integer(lubridate::month(date) %in% 3:5),
+  spring_fall  = as.integer(lubridate::month(date) %in% c(3:5, 9:11)),
+  season       = factor(
     fcase(
       lubridate::month(date) %in% c(12, 1, 2), "Winter",
       lubridate::month(date) %in% 3:5,         "Spring",
@@ -224,16 +172,11 @@ daily_fishnet[, `:=`(
     levels = c("Winter", "Spring", "Summer", "Fall")
   )
 )]
-
 ```
 
-## 6. Export the daily timeseries (with flags) + the sample-size cascade
+# 6. Export daily timeseries and cascade summary
 
-```{r 6a-export}
-
-# Counts per season for the CONSORT figure. Independent events = raw events
-# minus the number of flagged outbreak_ids on that zone-day (per-id, not
-# all-or-nothing — a zone-day can hold >1 flagged event).
+```{r export}
 season_independent <- daily_fishnet[
   outbreak_binary == 1 & date >= case_window_start & date <= case_window_end
 ][, n_flagged_500m := vapply(outbreak_id, count_flagged_ids, integer(1),
@@ -243,7 +186,6 @@ season_independent <- daily_fishnet[
   by = season
 ][order(match(season, c("Winter", "Spring", "Summer", "Fall")))]
 
-# Multi-event zone-day breakdown for the CONSORT figure
 multi_event_zone_days <- daily_fishnet[
   outbreak_binary == 1 & outbreak_count > 1 &
     date >= case_window_start & date <= case_window_end,
@@ -251,32 +193,23 @@ multi_event_zone_days <- daily_fishnet[
 ]
 
 spillover_summary <- list(
-  total                  = sum(daily_fishnet[date >= case_window_start &
-                                             date <= case_window_end]$outbreak_count),
-  case_zone_days         = sum(daily_fishnet[date >= case_window_start &
-                                             date <= case_window_end]$outbreak_binary),
-  case_zones             = uniqueN(daily_fishnet[outbreak_binary == 1 &
-                                                 date >= case_window_start &
-                                                 date <= case_window_end]$zone_id),
-  multi_event_zone_days  = multi_event_zone_days,
-  non_independent_200m   = length(ids_200m),
-  non_independent_500m   = length(ids_500m),
-  non_independent_1km    = length(ids_1km),
-  by_season              = season_independent
+  total                = sum(daily_fishnet[date >= case_window_start &
+                                           date <= case_window_end]$outbreak_count),
+  case_zone_days       = sum(daily_fishnet[date >= case_window_start &
+                                           date <= case_window_end]$outbreak_binary),
+  case_zones           = uniqueN(daily_fishnet[outbreak_binary == 1 &
+                                               date >= case_window_start &
+                                               date <= case_window_end]$zone_id),
+  multi_event_zone_days = multi_event_zone_days,
+  non_independent_200m  = length(ids_200m),
+  non_independent_500m  = length(ids_500m),
+  non_independent_1km   = length(ids_1km),
+  by_season             = season_independent
 )
+saveRDS(spillover_summary, paste0(objects_folder, "spillover_summary.RDS"))
 
-saveRDS(spillover_summary, file.path(objects_folder, "spillover_summary.RDS"))
+saveRDS(daily_fishnet, paste0(objects_folder, "fishnet_timeseries_daily.RDS"))
 
-cat("\n--- Spillover summary ---\n")
-print(spillover_summary)
-
-# Full daily timeseries with flags
-saveRDS(daily_fishnet, file.path(objects_folder, "fishnet_timeseries_daily.RDS"))
-
-# Modeling version: drop the later event of each non-independent pair (500m, 28d).
-# Use `ids_500m` so the modeling panel's flag set is identical to the one used
-# in the seasonal CONSORT cascade above (combines within-cell AND cross-cell
-# pairs at the same threshold).
 flagged_zone_days <- daily_fishnet[
   outbreak_binary == 1 & date >= case_window_start & date <= case_window_end
 ] %>%
@@ -291,24 +224,17 @@ modeling[, outbreak_count  := outbreak_count - n_flagged]
 modeling[, outbreak_binary := as.integer(outbreak_count > 0)]
 modeling[, n_flagged := NULL]
 
-cat("\nModeling panel after removing non-independent later events:\n")
-cat("  Total events:", sum(modeling$outbreak_count), "\n")
-cat("  Case zone-days:", sum(modeling$outbreak_binary), "\n")
-
-saveRDS(modeling, file.path(objects_folder, "fishnet_timeseries_daily_modeling.RDS"))
-
+saveRDS(modeling, paste0(objects_folder, "fishnet_timeseries_daily_modeling.RDS"))
 ```
 
-## 7. Pairwise diagnostic export (used by CONSORT figure)
+# 7. Pairwise diagnostic export
 
-```{r 7a-pairwise-export}
-
+```{r pairwise-export}
 saveRDS(list(
   within_cell = pairwise_df,
   cross_cell  = cross_cell_df,
   ids_200m    = ids_200m,
   ids_500m    = ids_500m,
   ids_1km     = ids_1km
-), file.path(objects_folder, "independence_screening_daily.RDS"))
-
+), paste0(objects_folder, "independence_screening_daily.RDS"))
 ```

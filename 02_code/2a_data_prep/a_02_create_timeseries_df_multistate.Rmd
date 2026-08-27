@@ -1,0 +1,257 @@
+---
+title: "Timeseries panel and non-independence flagging — multi-state (daily + weekly)"
+author: "Fintan Mooney"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r initiate}
+rm(list = ls())
+# 0a.Declare root directory, folder location and load essential stuff
+project.folder = paste0(print(here::here()), '/')
+source(paste0(project.folder, 'create_folder_structure.R'))
+source(paste0(functions.folder, 'script_initiate.R'))
+
+# 0b.lubridate owns the date accessors under the project's conflicted setup.
+conflict_prefer("year",  "lubridate", quiet = TRUE)
+conflict_prefer("month", "lubridate", quiet = TRUE)
+
+# 0c.Study region (7 flyway states; SD excluded).
+study_states_abbr <- c("IA", "IL", "IN", "MI", "MN", "OH", "WI")
+```
+
+Multi-state analogue of `a_02_create_timeseries_df.Rmd`. It flags spatio-temporally
+non-independent spillover events (a second event close in space and time to a first is
+likely lateral spread, not an independent introduction) and adds time covariates. The
+independence flags are defined on `outbreak_id`, so the same set applies to both the
+daily and weekly panels.
+
+# 1. Load the daily and weekly panels
+
+```{r load}
+daily_fishnet  <- readRDS(paste0(objects_folder, "multistate_fishnet_daily_processed.rds"))
+weekly_fishnet <- readRDS(paste0(objects_folder, "multistate_fishnet_weekly_processed.rds"))
+setDT(daily_fishnet); setDT(weekly_fishnet)
+setkey(daily_fishnet, zone_id, date)
+
+case_window_start <- as.Date("2022-01-01")
+case_window_end   <- as.Date("2022-12-31")
+```
+
+# 2. Pairwise distance × day-gap between events (7 states)
+
+```{r pairwise}
+spillover_file <- paste0(spillover_data, "hpai-outbreaks-clean-placeholder-032124.csv")
+if (!file.exists(spillover_file)) stop("Missing ", spillover_file)
+
+# 2a.Read the bird-panel outbreaks (7 states) and split by linkage: independent
+#    (IND+INR) vs. cross-farm / unsequenced (CSLT+NOSEQ). The spatio-temporal screen
+#    runs over the independent candidates only; `cross_farm_ids` is saved for a_03 to
+#    remove when it builds the independent-only case-crossover dataframe.
+link_tbl <- fread(paste0(bird_abundance_data,
+  "study_spillover_events_casecrossover_2022_abundance_060326.csv"))[
+    is_case_week == 1 & state %in% study_states_abbr, .(outbreak_id, link)]
+link_tbl <- unique(link_tbl)
+independent_ids <- link_tbl[link %in% c("IND", "INR"),  outbreak_id]
+cross_farm_ids  <- link_tbl[!link %in% c("IND", "INR"), outbreak_id]
+
+hpai <- read_csv(spillover_file) %>%
+  mutate(case_date = as.Date(date_confirmed)) %>%          # 2b. USDA confirmation date
+  filter(outbreak_id %in% independent_ids,
+         !is.na(lon), !is.na(lat),
+         dplyr::between(case_date, case_window_start, case_window_end))
+
+fishnet_geom <- st_read(paste0(env_data, "hpai_multistate_era5/fishnet_7state.geojson"),
+                        quiet = TRUE)
+fishnet_geom <- fishnet_geom[!st_is_empty(fishnet_geom), ]
+fishnet_geom <- st_set_crs(fishnet_geom, 5070) %>% distinct(zone_id, geometry)
+
+hpai_sf <- hpai %>%
+  st_as_sf(coords = c("lon", "lat"), crs = 4326) %>%
+  st_transform(crs = st_crs(fishnet_geom)) %>%
+  st_join(fishnet_geom, join = st_within) %>%
+  filter(!is.na(zone_id))
+
+# 2a.Within-cell pairwise distance × day-gap (events sharing a 10 km cell).
+multi_outbreak_zones <- hpai_sf %>% st_drop_geometry() %>%
+  count(zone_id) %>% filter(n > 1) %>% pull(zone_id)
+
+pairwise_results <- list()
+for (z in multi_outbreak_zones) {
+  zone_pts <- hpai_sf %>% filter(zone_id == z) %>% arrange(case_date)
+  n <- nrow(zone_pts)
+  if (n < 2) next
+  for (i in 1:(n - 1)) for (j in (i + 1):n) {
+    dist_m     <- as.numeric(st_distance(zone_pts[i, ], zone_pts[j, ]))
+    days_apart <- as.numeric(zone_pts$case_date[j] - zone_pts$case_date[i])
+    pairwise_results[[length(pairwise_results) + 1]] <- tibble(
+      zone_id = z, outbreak_id_1 = zone_pts$outbreak_id[i],
+      outbreak_id_2 = zone_pts$outbreak_id[j],
+      distance_km = dist_m / 1000, days_apart = days_apart,
+      same_farm = dist_m < 100)
+  }
+}
+pairwise_df <- if (length(pairwise_results) > 0)
+  bind_rows(pairwise_results) %>% arrange(distance_km, days_apart) else
+  tibble(zone_id = character(), outbreak_id_1 = double(), outbreak_id_2 = double(),
+         distance_km = double(), days_apart = double(), same_farm = logical())
+
+# 2b.Cross-cell pairs within 1 km and 28 days.
+hpai_sf <- hpai_sf %>% arrange(case_date)
+n_evt   <- nrow(hpai_sf)
+cross_cell_results <- list()
+for (i in 1:(n_evt - 1)) for (j in (i + 1):n_evt) {
+  if (hpai_sf$zone_id[i] == hpai_sf$zone_id[j]) next
+  days_apart <- as.numeric(hpai_sf$case_date[j] - hpai_sf$case_date[i])
+  if (days_apart > 28) next
+  dist_m <- as.numeric(st_distance(hpai_sf[i, ], hpai_sf[j, ]))
+  if (dist_m > 1000) next
+  cross_cell_results[[length(cross_cell_results) + 1]] <- tibble(
+    zone_id_1 = hpai_sf$zone_id[i], zone_id_2 = hpai_sf$zone_id[j],
+    outbreak_id_1 = hpai_sf$outbreak_id[i], outbreak_id_2 = hpai_sf$outbreak_id[j],
+    distance_km = dist_m / 1000, days_apart = days_apart)
+}
+cross_cell_df <- if (length(cross_cell_results) > 0) bind_rows(cross_cell_results) else
+  tibble(zone_id_1 = character(), zone_id_2 = character(), outbreak_id_1 = double(),
+         outbreak_id_2 = double(), distance_km = double(), days_apart = double())
+```
+
+# 3. Flag the second event in each non-independent pair
+
+```{r flag}
+build_flag_ids <- function(within_df, cross_df, dist_km, day_gap = 28) {
+  within_ids <- within_df %>%
+    filter(days_apart < day_gap, (distance_km < dist_km | same_farm)) %>%
+    pull(outbreak_id_2) %>% unique()
+  cross_ids <- cross_df %>% filter(distance_km < dist_km) %>%
+    pull(outbreak_id_2) %>% unique()
+  unique(c(within_ids, cross_ids))
+}
+ids_200m <- build_flag_ids(pairwise_df, cross_cell_df, 0.2)
+ids_500m <- build_flag_ids(pairwise_df, cross_cell_df, 0.5)
+ids_1km  <- build_flag_ids(pairwise_df, cross_cell_df, 1.0)
+
+contains_flagged <- function(id_str, flagged_ids) {
+  if (is.na(id_str)) return(FALSE)
+  any(as.numeric(trimws(unlist(strsplit(id_str, ",")))) %in% flagged_ids)
+}
+count_flagged_ids <- function(id_str, flagged_ids) {
+  if (is.na(id_str)) return(0L)
+  as.integer(sum(as.numeric(trimws(unlist(strsplit(id_str, ",")))) %in% flagged_ids))
+}
+
+daily_fishnet[, `:=`(
+  flag_nearby_200m = vapply(outbreak_id, contains_flagged, logical(1), flagged_ids = ids_200m),
+  flag_nearby_500m = vapply(outbreak_id, contains_flagged, logical(1), flagged_ids = ids_500m),
+  flag_nearby_1km  = vapply(outbreak_id, contains_flagged, logical(1), flagged_ids = ids_1km),
+  flag_cross_farm  = vapply(outbreak_id, contains_flagged, logical(1), flagged_ids = cross_farm_ids)
+)]
+cat("Cross-farm / unsequenced events (link CSLT+NOSEQ): ", length(cross_farm_ids), "\n",
+    "Spatio-temporal non-independent 2nd events (among IND+INR) — 200 m: ", length(ids_200m),
+    " | 500 m: ", length(ids_500m), " | 1 km: ", length(ids_1km), "\n", sep = "")
+```
+
+# 4. Time covariates (daily and weekly)
+
+```{r time-covs}
+add_time_covs <- function(dt, date_col) {
+  m <- lubridate::month(dt[[date_col]])
+  dt[, `:=`(
+    month        = m,
+    month_factor = factor(m),
+    warm_season  = as.integer(m %in% 5:9),
+    spring       = as.integer(m %in% 3:5),
+    spring_fall  = as.integer(m %in% c(3:5, 9:11)),
+    season       = factor(fcase(
+      m %in% c(12, 1, 2), "Winter", m %in% 3:5, "Spring",
+      m %in% 6:8, "Summer", m %in% 9:11, "Fall"),
+      levels = c("Winter", "Spring", "Summer", "Fall"))
+  )]
+  dt
+}
+daily_fishnet  <- add_time_covs(daily_fishnet,  "date")
+weekly_fishnet[, week_start := as.Date(week_start)]
+weekly_fishnet <- add_time_covs(weekly_fishnet, "week_start")
+```
+
+# 5. Build independent-set modeling panels (drop cross-farm + flagged second events)
+
+```{r modeling}
+# 5a.Daily independent panel: subtract both the cross-farm/unsequenced events (link
+#    CSLT+NOSEQ) and the spatio-temporal non-independent second events (500 m) from
+#    each zone-day's outbreak count. (a_03 rebuilds these from the raw panel for the
+#    final case-crossover dfs; these convenience panels mirror the MN pipeline.)
+independent_remove_ids <- union(cross_farm_ids, ids_500m)
+flagged_zone_days <- daily_fishnet[
+  outbreak_binary == 1 & date >= case_window_start & date <= case_window_end
+][, n_flagged := vapply(outbreak_id, count_flagged_ids, integer(1), flagged_ids = independent_remove_ids)
+][n_flagged > 0, .(zone_id, date, n_flagged)]
+
+daily_modeling <- copy(daily_fishnet)
+daily_modeling <- merge(daily_modeling, flagged_zone_days, by = c("zone_id", "date"), all.x = TRUE)
+daily_modeling[, n_flagged := fcoalesce(n_flagged, 0L)]
+daily_modeling[, outbreak_count  := outbreak_count - n_flagged]
+daily_modeling[, outbreak_binary := as.integer(outbreak_count > 0)]
+daily_modeling[, n_flagged := NULL]
+
+# 5b.Weekly: re-aggregate the corrected daily outbreak counts onto the weekly panel.
+weekly_out_mod <- daily_modeling[, .(
+  outbreak_count  = sum(outbreak_count),
+  outbreak_binary = as.integer(sum(outbreak_count) > 0)
+), by = .(zone_id, iso_year, iso_week)]
+
+weekly_modeling <- copy(weekly_fishnet)
+weekly_modeling[, c("outbreak_count", "outbreak_binary") := NULL]
+weekly_modeling <- merge(weekly_modeling, weekly_out_mod,
+                         by = c("zone_id", "iso_year", "iso_week"), all.x = TRUE)
+weekly_modeling[is.na(outbreak_count),  outbreak_count  := 0]
+weekly_modeling[is.na(outbreak_binary), outbreak_binary := 0L]
+```
+
+# 6. Spillover cascade summary
+
+```{r summary}
+season_independent <- daily_fishnet[
+  outbreak_binary == 1 & date >= case_window_start & date <= case_window_end
+][, n_removed := vapply(outbreak_id, count_flagged_ids, integer(1), flagged_ids = independent_remove_ids)
+][, .(all_events = sum(outbreak_count),
+      independent_events = sum(outbreak_count - n_removed)), by = season
+][order(match(season, c("Winter", "Spring", "Summer", "Fall")))]
+
+cw <- daily_fishnet[date >= case_window_start & date <= case_window_end]
+spillover_summary <- list(
+  states                = study_states_abbr,
+  total_all_events      = sum(cw$outbreak_count),                # every link type
+  cross_farm_unseq      = length(cross_farm_ids),                # CSLT + NOSEQ removed
+  independent_link      = length(independent_ids),               # IND + INR
+  non_independent_200m  = length(ids_200m),                      # spatio-temporal, among IND+INR
+  non_independent_500m  = length(ids_500m),
+  non_independent_1km   = length(ids_1km),
+  case_zone_days_all    = sum(cw$outbreak_binary),
+  case_zones_all        = uniqueN(cw[outbreak_binary == 1]$zone_id),
+  by_season             = season_independent
+)
+saveRDS(spillover_summary, paste0(objects_folder, "multistate_spillover_summary.RDS"))
+print(spillover_summary[c("total_all_events", "cross_farm_unseq", "independent_link",
+                          "non_independent_500m", "case_zones_all")])
+```
+
+# 7. Export
+
+```{r export}
+saveRDS(daily_fishnet,    paste0(objects_folder, "multistate_fishnet_timeseries_daily.RDS"))
+saveRDS(daily_modeling,   paste0(objects_folder, "multistate_fishnet_timeseries_daily_modeling.RDS"))
+saveRDS(weekly_fishnet,   paste0(objects_folder, "multistate_fishnet_timeseries_weekly.RDS"))
+saveRDS(weekly_modeling,  paste0(objects_folder, "multistate_fishnet_timeseries_weekly_modeling.RDS"))
+
+saveRDS(list(
+  within_cell = pairwise_df, cross_cell = cross_cell_df,
+  ids_200m = ids_200m, ids_500m = ids_500m, ids_1km = ids_1km,
+  cross_farm_ids = cross_farm_ids, independent_ids = independent_ids
+), paste0(objects_folder, "multistate_independence_screening.RDS"))
+cat("Wrote daily + weekly timeseries (raw all-events + independent modeling), screening, summary.\n")
+```

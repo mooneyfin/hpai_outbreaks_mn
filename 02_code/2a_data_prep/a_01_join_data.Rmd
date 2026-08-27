@@ -1,106 +1,76 @@
 ---
-title: "Join Data Sources (Daily Resolution)"
+title: "Join data sources (daily)"
 author: "Fintan Mooney"
-date: "2026-05-12"
+date: "`r Sys.Date()`"
 output: html_document
 ---
 
-# NOTE: This script requires confidential HPAI spillover point-location data
-# (not publicly available). The processed grid-cell level output is provided
-# in data/ and downstream analyses can be run without this file.
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
 
-# Joins USDA spillover events (by date_confirmed) to 10x10km grid cells covering
-# Minnesota at DAILY resolution for Nov 15 2021 – Dec 31 2022!
-# Brings in daily ERA5-Land met, linearly-interpolated daily eBird abundance,
-# MPCA feedlots, and USGS landcover.
-# Produces the base zone × date panel used to build the daily timeseries and
-# time-stratified case-crossover datasets.
-
-# Major revision (May 2026): all temporal operations moved from weekly to daily
-# to address GeoHealth reviewer comments. Wild bird abundance is linearly
-# interpolated within each zone between weekly eBird Status & Trends midpoints
-# to produce a smooth daily series. The Nov–Dec 2021 leading window is required
-# so that DLNM lag 0–28 windows for early-2022 cases stay fully observed.
-
-```{r 0a-initiate, include=FALSE}
-# 0a. Declare root directory, folder locations, and load packages + helpers
+```{r initiate}
 rm(list = ls())
+# 0a.Declare root directory, folder location and load essential stuff
 project.folder = paste0(print(here::here()), '/')
 source(paste0(project.folder, 'create_folder_structure.R'))
 source(paste0(functions.folder, 'script_initiate.R'))
 ```
 
-## 1. Load 10 km fishnet geometry
+# 1. Load 10 km fishnet geometry
 
-```{r 1a-load-fishnet}
-# 1a. Single feature per zone — geometry only (one-to-many join key)
+```{r fishnet}
 fishnet_geom <- st_read(paste0(spatial_data, "/fishnet_10km_timeseries.gpkg")) %>%
   distinct(zone_id, geom)
 ```
 
-## 2. Build the zone × date scaffold (Nov 15 2021 – Dec 31 2022)
+# 2. Build the zone × date scaffold
 
-```{r 2a-build-scaffold}
-# 2a. Full crossing of zones × days. The Nov–Dec 2021 leading window is
-#     required so the DLNM lag 0–28 windows for early-2022 cases stay fully
-#     observed (see 02_code/2a_data_prep/a_00_era5_land_gee.js (or a_00_era5_land_rgee.R)).
+```{r scaffold}
 study_start <- as.Date("2021-11-15")
 study_end   <- as.Date("2022-12-31")
+date_seq    <- seq(study_start, study_end, by = "day")
+zone_ids    <- fishnet_geom %>% st_drop_geometry() %>% pull(zone_id) %>% unique()
 
-date_seq <- seq(study_start, study_end, by = "day")
-
-zone_ids <- fishnet_geom %>% st_drop_geometry() %>% pull(zone_id) %>% unique()
-
-# Full crossing — one row per zone per day
 daily_fishnet <- expand.grid(
   zone_id = zone_ids,
   date    = date_seq,
   stringsAsFactors = FALSE
 ) %>%
   mutate(
-    year       = lubridate::year(date),
-    month      = lubridate::month(date),
-    iso_week   = lubridate::isoweek(date),
-    iso_year   = lubridate::isoyear(date),
-    dow        = lubridate::wday(date, label = TRUE, week_start = 1),
-    doy        = lubridate::yday(date)
+    year     = lubridate::year(date),
+    month    = lubridate::month(date),
+    iso_week = lubridate::isoweek(date),
+    iso_year = lubridate::isoyear(date),
+    dow      = lubridate::wday(date, label = TRUE, week_start = 1),
+    doy      = lubridate::yday(date)
   ) %>%
   as.data.table()
 
 setkey(daily_fishnet, zone_id, date)
-
-cat("Daily fishnet scaffold:\n")
-cat("  Zones:", length(zone_ids), "\n")
-cat("  Days :", length(date_seq), "\n")
-cat("  Rows :", nrow(daily_fishnet), "\n")
-
 ```
 
-## 3. Load and join spillover events (by date_confirmed)
+# 3. Load and join spillover events
 
-```{r 3a-spillover-data}
-
+```{r spillover}
 spillover_file <- file.path(spillover_data, "hpai-outbreaks-clean-placeholder-032124.csv")
 if (!file.exists(spillover_file)) {
-  stop("This script needs the confidential spillover data (hpai-outbreaks-clean-placeholder-032124.csv). See 01_data/1b_outcome_data/README.md for how to get it.")
+  stop("Missing ", spillover_file)
 }
 spillover_raw <- read_csv(spillover_file)
 
-# Filter to MN 2022 (case window — leading 2021 days are zero-outbreak by design)
+# 3a.Keep IND (independent introduction) and INR; exclude CSLT (common source lateral transfer)
+spillover_raw <- spillover_raw %>% filter(link %in% c("IND", "INR"))
+
+# 3b.Use date_confirmed as the case-defining date (USDA surveillance convention;
+#    median 2 d after presumptive onset). A date_presumptive sensitivity is
+#    reported separately.
+spillover_raw <- spillover_raw %>% mutate(case_date = date_confirmed)
+
 spillover_mn <- spillover_raw %>%
   filter(state == "MN",
-         dplyr::between(date_confirmed, as.Date("2022-01-01"), as.Date("2022-12-31")))
+         dplyr::between(case_date, as.Date("2022-01-01"), as.Date("2022-12-31")))
 
-# If date_observed / date_sampled exist, attach for downstream sensitivity analysis;
-# date_confirmed remains the primary stratum date for consistency with the submitted
-# manuscript and prior USDA APHIS-based HPAI literature.
-date_cols_present <- intersect(c("date_observed", "date_sampled", "date_analyzed"),
-                               names(spillover_mn))
-if (length(date_cols_present) > 0) {
-  cat("Earlier-date columns present (kept for sensitivity):", paste(date_cols_present, collapse = ", "), "\n")
-}
-
-# Convert to sf and join to fishnet
 spillover_sf <- spillover_mn %>%
   st_as_sf(coords = c("lon", "lat"), crs = 4326) %>%
   st_transform(crs = st_crs(fishnet_geom))
@@ -108,9 +78,8 @@ spillover_sf <- spillover_mn %>%
 outbreaks_in_cells <- st_join(spillover_sf, fishnet_geom, join = st_within) %>%
   st_drop_geometry()
 
-# Aggregate by zone × date
 outbreak_daily <- outbreaks_in_cells %>%
-  group_by(zone_id, date = date_confirmed) %>%
+  group_by(zone_id, date = case_date) %>%
   summarise(
     outbreak_count = n(),
     outbreak_id    = paste(outbreak_id, collapse = ", "),
@@ -119,14 +88,12 @@ outbreak_daily <- outbreaks_in_cells %>%
   mutate(outbreak_binary = 1L) %>%
   as.data.table()
 
-# Zone-level summaries (time-invariant tags)
 any_outbreak_zones <- outbreak_daily[, .(any_outbreak = 1L), by = zone_id]
 outbreak_dates_by_zone <- outbreak_daily[
   , .(outbreak_date = paste(sort(unique(as.character(date))), collapse = ", ")),
   by = zone_id
 ]
 
-# Merge into daily scaffold
 setkey(outbreak_daily, zone_id, date)
 daily_fishnet <- merge(daily_fishnet, outbreak_daily,
                        by = c("zone_id", "date"), all.x = TRUE)
@@ -140,67 +107,190 @@ daily_fishnet[, `:=`(
   outbreak_id     = fcoalesce(outbreak_id, NA_character_),
   outbreak_date   = fcoalesce(outbreak_date, NA_character_)
 )]
-
-cat("\nSpillover join:\n")
-cat("  Events in MN 2022:", nrow(spillover_mn), "\n")
-cat("  Case zone-DAYS   :", uniqueN(outbreak_daily, by = c("zone_id", "date")), "\n")
-cat("  Unique case zones:", uniqueN(outbreak_daily, by = "zone_id"), "\n")
-
 ```
 
-## 4. Load DAILY ERA5-Land meteorological data
+# 4. Load daily ERA5-Land met
+#
+# Two supported sources, selected by USE_MULTISTATE_ERA5:
+#
+# (A) Multistate (default): bi-weekly CSVs from the new GEE pipeline
+#     (a_00_era5_land_gee_multistate.js), one CSV per (state, window). These
+#     carry raw ERA5 band names and ~2 000 MN cells with their own zone_ids.
+#     We map those onto the existing MN fishnet via a centroid-contains spatial
+#     join so the rest of the pipeline (cases, birds) stays in the legacy
+#     zone_id space. The multistate CSVs expose the new variables we added in
+#     the Nov 2025 refresh: snow_depth, snow_cover, skin_temperature,
+#     soil_temperature, soil_moisture_2, snowfall.
+#
+# (B) Legacy single-state: the older mn_daily_era5land_*.csv files from the
+#     rgee pipeline, which already use friendly column names but lack the new
+#     variables. Kept as a fallback if you ever want to re-run the previous
+#     analysis exactly.
 
-```{r 4a-load-met-daily}
+```{r met}
+USE_MULTISTATE_ERA5 <- TRUE   # set FALSE to revert to legacy single-state CSVs
 
-# 2022 daily + Nov–Dec 2021 trailing daily (produced by 02_code/2a_data_prep/a_00_era5_land_gee.js (or a_00_era5_land_rgee.R))
-met_files <- c(
-  file.path(env_data, "mn_daily_era5land_2021_novdec.csv"),
-  file.path(env_data, "mn_daily_era5land_2022.csv")
-)
-missing <- met_files[!file.exists(met_files)]
-if (length(missing) > 0) {
-  stop("Missing daily met file(s):\n  ",
-       paste(missing, collapse = "\n  "),
-       "\nRun 02_code/2a_data_prep/a_00_era5_land_gee.js (or a_00_era5_land_rgee.R) first.")
+if (USE_MULTISTATE_ERA5) {
+
+  multistate_dir <- file.path(env_data, "hpai_multistate_era5")
+  state_filter   <- "Minnesota"
+  state_tag      <- "MN"
+
+  # ---- 4a. Load multistate fishnet (5 states) and filter to MN ----
+  # GEE exports GeoJSON with EPSG:5070 (NAD83 Albers) projected coordinates but
+  # tags the metadata as WGS84 — we must override the CRS rather than transform.
+  multistate_geom <- st_read(file.path(multistate_dir, "fishnet_8state.geojson"),
+                             quiet = TRUE)
+  multistate_geom <- multistate_geom[!st_is_empty(multistate_geom), ]
+  multistate_geom <- st_set_crs(multistate_geom, 5070)
+  if (!"state" %in% names(multistate_geom)) {
+    stop("Multistate fishnet missing `state` column")
+  }
+  multistate_mn <- multistate_geom %>% filter(state == state_filter)
+  multistate_mn <- st_transform(multistate_mn, st_crs(fishnet_geom))
+  message("Multistate MN cells: ", nrow(multistate_mn),
+          "  |  legacy MN fishnet cells: ", nrow(fishnet_geom))
+
+  # ---- 4b. Build legacy_zone → multistate_zone mapping via centroid-contains ----
+  legacy_centroids <- st_centroid(fishnet_geom)
+  legacy_centroids$legacy_zone_id <- fishnet_geom$zone_id
+  legacy_centroids <- legacy_centroids[, "legacy_zone_id"]
+
+  zone_map <- st_join(legacy_centroids,
+                      multistate_mn %>% select(multistate_zone_id = zone_id),
+                      join = st_within) %>%
+    st_drop_geometry() %>%
+    as.data.table()
+  # Some legacy cells sit on the multistate-fishnet boundary or just outside MN
+  # (e.g. small island cells) — assign via nearest-feature as a fallback.
+  if (any(is.na(zone_map$multistate_zone_id))) {
+    missing_idx <- which(is.na(zone_map$multistate_zone_id))
+    nn <- st_nearest_feature(legacy_centroids[missing_idx, ], multistate_mn)
+    zone_map[missing_idx, multistate_zone_id := multistate_mn$zone_id[nn]]
+    message("Centroid-contain missed ", length(missing_idx),
+            " legacy cells; filled via nearest-feature.")
+  }
+  setkey(zone_map, multistate_zone_id)
+
+  # ---- 4c. Load all bi-weekly MN CSVs and concatenate ----
+  mn_csvs <- list.files(multistate_dir,
+                        pattern = paste0("^era5_", state_tag, "_.*\\.csv$"),
+                        full.names = TRUE)
+  if (length(mn_csvs) == 0) stop("No multistate MN CSVs found in ", multistate_dir)
+  message("Loading ", length(mn_csvs), " bi-weekly MN CSVs...")
+  met_daily <- rbindlist(lapply(mn_csvs, fread), use.names = TRUE, fill = TRUE)
+  setnames(met_daily, "zone_id", "multistate_zone_id")
+
+  # Multistate CSV date is "YYYY-MM-DD" (GEE format), not "YYYYMMDD"
+  met_daily[, date := as.Date(as.character(date))]
+
+  # ---- 4d. Rename raw ERA5 bands to friendly column names ----
+  raw_to_friendly <- c(
+    "temperature_2m"                 = "temperature",
+    "dewpoint_temperature_2m"        = "dewpoint",
+    "skin_temperature"               = "skin_temperature",      # already friendly
+    "soil_temperature_level_1"       = "soil_temperature",
+    "volumetric_soil_water_layer_1"  = "soil_moisture",
+    "volumetric_soil_water_layer_2"  = "soil_moisture_2",
+    "total_precipitation_hourly"     = "precipitation",
+    "snowfall_hourly"                = "snowfall",
+    "surface_runoff_hourly"          = "runoff",
+    "total_evaporation_hourly"       = "evapotranspiration",
+    "surface_solar_radiation_downwards_hourly"   = "shortwave_radiation",
+    "surface_thermal_radiation_downwards_hourly" = "longwave_radiation",
+    "leaf_area_index_low_vegetation" = "leaf_area_index"
+  )
+  for (raw in names(raw_to_friendly)) {
+    if (raw %in% names(met_daily) && raw_to_friendly[[raw]] != raw) {
+      setnames(met_daily, raw, raw_to_friendly[[raw]])
+    }
+  }
+
+  # ---- 4e. Derive wind_speed and relative_humidity ----
+  met_daily[, wind_speed := sqrt(u_component_of_wind_10m^2 +
+                                  v_component_of_wind_10m^2)]
+  # Magnus formula (with T, Td in °C). ERA5-Land gives K.
+  T_C  <- met_daily$temperature - 273.15
+  Td_C <- met_daily$dewpoint   - 273.15
+  met_daily[, relative_humidity := 100 *
+              exp((17.625 * Td_C) / (243.04 + Td_C)) /
+              exp((17.625 * T_C ) / (243.04 + T_C ))]
+
+  # snow_density fill (~100 = no-snow sentinel)
+  met_daily[, snow_density := fifelse(snow_density <= 100, 0, snow_density)]
+
+  # ---- 4f. Aggregate multistate cells → legacy zone_id ----
+  # legacy zone_id ↔ exactly one multistate zone_id (centroid-contained).
+  # If multiple legacy cells map to the same multistate cell, they share the
+  # multistate value (no aggregation needed). Mean is a no-op in that case.
+  met_daily <- merge(met_daily, zone_map,
+                     by = "multistate_zone_id", all.x = FALSE,
+                     allow.cartesian = TRUE)
+  setnames(met_daily, "legacy_zone_id", "zone_id")
+
+} else {
+
+  # ---- Legacy single-state path (kept for reproducibility) ----
+  met_files <- c(
+    file.path(env_data, "mn_daily_era5land_2021_novdec.csv"),
+    file.path(env_data, "mn_daily_era5land_2022.csv")
+  )
+  missing <- met_files[!file.exists(met_files)]
+  if (length(missing) > 0) stop("Missing daily met file(s):\n  ",
+                                paste(missing, collapse = "\n  "))
+  met_daily <- rbindlist(lapply(met_files, fread))
+  met_daily[, date := as.Date(as.character(date), format = "%Y%m%d")]
+  # `runoff` means SURFACE runoff, same as the multistate branch up top and the
+  # 8-state panel. the mn_daily_era5land_*.csv files on disk predate that and only
+  # carry runoff_sum (surface + sub-surface), so this branch falls back and warns.
+  # that's the mismatch the 8-state move was meant to kill, which is why this path
+  # is a fallback and not the one you want.
+  if ("surface_runoff" %in% names(met_daily)) {
+    setnames(met_daily, "surface_runoff", "runoff")
+  } else if ("runoff_sum" %in% names(met_daily)) {
+    warning("No surface_runoff column: falling back to TOTAL runoff. Re-export ",
+            "on the 8-state grid to match the flyway panel.")
+    setnames(met_daily, "runoff_sum", "runoff")
+  }
+  # single-state CSV columns are already friendly. stub the new ones with NA so
+  # a pre-refresh export doesn't blow up downstream.
+  for (col in c("snow_depth", "snow_cover", "skin_temperature", "soil_temperature",
+                "soil_moisture_2", "snowfall", "sub_surface_runoff", "runoff_sum",
+                "temperature_C", "leaf_area_index_low", "shortwave_radiation_down")) {
+    if (!col %in% names(met_daily)) met_daily[, (col) := NA_real_]
+  }
+  met_daily[, snow_density := fifelse(snow_density <= 100, 0, snow_density)]
 }
 
-met_daily <- rbindlist(lapply(met_files, fread))
-
-# Parse the date column (GEE exports as YYYYMMdd integers)
-met_daily[, date := as.Date(as.character(date), format = "%Y%m%d")]
-
-# Snow density: ERA5-Land returns ~99.9999 when no snow is present (default fill);
-# this is a known artefact. Set to 0 for cells with no snow.
-met_daily[, snow_density := fifelse(snow_density <= 100, 0, snow_density)]
-
-# Rename runoff_sum → runoff for downstream code consistency
-if ("runoff_sum" %in% names(met_daily)) setnames(met_daily, "runoff_sum", "runoff")
-
-# Met columns to retain
-met_cols <- c("temperature", "dewpoint", "relative_humidity", "wind_speed",
-              "soil_moisture", "snow_density", "precipitation", "runoff",
-              "evapotranspiration", "leaf_area_index", "shortwave_radiation",
+# ---- 4g. Common post-load steps for both paths ----
+# whitelist, and the intersect() below drops silently, so anything new in the
+# CSVs has to be named here or it never reaches the models.
+met_cols <- c("temperature", "temperature_C", "dewpoint",
+              "relative_humidity", "wind_speed",
+              "skin_temperature", "soil_temperature",
+              "soil_moisture", "soil_moisture_2",
+              "snow_depth", "snow_cover", "snow_density",
+              "precipitation", "snowfall",
+              "runoff",              # SURFACE runoff, matches the 8-state panel
+              "sub_surface_runoff",  # the other half, for the comparison figure
+              "runoff_sum",          # surface + sub-surface, what MN used to use
+              "evapotranspiration", "leaf_area_index", "leaf_area_index_low",
+              "shortwave_radiation", "shortwave_radiation_down",
               "longwave_radiation", "surface_pressure")
-met_daily <- met_daily[, c("zone_id", "date", ..met_cols)]
+# Drop any met_cols not present (single-state legacy path may be missing some)
+met_cols <- intersect(met_cols, names(met_daily))
+met_daily <- met_daily[, c("zone_id", "date", ..met_cols), with = FALSE]
 setkey(met_daily, zone_id, date)
 
 daily_fishnet <- merge(daily_fishnet, met_daily, by = c("zone_id", "date"), all.x = TRUE)
-
-cat("\nMet join:\n")
-cat("  Rows with any NA met var:",
-    sum(daily_fishnet[, rowSums(is.na(.SD)), .SDcols = met_cols] > 0), "\n")
-
 ```
 
-## 5. Load weekly eBird and linearly interpolate to daily within each zone
+# 5. Load weekly eBird and interpolate to daily within each zone
 
-```{r 5a-bird-abundance-interpolation}
-
-# eBird Status & Trends weekly outbreak-level estimates
+```{r bird}
 bird_outbreak <- read_csv(file.path(bird_abundance_data,
                                     "mn-outbreak-weekly-bird-estimate-2022-012926.csv"))
 
-# Species groupings used throughout the manuscript
 anseriformes <- c(
   "mallar3", "cangoo", "wooduc", "rinduc", "comgol", "norsho",
   "buffle", "lessca", "rebmer", "gnwtea", "gadwal", "ambduc",
@@ -208,7 +298,6 @@ anseriformes <- c(
 )
 predators <- c("buwtea", "grhowl", "amwpel", "baleag", "brdowl")
 
-# Pivot wide and sum within group per (outbreak_id, mmwr_week)
 bird_wide <- bird_outbreak %>%
   pivot_wider(
     id_cols = c(outbreak_id, mmwr_week, week, week_outbreak),
@@ -224,7 +313,6 @@ bird_wide <- bird_outbreak %>%
   ) %>%
   select(outbreak_id, mmwr_week, total_bird_abundance, anseriformes, predators)
 
-# Map outbreak_id → zone_id (so we can collapse multi-outbreak zones to one zone-week)
 zone_outbreak_map <- outbreaks_in_cells %>%
   select(outbreak_id, zone_id) %>%
   distinct()
@@ -240,7 +328,6 @@ bird_zone_week <- bird_wide %>%
   ) %>%
   as.data.table()
 
-# Negative-control zones (feedlot zones with no outbreak) — feedlot-level weekly bird series
 bird_neg_path <- file.path(bird_abundance_data, "all-mn-feedlot-species-abundance-070125.csv")
 bird_neg_raw  <- fread(bird_neg_path)
 
@@ -256,7 +343,6 @@ bird_neg_long[, mmwr_week := as.integer(gsub("week_", "", mmwr_week))]
 bird_neg_long[, group := fifelse(species %in% anseriformes, "anseriformes",
                           fifelse(species %in% predators, "predators", "other"))]
 
-# Average across feedlot pixels within zone × week × species, then sum across species in group
 bird_neg_zone_week <- bird_neg_long[
   , .(abundance = mean(abundance, na.rm = TRUE)),
   by = .(zone_id, mmwr_week, species, group)
@@ -279,8 +365,6 @@ bird_neg_wide[is.na(total_bird_abundance), total_bird_abundance := 0]
 bird_neg_wide[is.na(anseriformes), anseriformes := 0]
 bird_neg_wide[is.na(predators),    predators    := 0]
 
-# Combine case-zone weekly bird and negative-control weekly bird into one zone-week series.
-# Case zones get their outbreak-derived weekly values; negative-control zones get feedlot-derived.
 case_zone_ids <- unique(bird_zone_week$zone_id)
 bird_zone_week_all <- rbind(
   bird_zone_week[, .(zone_id, mmwr_week, total_bird_abundance, anseriformes, predators)],
@@ -289,23 +373,14 @@ bird_zone_week_all <- rbind(
 )
 setkey(bird_zone_week_all, zone_id, mmwr_week)
 
-# Anchor each weekly value at the mid-point of its MMWR week within 2022
-# (MMWR week 1 of 2022 starts Sun 2022-01-02; midpoint = +3 days)
 mmwr_anchor <- function(week, year = 2022) {
-  jan1 <- as.Date(paste0(year, "-01-01"))
-  wday1 <- as.integer(format(jan1, "%w"))  # 0 = Sun
-  # MMWR week 1 = week containing Jan 4; week starts on Sunday
+  jan1       <- as.Date(paste0(year, "-01-01"))
+  wday1      <- as.integer(format(jan1, "%w"))
   mmwr_start <- jan1 - wday1
   mmwr_start + 7 * (week - 1) + 3
 }
-
 bird_zone_week_all[, anchor_date := mmwr_anchor(mmwr_week, 2022)]
 
-# Linear interpolation within each zone: anchor weekly values at midpoint, then
-# interpolate to daily across the full study window. Use approx() with rule = 2
-# so days before the first or after the last anchor receive the nearest weekly
-# value (clamped endpoints). This produces a smooth daily series that exactly
-# passes through the weekly midpoints.
 interpolate_bird_daily <- function(anchors_df, target_dates) {
   vars <- c("total_bird_abundance", "anseriformes", "predators")
   out <- data.frame(date = target_dates)
@@ -334,30 +409,20 @@ setcolorder(bird_daily, c("zone_id", "date", "total_bird_abundance",
                           "anseriformes", "predators"))
 setkey(bird_daily, zone_id, date)
 
-cat("\nBird interpolation:\n")
-cat("  Zones with weekly bird data:", uniqueN(bird_zone_week_all, by = "zone_id"), "\n")
-cat("  Daily bird rows produced  :", nrow(bird_daily), "\n")
-
-# Merge into daily fishnet
 daily_fishnet <- merge(daily_fishnet, bird_daily, by = c("zone_id", "date"), all.x = TRUE)
-
-# Zones with no eBird coverage at all → zero by definition
 daily_fishnet[is.na(total_bird_abundance), total_bird_abundance := 0]
 daily_fishnet[is.na(anseriformes),         anseriformes         := 0]
 daily_fishnet[is.na(predators),            predators            := 0]
 
-# Tag zones with consistently zero abundance (for diagnostic mapping)
 zone_zero_summary <- daily_fishnet[, .(total_abundance = sum(total_bird_abundance, na.rm = TRUE)),
                                    by = zone_id]
 zone_ids_all_zero <- zone_zero_summary[total_abundance == 0, zone_id]
 daily_fishnet[, bird_zero := fifelse(zone_id %in% zone_ids_all_zero, "No Birds", "Has Birds")]
-
 ```
 
-## 6. Feedlot covariates (time-invariant)
+# 6. Feedlot covariates
 
-```{r 6a-feedlots}
-
+```{r feedlots}
 feedlots <- st_read(file.path(feedlot_data, "feedlots.shp")) %>%
   st_transform(crs = st_crs(fishnet_geom))
 
@@ -390,13 +455,11 @@ daily_fishnet[, `:=`(
   cafo_flag     = fcoalesce(cafo_flag,     0L),
   near_river    = fcoalesce(near_river,    0L)
 )]
-
 ```
 
-## 7. Land cover (time-invariant)
+# 7. Land cover
 
-```{r 7a-landcover}
-
+```{r landcover}
 land_cover <- st_read(file.path(spatial_data, "fishnet_landcover.gpkg"))
 
 land_cover_clean <- land_cover %>%
@@ -404,59 +467,33 @@ land_cover_clean <- land_cover %>%
   select(zone_id, land_cover_mode, land_cover_label, lat, lon)
 
 daily_fishnet <- merge(daily_fishnet, land_cover_clean, by = "zone_id", all.x = TRUE)
-
-# Re-level so coefficients are interpretable
 daily_fishnet[, land_cover_label := relevel(
   factor(land_cover_label), ref = "Developed, Medium Intensity"
 )]
-
 daily_fishnet[, farm_possible := fifelse(
   land_cover_label %in% c("Cultivated Crops", "Pasture/Hay", "Emergent Herbaceous Wetlands"),
   1L, 0L
 )]
-
 ```
 
-## 8. Sort + final NA check
+# 8. Export
 
-```{r 8a-final-checks}
-
+```{r export}
 setkey(daily_fishnet, zone_id, date)
 
-na_summary <- daily_fishnet[, lapply(.SD, function(x) sum(is.na(x)))]
-cat("\nNA counts by column (non-zero only):\n")
-print(t(na_summary[, .SD, .SDcols = which(na_summary != 0)]))
-cat("\n(Expected NAs only for outbreak_id / outbreak_date on non-case days.)\n")
+saveRDS(daily_fishnet, paste0(objects_folder, "mn_fishnet_daily_processed.rds"))
+fwrite(daily_fishnet,  paste0(processed_data, "mn_fishnet_daily_processed.csv"))
 
-```
-
-## 9. Export daily zone × date panel
-
-```{r 9a-export}
-
-saveRDS(daily_fishnet, file.path(objects_folder, "mn_fishnet_daily_processed.rds"))
-
-# Also write CSV for downstream non-R consumers (Python map script, etc.)
-fwrite(daily_fishnet, file.path(processed_data, "mn_fishnet_daily_processed.csv"))
-
-# Spatial export — single feature per zone with time-invariant covariates
 fishnet_spatial <- fishnet_geom %>%
   left_join(
-    daily_fishnet[, .(any_outbreak = max(any_outbreak),
-                      feedlot_count = first(feedlot_count),
-                      bird_zero = first(bird_zero),
+    daily_fishnet[, .(any_outbreak     = max(any_outbreak),
+                      feedlot_count    = first(feedlot_count),
+                      bird_zero        = first(bird_zero),
                       land_cover_label = first(as.character(land_cover_label))),
                   by = zone_id],
     by = "zone_id"
   )
-saveRDS(fishnet_spatial, file.path(objects_folder, "mn_fishnet_daily_processed_sf.rds"))
-st_write(fishnet_spatial, file.path(processed_data, "mn_fishnet_daily_processed.gpkg"),
+saveRDS(fishnet_spatial, paste0(objects_folder, "mn_fishnet_daily_processed_sf.rds"))
+st_write(fishnet_spatial, paste0(processed_data, "mn_fishnet_daily_processed.gpkg"),
          delete_dsn = TRUE)
-
-cat("\nExports written:\n")
-cat("  ", file.path(objects_folder, "mn_fishnet_daily_processed.rds"), "\n")
-cat("  ", file.path(processed_data, "mn_fishnet_daily_processed.csv"), "\n")
-cat("  ", file.path(objects_folder, "mn_fishnet_daily_processed_sf.rds"), "\n")
-cat("  ", file.path(processed_data, "mn_fishnet_daily_processed.gpkg"), "\n")
-
 ```

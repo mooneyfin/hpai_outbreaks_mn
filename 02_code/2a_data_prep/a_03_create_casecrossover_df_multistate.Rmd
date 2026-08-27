@@ -1,0 +1,264 @@
+---
+title: "Case-crossover dataframes — multi-state (unidirectional; daily + weekly)"
+author: "Fintan Mooney"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r initiate}
+rm(list = ls())
+# 0a.Declare root directory, folder location and load essential stuff
+project.folder = paste0(print(here::here()), '/')
+source(paste0(project.folder, 'create_folder_structure.R'))
+source(paste0(functions.folder, 'script_initiate.R'))
+
+# 0b.lubridate owns the date accessors under the project's conflicted setup.
+conflict_prefer("year",  "lubridate", quiet = TRUE)
+conflict_prefer("month", "lubridate", quiet = TRUE)
+```
+
+Builds the multi-state case-crossover dataframes with a **unidirectional** referent design:
+each case is matched to up to four control periods drawn from the **four weeks immediately
+before** the case, in the same 10 km cell. This is required because after an outbreak we
+cannot assume the cell became virus-free, so post-event periods are not valid controls
+(mirrors the manuscript and the flyway models `c_03`/`c_04`).
+
+  * **daily**  — case day + control days at 7/14/21/28 d before (same weekday); DLNM lag 0–28 d.
+  * **weekly** — case week + the 4 preceding weeks; DLNM lag 0–4 wk.
+  * A **bidirectional** (time-stratified) daily df is written as a *secondary* comparison only.
+
+Two case definitions per design: **all events** (`*_all`) and **independent** (no suffix,
+primary — cross-farm CSLT/NOSEQ and spatio-temporal non-independent second events removed;
+1 km / 200 m vary that spatial threshold). Control periods that themselves had an outbreak
+in the same cell are excluded.
+
+# 1. Load panels and the exposure variable set
+
+```{r load}
+daily  <- readRDS(paste0(objects_folder, "multistate_fishnet_timeseries_daily.RDS"))
+weekly <- readRDS(paste0(objects_folder, "multistate_fishnet_timeseries_weekly.RDS"))
+screening <- readRDS(paste0(objects_folder, "multistate_independence_screening.RDS"))
+setDT(daily); setDT(weekly)
+setkey(daily, zone_id, date)
+
+case_window_start <- as.Date("2022-01-01")
+case_window_end   <- as.Date("2022-12-31")
+
+# Count how many of a zone-period's outbreak_ids are in a removal set.
+count_flagged_ids <- function(id_str, flagged_ids) {
+  if (is.na(id_str)) return(0L)
+  as.integer(sum(as.numeric(trimws(unlist(strsplit(id_str, ",")))) %in% flagged_ids))
+}
+
+# Case definitions as outbreak_id removal sets: ALL_REMOVE keeps every event; ind_remove()
+# drops cross-farm/unsequenced (link CSLT+NOSEQ) plus spatio-temporal non-independent events.
+cross_farm_ids <- screening$cross_farm_ids
+ALL_REMOVE     <- integer(0)
+ind_remove     <- function(spatio_ids) union(cross_farm_ids, spatio_ids)
+
+lag_vars <- intersect(c(
+  "temperature", "dewpoint", "relative_humidity", "wind_speed",
+  "skin_temperature", "soil_temperature", "soil_moisture", "soil_moisture_2",
+  "snow_depth", "snow_cover", "snow_density",
+  "precipitation", "snowfall", "runoff", "evapotranspiration",
+  "leaf_area_index", "shortwave_radiation", "longwave_radiation", "surface_pressure",
+  "total_bird_abundance", "anseriformes", "predators"), names(daily))
+skewed_vars <- intersect(c("total_bird_abundance", "anseriformes", "predators",
+                           "runoff", "precipitation"), lag_vars)
+
+# log1p the skewed exposures, then z-scale every lag column (effects per +1 SD).
+transform_lag_cols <- function(dt, max_lag) {
+  for (v in skewed_vars) for (k in 0:max_lag) {
+    col <- paste0(v, "_Lag", k); if (col %in% names(dt)) dt[[col]] <- log1p(dt[[col]])
+  }
+  for (v in lag_vars) for (k in 0:max_lag) {
+    col <- paste0(v, "_Lag", k); if (col %in% names(dt)) dt[[col]] <- as.numeric(scale(dt[[col]]))
+  }
+  dt
+}
+```
+
+# 2. Convert precipitation & runoff m → mm (guarded)
+
+```{r units}
+stopifnot(
+  "runoff already in mm — reload panels before re-running" =
+    max(daily$runoff,        na.rm = TRUE) < 1,
+  "precipitation already in mm — reload panels before re-running" =
+    max(daily$precipitation, na.rm = TRUE) < 1
+)
+daily[,  `:=`(runoff = runoff * 1000, precipitation = precipitation * 1000)]
+weekly[, `:=`(runoff = runoff * 1000, precipitation = precipitation * 1000)]
+```
+
+# 3. Unidirectional builder (primary design, daily & weekly)
+
+```{r build-uni}
+# For each case (flag-removed outbreak in the case window), the matched set is the case
+# period plus the periods 7/14/21/28 days before it in the same cell (up to 4 controls).
+# Control periods that were themselves outbreaks (any event, same cell) are excluded, and
+# strata are kept only if they retain the case and >=1 control. The DLNM lag matrix is built
+# on the case zones' full series (so each period carries its own lag-0..max exposure history).
+OFFSETS <- c(0, 7, 14, 21, 28)   # case (0) + 4 control periods, in days before
+
+build_uni_cc <- function(panel, tcol, max_lag, flag_ids) {
+  p <- copy(panel)
+  p[, tkey := as.Date(get(tcol))]
+  p[, is_outbreak_raw := as.integer(outbreak_binary == 1)]
+
+  # 3a. Apply the case definition (remove flagged events → redefine cases).
+  fl <- p[outbreak_binary == 1 & tkey >= case_window_start & tkey <= case_window_end
+        ][, nf := vapply(outbreak_id, count_flagged_ids, integer(1), flagged_ids = flag_ids)
+        ][nf > 0, .(zone_id, tkey, nf)]
+  p <- merge(p, fl, by = c("zone_id", "tkey"), all.x = TRUE)
+  p[, nf := fcoalesce(nf, 0L)]
+  p[, outbreak_binary := as.integer(outbreak_count - nf > 0)]
+  p[, nf := NULL]
+
+  cases <- p[outbreak_binary == 1 & tkey >= case_window_start & tkey <= case_window_end,
+             .(zone_id, ct = tkey)]
+  cases[, stratum_id := paste0("z", zone_id, "_", format(ct, "%Y%m%d"))]
+
+  # 3b. Lag matrix on case zones' full series.
+  src <- p[zone_id %in% unique(cases$zone_id)]
+  setorder(src, zone_id, tkey)
+  for (v in lag_vars) {
+    nm <- paste0(v, "_Lag", 0:max_lag)
+    src[, (nm) := shift(.SD[[1]], n = 0:max_lag, type = "lag"), by = zone_id, .SDcols = v]
+  }
+
+  # 3c. Expand each case into its matched set, join exposures, drop outbreak controls.
+  cases[, cid := .I]
+  sets <- cases[, .(tkey = ct - OFFSETS, is_case = c(1L, 0L, 0L, 0L, 0L)),
+                by = .(cid, zone_id, stratum_id)]
+  matched <- merge(sets, src, by = c("zone_id", "tkey"), all.x = FALSE)
+  matched <- matched[is_case == 1L | is_outbreak_raw == 0L]
+  keep <- matched[, .(nc = sum(is_case == 1L), nk = sum(is_case == 0L)),
+                  by = stratum_id][nc >= 1 & nk >= 1, stratum_id]
+  matched <- matched[stratum_id %in% keep]
+
+  matched[, `:=`(outbreak_binary = is_case,
+                 case_control    = fifelse(is_case == 1L, "case", "control"))]
+  setnames(matched, "tkey", tcol)
+  matched <- transform_lag_cols(matched, max_lag)
+  list(df = matched, n_keep = length(keep), n_cases = sum(matched$outbreak_binary == 1))
+}
+```
+
+# 4. Bidirectional builder (secondary daily comparison only)
+
+```{r build-bi}
+# Time-stratified strata (zone × year × calendar-month × day-of-week): controls are the
+# same-weekday days of the case's calendar month, before AND after. Retained only as a
+# secondary sensitivity to the unidirectional primary.
+build_daily_bi <- function(panel, flag_ids, max_lag = 28) {
+  p <- copy(panel)
+  fl <- p[outbreak_binary == 1 & date >= case_window_start & date <= case_window_end
+        ][, nf := vapply(outbreak_id, count_flagged_ids, integer(1), flagged_ids = flag_ids)
+        ][nf > 0, .(zone_id, date, nf)]
+  p <- merge(p, fl, by = c("zone_id", "date"), all.x = TRUE)
+  p[, nf := fcoalesce(nf, 0L)]
+  p[, outbreak_binary := as.integer(outbreak_count - nf > 0)]; p[, nf := NULL]
+
+  cy <- p[date >= case_window_start & date <= case_window_end]
+  cy[, stratum_id := sprintf("%d-%02d-%d-z%s", lubridate::year(date), lubridate::month(date),
+                             lubridate::wday(date, week_start = 1), zone_id)]
+  active <- unique(cy[outbreak_binary == 1]$stratum_id)
+  pool   <- cy[stratum_id %in% active]
+  pool[, case_control := fifelse(outbreak_binary == 1, "case", "control")]
+  keep   <- pool[case_control == "control", .N, by = stratum_id][N >= 1]$stratum_id
+  pool   <- pool[stratum_id %in% keep]
+
+  src <- copy(p[zone_id %in% unique(pool$zone_id)]); setorder(src, zone_id, date)
+  lag_cols <- character(0)
+  for (v in lag_vars) {
+    nm <- paste0(v, "_Lag", 0:max_lag)
+    src[, (nm) := shift(.SD[[1]], n = 0:max_lag, type = "lag"), by = zone_id, .SDcols = v]
+    lag_cols <- c(lag_cols, nm)
+  }
+  lag_mat <- merge(pool[, .(zone_id, date, stratum_id, outbreak_binary, case_control)],
+                   src[, c("zone_id", "date", ..lag_cols)], by = c("zone_id", "date"), all.x = TRUE)
+  non_lag <- setdiff(names(pool), names(lag_mat))
+  out <- merge(lag_mat, pool[, c("zone_id", "date", ..non_lag)], by = c("zone_id", "date"))
+  out <- transform_lag_cols(out, max_lag)
+  list(df = out, n_keep = length(keep), n_cases = sum(out$outbreak_binary == 1))
+}
+```
+
+# 5. Daily dataframes — unidirectional primary (+ bidirectional secondary)
+
+```{r daily}
+cc_daily_all <- build_uni_cc(daily, "date", 28, ALL_REMOVE)
+cc_daily     <- build_uni_cc(daily, "date", 28, ind_remove(screening$ids_500m))
+cc_daily_1km <- build_uni_cc(daily, "date", 28, ind_remove(screening$ids_1km))
+cc_daily_200 <- build_uni_cc(daily, "date", 28, ind_remove(screening$ids_200m))
+cc_daily_bi  <- build_daily_bi(daily, ind_remove(screening$ids_500m))   # secondary
+
+saveRDS(cc_daily_all$df, paste0(objects_folder, "case_crossover_df_multistate_daily_all.RDS"))
+saveRDS(cc_daily$df,     paste0(objects_folder, "case_crossover_df_multistate_daily.RDS"))
+saveRDS(cc_daily_1km$df, paste0(objects_folder, "case_crossover_df_multistate_daily_1km.RDS"))
+saveRDS(cc_daily_200$df, paste0(objects_folder, "case_crossover_df_multistate_daily_200m.RDS"))
+saveRDS(cc_daily_bi$df,  paste0(objects_folder, "case_crossover_df_multistate_daily_bidirectional.RDS"))
+fwrite(cc_daily$df,      paste0(processed_data, "case_crossover_df_multistate_daily.csv"))
+cat("Daily (unidirectional) — independent: ", cc_daily$n_cases, " cases / ",
+    sum(cc_daily$df$outbreak_binary == 0), " controls, ", cc_daily$n_keep, " strata | all events: ",
+    cc_daily_all$n_cases, " cases | bidirectional (secondary): ", cc_daily_bi$n_cases, " cases\n", sep = "")
+```
+
+# 6. Weekly dataframes — unidirectional
+
+```{r weekly}
+cc_weekly_all <- build_uni_cc(weekly, "week_start", 4, ALL_REMOVE)
+cc_weekly     <- build_uni_cc(weekly, "week_start", 4, ind_remove(screening$ids_500m))
+saveRDS(cc_weekly_all$df, paste0(objects_folder, "case_crossover_df_multistate_weekly_all.RDS"))
+saveRDS(cc_weekly$df,     paste0(objects_folder, "case_crossover_df_multistate_weekly.RDS"))
+fwrite(cc_weekly$df,      paste0(processed_data, "case_crossover_df_multistate_weekly.csv"))
+cat("Weekly (unidirectional) — independent: ", cc_weekly$n_cases, " cases / ",
+    sum(cc_weekly$df$outbreak_binary == 0), " controls, ", cc_weekly$n_keep, " strata | all events: ",
+    cc_weekly_all$n_cases, " cases\n", sep = "")
+```
+
+# 7. CONSORT cascade (final counts)
+
+```{r cascade}
+sc <- function(x) list(cases = x$n_cases, controls = sum(x$df$outbreak_binary == 0), strata = x$n_keep)
+cascade <- list(
+  states        = c("IA", "IL", "IN", "MI", "MN", "OH", "WI"),
+  daily_design  = "Unidirectional case-crossover (case + 4 prior control days, 7/14/21/28 d), DLNM lag 0-28 d",
+  weekly_design = "Unidirectional case-crossover (case week + 4 prior control weeks), DLNM lag 0-4 wk",
+  secondary     = "Daily bidirectional (time-stratified zone x year x month x DOW) retained as sensitivity",
+  case_defs     = "all = every spillover event; independent = link IND+INR minus spatio-temporal 500 m",
+  daily_independent         = sc(cc_daily),
+  daily_all                 = sc(cc_daily_all),
+  daily_independent_bidir   = sc(cc_daily_bi),
+  weekly_independent        = sc(cc_weekly),
+  weekly_all                = sc(cc_weekly_all)
+)
+saveRDS(cascade, paste0(objects_folder, "multistate_case_crossover_cascade.RDS"))
+cat("Wrote unidirectional daily + weekly dfs (all + independent, + 1km/200m daily),",
+    "bidirectional daily secondary, and cascade.\n")
+```
+
+# 8. No-spatial-restriction panels (the locked primary case definition)
+
+```{r nospatial}
+# The §5/§6 primary strips cross-farm CSLT/NOSEQ *and* the 500 m spatio-temporal events.
+# The final analysis drops that spatial filter: CSLT exclusion is the principled,
+# investigation-based criterion and the distance cut is an arbitrary proxy for the same
+# thing that costs cases. These panels are what c_11 actually fits, for both the pooled
+# flyway and the MN subset (Minnesota lives inside this grid, so MN and the flyway are
+# finally on the same cells, same bird aggregation, same surface-runoff definition).
+cc_daily_ns  <- build_uni_cc(daily,  "date",       28, cross_farm_ids)
+cc_weekly_ns <- build_uni_cc(weekly, "week_start",  4, cross_farm_ids)
+
+saveRDS(cc_daily_ns$df,  paste0(objects_folder, "case_crossover_df_multistate_daily_nospatial.RDS"))
+saveRDS(cc_weekly_ns$df, paste0(objects_folder, "case_crossover_df_multistate_weekly_nospatial.RDS"))
+
+cat("flyway pooled, no spatial restriction: ", cc_daily_ns$n_cases, " cases / ",
+    cc_daily_ns$n_keep, " strata\n", sep = "")
+print(setDT(cc_daily_ns$df)[outbreak_binary == 1, .(cases = .N), by = state][order(-cases)])
+```

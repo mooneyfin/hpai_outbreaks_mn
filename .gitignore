@@ -69,3 +69,42 @@ code/model_prep/
 # Manuscript / supporting docs (not part of the analysis repo)
 *.pdf
 Supporting Information*.docx
+.positai
+
+# Large regenerable intermediates. GitHub rejects any blob over 100 MB and this repo has 20
+# such files (~10 GB untracked in total), so a plain `git add -A` would fail outright.
+# Everything matched here is rebuilt by the a_*/b_* scripts from the raw inputs.
+03_output/3a_eda_output/*.csv
+03_output/3a_eda_output/*.dbf
+03_output/3b_model_output/dataframes/multistate_*.RDS
+03_output/3b_model_output/dataframes/multistate_*.rds
+03_output/3b_model_output/dataframes/fishnet_timeseries_modeling.RDS
+03_output/3b_model_output/dataframes/case_crossover_df_sym_*.RDS
+03_output/3b_model_output/dataframes/case_crossover_df_ms_*.RDS
+
+# Bulk raw exposure inputs (GEE exports, eBird abundance, feedlot shapefile attributes)
+01_data/1a_exposure_data/**/*.csv
+01_data/1c_supportive_datasets/feedlot_data/*.dbf
+
+# partial browser downloads
+*.crdownload
+03_output/3b_model_output/dataframes/fishnet_timeseries*.RDS
+03_output/3b_model_output/dataframes/ts_seasonal_mn.RDS
+03_output/3b_model_output/dataframes/mn_fishnet_daily_processed.rds
+03_output/3a_eda_output/*.gpkg
+03_output/3b_model_output/models/timeseries_seasonal_mn.RDS
+
+01_data/*.csv
+03_output/3b_model_output/dataframes/climate_anomaly_panel.RDS
+
+# regenerable artefacts over ~10 MB; rebuilt by the numbered scripts
+01_data/1c_supportive_datasets/spatial_data/Control_Zones.gpkg
+01_data/1c_supportive_datasets/spatial_data/fishnet_10km_timeseries.gpkg
+03_output/3a_eda_output/feedlots_timeseries_10km_simple_first.shp
+03_output/3a_eda_output/feedlots_timeseries_10km_simple_second.shp
+03_output/3b_model_output/dataframes/weekly_primary_ab.RDS
+03_output/3b_model_output/models/casecrossover_inla_mn_symmetric.RDS
+05_figures/archive/case_zones_map_veg.png
+
+# revision working documents - local only, not for the public repo
+07_drafts/revision/

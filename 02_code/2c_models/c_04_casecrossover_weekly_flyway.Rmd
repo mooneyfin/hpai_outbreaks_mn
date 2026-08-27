@@ -1,0 +1,302 @@
+---
+title: "Multi-state weekly case-crossover DLNM — flyway climate + bird abundance"
+author: "Fintan Mooney"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r initiate}
+rm(list = ls())
+# 0a. Declare root directory, folder location and load essential stuff
+project.folder = paste0(print(here::here()), '/')
+source(paste0(project.folder, 'create_folder_structure.R'))
+source(paste0(functions.folder, 'script_initiate.R'))
+
+# 0b. lubridate owns the date accessors under the project's conflicted setup.
+conflict_prefer("year",  "lubridate", quiet = TRUE)
+conflict_prefer("month", "lubridate", quiet = TRUE)
+```
+
+The weekly bird-only model ([c_03](c_03_casecrossover_flyway_birds.Rmd)) established the
+premises-level case-crossover for the flyway states. This script adds the **meteorological**
+exposures from the multi-state ERA5 pull, giving the full climate + bird weekly model that
+mirrors the MN weekly design ([c_01](c_01_casecrossover_weekly.Rmd)) but pooled across states.
+
+Climate is attached by mapping each outbreak premises to its 10 km ERA5 fishnet zone and
+aggregating that zone's daily series to ISO weeks. Premises in states without an ERA5 pull
+yet (OH/IL/IN until their exports land) get NA climate and drop from the climate+bird model
+automatically — they remain covered by the c_03 bird-only arm. Both referent designs:
+
+  * **unidirectional**  — 1:4 matching, controls at the four weeks before each case week.
+  * **time-stratified** — controls are the other weeks in the case's calendar month.
+
+# 1. Load bird panel and apply the independence filter (mirrors c_03)
+
+```{r load-bird}
+era5_dir <- paste0(env_data, "hpai_multistate_era5/")
+
+cc <- fread(paste0(bird_abundance_data,
+                   "study_spillover_events_casecrossover_2022_abundance_060326.csv"))
+
+# IND + INR only (drop CSLT / NOSEQ); link is constant within an outbreak.
+keep_ids <- cc[is_case_week == 1 & link %in% c("IND", "INR"), unique(outbreak_id)]
+cc <- cc[outbreak_id %in% keep_ids]
+cc[, week_start := as.Date(week_start)]
+setorder(cc, outbreak_id, week_start)
+
+cat("Outbreaks (IND+INR): ", length(keep_ids),
+    " across ", uniqueN(cc$state), " states\n", sep = "")
+```
+
+# 2. Map each premises to its ERA5 fishnet zone
+
+```{r premises-zone}
+# 2a. Multi-state fishnet. GEE writes EPSG:5070 coordinates but mislabels the CRS
+#     as WGS84, so we *set* (not transform) the CRS, matching a_01_join_data.
+fishnet <- st_read(paste0(era5_dir, "fishnet_8state.geojson"), quiet = TRUE)
+fishnet <- fishnet[!st_is_empty(fishnet), ]
+fishnet <- st_set_crs(fishnet, 5070)
+
+# 2b. One point per premises → containing zone. Premises in states absent from the
+#     fishnet (OH/IL/IN until re-pull) return NA and carry no climate.
+prem <- unique(cc[is_case_week == 1, .(outbreak_id, state, lon, lat)])
+prem_sf <- st_transform(st_as_sf(prem, coords = c("lon", "lat"), crs = 4326), 5070)
+prem[, zone_id := fishnet$zone_id[as.integer(st_within(prem_sf, fishnet))]]
+
+cat("Premises mapped to an ERA5 zone, by state:\n")
+print(prem[, .(n = .N, with_climate = sum(!is.na(zone_id))), by = state][order(-n)])
+
+cc <- merge(cc, prem[, .(outbreak_id, zone_id)], by = "outbreak_id", all.x = TRUE)
+prem_zones <- prem[!is.na(zone_id), unique(zone_id)]
+```
+
+# 3. Load multi-state ERA5, derive vars, aggregate to ISO-week per zone
+
+```{r era5-weekly}
+# 3a. Read only the columns needed for the 6 primary climate exposures (matching
+#     c_01). Restrict to premises zones to keep memory modest.
+era5_cols <- c("zone_id", "state", "date",
+               "temperature_2m", "volumetric_soil_water_layer_1", "snow_cover",
+               "u_component_of_wind_10m", "v_component_of_wind_10m",
+               "total_precipitation_hourly", "surface_runoff_hourly")
+era5_files <- list.files(era5_dir, pattern = "^era5_[A-Z]{2}_.*\\.csv$",
+                         full.names = TRUE)
+era5 <- rbindlist(lapply(era5_files, fread, select = era5_cols),
+                  use.names = TRUE, fill = TRUE)
+era5[, date := as.Date(date)]
+era5 <- era5[zone_id %in% prem_zones]            # join on zone_id across all states
+
+# 3b. Derived fields + friendly names (a_01 logic). wind_speed from u/v; the rest
+#     are direct renames. Temperature kept in K — the model z-scales, so the unit
+#     is immaterial to the per-0.5-SD effect.
+era5[, wind_speed := sqrt(u_component_of_wind_10m^2 + v_component_of_wind_10m^2)]
+setnames(era5,
+         c("temperature_2m", "volumetric_soil_water_layer_1",
+           "total_precipitation_hourly", "surface_runoff_hourly"),
+         c("temperature", "soil_moisture", "precipitation", "runoff"))
+
+# 3c. Aggregate to ISO-week per zone: means for state variables, sums for fluxes
+#     (matching the c_01 weekly aggregation).
+era5[, `:=`(iso_year = lubridate::isoyear(date),
+            iso_week = lubridate::isoweek(date))]
+clim_weekly <- era5[, .(
+  temperature   = mean(temperature,   na.rm = TRUE),
+  soil_moisture = mean(soil_moisture, na.rm = TRUE),
+  snow_cover    = mean(snow_cover,    na.rm = TRUE),
+  wind_speed    = mean(wind_speed,    na.rm = TRUE),
+  precipitation = sum(precipitation,  na.rm = TRUE),
+  runoff        = sum(runoff,         na.rm = TRUE)
+), by = .(zone_id, iso_year, iso_week)]
+
+# 3d. Same skew handling as c_01: m→mm then log1p for fluxes; snow % → fraction.
+clim_weekly[, runoff        := log1p(runoff        * 1000)]
+clim_weekly[, precipitation := log1p(precipitation * 1000)]
+clim_weekly[, snow_cover    := snow_cover / 100]
+```
+
+# 4. Join climate to premises-weeks; transform and z-scale all exposures
+
+```{r join-scale}
+# 4a. Attach weekly climate by zone × ISO-week. The bird study CSV already carries
+#     iso_year / iso_week, so the join is exact.
+cc <- merge(cc, clim_weekly, by = c("zone_id", "iso_year", "iso_week"), all.x = TRUE)
+
+# 4b. Exposure set: 6 climate (from ERA5) + anseriformes (from the bird CSV).
+climate_vars  <- c("temperature", "soil_moisture", "snow_cover",
+                   "wind_speed", "precipitation", "runoff")
+exposure_vars <- c(climate_vars, "anseri_abd")
+name_map <- c(temperature = "Temperature", soil_moisture = "Soil Moisture",
+              snow_cover = "Snow Cover", wind_speed = "Wind Speed",
+              precipitation = "Precipitation", runoff = "Runoff",
+              anseri_abd = "Anseriformes")
+
+# 4c. log1p the right-skewed exposures (bird; fluxes already logged above), then
+#     z-scale every exposure across all premises-weeks → effects per +0.5 SD.
+cc[, anseri_abd := log1p(anseri_abd)]
+setorder(cc, outbreak_id, week_start)
+for (v in exposure_vars) {
+  cc[, (v) := as.numeric(scale(get(v)))]
+}
+
+# 4d. Weekly lag-0..4 columns per exposure, shifted within outbreak.
+MAX_LAG_WK <- 4
+for (v in exposure_vars) {
+  cc[, (paste0(v, "_Lag", 0:MAX_LAG_WK)) :=
+       shift(.SD[[1]], n = 0:MAX_LAG_WK, type = "lag"),
+     by = outbreak_id, .SDcols = v]
+}
+```
+
+# 5. Assemble referent designs and the per-exposure stratum filter
+
+```{r designs}
+# 5a. unidirectional (1:4) and time-stratified (case calendar month), as in c_03.
+design_uni <- cc[lag_weeks_from_case %in% c(0, -1, -2, -3, -4)]
+design_uni[, stratum_id := paste0("uni_", outbreak_id)]
+
+case_month <- cc[is_case_week == 1, .(outbreak_id,
+                                      c_year  = year(week_start),
+                                      c_month = month(week_start))]
+design_ts <- merge(cc, case_month, by = "outbreak_id")
+design_ts <- design_ts[year(week_start) == c_year & month(week_start) == c_month]
+design_ts[, stratum_id := paste0("ts_", outbreak_id)]
+
+# 5b. Keep rows whose every-exposure lag-0..4 is observed (this is what restricts
+#     the climate+bird model to premises with ERA5), then strata holding a case
+#     AND >=1 control.
+prep_strata <- function(dd, vars) {
+  lag_cols <- unlist(lapply(vars, function(v) paste0(v, "_Lag", 0:MAX_LAG_WK)))
+  dd <- dd[complete.cases(dd[, ..lag_cols])]
+  ok <- dd[, .(nc = sum(is_case_week == 1L), nk = sum(is_case_week == 0L)),
+           by = stratum_id][nc >= 1L & nk >= 1L, stratum_id]
+  dd[stratum_id %in% ok]
+}
+
+climate_states <- design_uni[!is.na(temperature) & is_case_week == 1,
+                             sort(unique(state))]
+cat("States entering the climate+bird model: ",
+    paste(climate_states, collapse = ", "), "\n", sep = "")
+```
+
+# 6. Fit the joint climate + bird DLNM (both designs)
+
+```{r fit}
+# 6a. Weekly crossbasis (linear exposure-response, ns df=2 lag over 0–4 wk) — one
+#     per exposure. Named cb_<var> so coefficients are grep-able per predictor.
+make_cb <- function(dd, v) crossbasis(
+  as.matrix(dd[, paste0(v, "_Lag", 0:MAX_LAG_WK), with = FALSE]),
+  lag = c(0, MAX_LAG_WK), argvar = list(fun = "lin"),
+  arglag = list(fun = "ns", df = 2))
+
+# 6b. Fit one conditional-logistic DLNM with all 7 exposures jointly, then extract
+#     each predictor's cumulative (whole 0–4-wk window) and per-lag OR at +0.5 SD.
+fit_joint <- function(dd, vars, design) {
+  dd  <- prep_strata(dd, vars)
+  cbs <- setNames(lapply(vars, function(v) make_cb(dd, v)), paste0("cb_", vars))
+  list2env(cbs, environment())                      # expose cb_* to the formula
+  form <- as.formula(paste("is_case_week ~",
+                           paste(names(cbs), collapse = " + "),
+                           "+ strata(stratum_id)"))
+  m <- clogit(form, method = "efron", data = dd)
+
+  beta <- coef(m); V <- vcov(m)
+  or_rows <- rbindlist(lapply(seq_along(vars), function(i) {
+    cb  <- cbs[[i]]
+    ix  <- grep(paste0("^cb_", vars[i], "v"), names(beta))
+    b   <- beta[ix]; Vsub <- V[ix, ix, drop = FALSE]
+    lb  <- do.call(dlnm::onebasis, c(list(x = 0:MAX_LAG_WK), attr(cb, "arglag")))
+    or_ci <- function(contrast) {
+      lo <- as.numeric(contrast %*% b)
+      se <- sqrt(as.numeric(t(contrast) %*% Vsub %*% contrast))
+      list(OR = exp(lo), lcl = exp(lo - 1.96 * se), ucl = exp(lo + 1.96 * se))
+    }
+    cum <- or_ci(0.5 * colSums(lb))
+    per <- rbindlist(lapply(0:MAX_LAG_WK, function(k) {
+      v <- or_ci(0.5 * lb[k + 1, ]); data.table(lag_wk = k, OR = v$OR,
+                                                 lcl = v$lcl, ucl = v$ucl)
+    }))
+    data.table(design = design, exposure = vars[i], label = name_map[vars[i]],
+               cum_OR = cum$OR, cum_lcl = cum$lcl, cum_ucl = cum$ucl,
+               per_lag = list(per))
+  }))
+  list(model = m, n_strata = uniqueN(dd$stratum_id), ors = or_rows)
+}
+
+fit_uni <- fit_joint(design_uni, exposure_vars, "unidirectional")
+fit_ts  <- fit_joint(design_ts,  exposure_vars, "time-stratified")
+
+saveRDS(fit_uni$model, paste0(models_folder, "flyway_weekly_climate_bird_unidirectional.RDS"))
+saveRDS(fit_ts$model,  paste0(models_folder, "flyway_weekly_climate_bird_timestrat.RDS"))
+
+cum_all <- rbindlist(list(fit_uni$ors, fit_ts$ors))
+fmt_or  <- function(OR, lcl, ucl) sprintf("%.2f (%.2f, %.2f)", OR, lcl, ucl)
+cat("\nN strata — unidirectional: ", fit_uni$n_strata,
+    " | time-stratified: ", fit_ts$n_strata, "\n", sep = "")
+print(cum_all[, .(design, label,
+                  `OR (95% CI)` = fmt_or(cum_OR, cum_lcl, cum_ucl))])
+```
+
+# 7. Table — cumulative ORs, unidirectional vs. time-stratified
+
+```{r table}
+cum_all[, OR_CI := fmt_or(cum_OR, cum_lcl, cum_ucl)]
+tbl <- dcast(cum_all, label ~ design, value.var = "OR_CI")
+setcolorder(tbl, c("label", "unidirectional", "time-stratified"))
+setnames(tbl, "label", "Exposure (per +0.5 SD)")
+
+ft <- flextable(tbl) |>
+  fontsize(size = 11, part = "all") |> autofit() |>
+  align(align = "center", part = "all") |> theme_booktabs()
+read_docx() |>
+  body_add_flextable(ft) |>
+  body_add_par(
+    sprintf(paste0("Cumulative odds ratios (per +0.5 SD, lag 0–4 weeks) from the ",
+                   "joint weekly climate + bird DLNM, pooled across %d flyway states ",
+                   "(%s; IND+INR events). unidirectional = 1:4 matching; ",
+                   "time-stratified = case calendar-month controls. N strata = %d."),
+            length(climate_states), paste(climate_states, collapse = ", "),
+            fit_uni$n_strata),
+    style = "Normal") |>
+  print(target = paste0(tables_main_folder, "Table_Flyway_Weekly_ClimateBird_OR.docx"))
+```
+
+# 8. Figure — cumulative OR forest (both designs)
+
+```{r figure}
+forest <- copy(cum_all)
+ord <- forest[design == "unidirectional"][order(cum_OR), label]
+forest[, label := factor(label, levels = ord)]
+
+fig <- ggplot(forest, aes(cum_OR, label, colour = design)) +
+  geom_vline(xintercept = 1, linetype = "dashed", colour = "grey50") +
+  geom_errorbarh(aes(xmin = cum_lcl, xmax = cum_ucl),
+                 height = 0.25, linewidth = 0.5,
+                 position = position_dodge(width = 0.5)) +
+  geom_point(size = 2, position = position_dodge(width = 0.5)) +
+  scale_colour_manual(values = c(unidirectional = "#32135C",
+                                 `time-stratified` = "#C9405A"), name = NULL) +
+  labs(x = "Cumulative OR (per +0.5 SD, lag 0–4 wk)", y = NULL,
+       title = "Weekly climate + bird and HPAI spillover (flyway, pooled)") +
+  theme_spark() +
+  theme(axis.text.x = element_text(angle = 0, hjust = 0.5))
+ggsave(paste0(figures_main_folder, "figure_flyway_weekly_climate_bird_forest.png"),
+       fig, width = 8, height = 5, dpi = 300, bg = "white")
+```
+
+# 9. Save result bundle
+
+```{r save}
+saveRDS(list(
+  cum_all        = cum_all,
+  n_strata_uni   = fit_uni$n_strata,
+  n_strata_ts    = fit_ts$n_strata,
+  climate_states = climate_states,
+  designs        = list(unidirectional = design_uni, time_stratified = design_ts)
+), paste0(objects_folder, "flyway_weekly_climate_bird.RDS"))
+
+cat("Done — flyway weekly climate+bird case-crossover models, table, and figure written.\n")
+```

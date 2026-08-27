@@ -1,0 +1,212 @@
+---
+title: "Season-adjusted time-series DLNM (INLA)"
+author: "Fintan Mooney"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
+                      fig.align = "center", dev = "ragg_png", dpi = 150)
+```
+
+```{r initiate}
+rm(list = ls())
+project.folder = paste0(print(here::here()), '/')
+source(paste0(project.folder, 'create_folder_structure.R'))
+source(paste0(functions.folder, 'script_initiate.R'))
+stopifnot(requireNamespace("INLA", quietly = TRUE))
+library(INLA); library(Matrix)
+INLA::inla.setOption(num.threads = 1)
+source(paste0(functions.folder, 'inla_dlnm_helpers.R'))
+```
+
+Companion to the case-crossover in `c_11`, answering the question that design *cannot*.
+
+A case-crossover matches each case to referents in the same cell within a few weeks, which
+throws away every between-season contrast by construction. It can only tell you whether a
+short-term deviation precedes an event. That matters here because 71% of Minnesota's cases
+are in spring, so "why spring?" is a between-season question the matched design is blind to.
+
+This model keeps the whole panel and adjusts for season **explicitly** instead: a cyclic RW2
+over week-of-year absorbs the seasonal epidemic curve, an iid cell effect absorbs
+between-cell differences, and `feedlot_count` enters as the offset (only premises can have a
+spillover). Exposure effects are then identified from week-to-week deviations that survive
+the seasonal cycle — strictly more temporal signal than matching leaves behind.
+
+## Meteorology only — and why
+
+**No bird term goes in this model, and it must not.** `a_04_zone_bird_abundance_multistate`
+only extracts eBird abundance for *event* zones, because that is all the case-crossover ever
+needs. Across the full grid the result is that waterfowl abundance is non-zero in exactly the
+77 cells that had an outbreak and zero in all 1,484 others — those zeros are missing data, not
+low counts. Any model that compares outbreak cells against non-outbreak cells therefore gets a
+bird variable that is a perfect indicator of case-cell status, and "discovers" a spillover
+association by construction. An earlier version of this file included the bird term and
+returned RR 1.45 (1.38, 1.51) with a 411-point WAIC gap; that was entirely circular.
+
+ERA5 covers every cell, so the meteorological terms have no such problem and this model is
+valid for them. The waterfowl question stays in `c_11`, where cases and controls are days
+inside the *same* event cell and bird data exists for both. Extending the eBird raster
+extraction to all cells would make a bird term legitimate here; until then it is left out.
+
+Two other coverage limits worth knowing: `feedlot_count` is a Minnesota registration layer
+(1,561 MN cells, 37 in Wisconsin, zero elsewhere), so the offset confines this model to
+Minnesota.
+
+# 1. Weekly at-risk panel
+
+```{r panel}
+d   <- setDT(readRDS(paste0(objects_folder, multistate_ts_daily_rds)))
+scr <- readRDS(paste0(objects_folder, multistate_independence_screening_rds))
+
+# every case sits in a cell with at least one feedlot, so dropping the rest costs nothing
+# and removes ~750 structurally-zero cells
+mn <- d[state == "Minnesota" & feedlot_count > 0]
+
+# same case definition as c_11: drop cross-farm CSLT/NOSEQ events
+count_flagged <- function(s, ids) {
+  if (is.na(s)) return(0L)
+  as.integer(sum(as.numeric(trimws(unlist(strsplit(s, ",")))) %in% ids))
+}
+mn[, nf := vapply(outbreak_id, count_flagged, integer(1), ids = scr$cross_farm_ids)]
+mn[, outbreak_count := pmax(outbreak_count - nf, 0L)][, nf := NULL]
+
+MET  <- INLA_MET_VARS
+VARS <- MET          # meteorology only — see the note above
+
+# roll up to cell-weeks. fluxes accumulate over the week, states average.
+sum_v  <- c("runoff", "precipitation")
+mean_v <- setdiff(VARS, sum_v)
+wk <- mn[, c(.(cases = sum(outbreak_count, na.rm = TRUE),
+               feedlots = max(feedlot_count, na.rm = TRUE),
+               wk_start = min(date)),
+             lapply(.SD, mean, na.rm = TRUE)),
+         by = .(zone_id, iso_year, iso_week), .SDcols = mean_v]
+wk <- merge(wk, mn[, lapply(.SD, sum, na.rm = TRUE),
+                   by = .(zone_id, iso_year, iso_week), .SDcols = sum_v],
+            by = c("zone_id", "iso_year", "iso_week"))
+setorder(wk, zone_id, wk_start)
+
+# weekly lag matrix 0-4 wk, log1p the skewed ones, then z-scale so effects read per SD
+for (v in VARS) {
+  nm <- paste0(v, "_Lag", 0:4)
+  wk[, (nm) := shift(.SD[[1]], n = 0:4, type = "lag"), by = zone_id, .SDcols = v]
+}
+for (v in intersect(c("runoff", "precipitation"), VARS)) for (k in 0:4) {
+  cc <- paste0(v, "_Lag", k); wk[[cc]] <- log1p(pmax(wk[[cc]], 0))
+}
+for (v in VARS) for (k in 0:4) {
+  cc <- paste0(v, "_Lag", k); wk[[cc]] <- as.numeric(scale(wk[[cc]]))
+}
+wk <- wk[complete.cases(wk[, paste0(rep(VARS, each = 5), "_Lag", 0:4), with = FALSE])]
+
+cat(sprintf("%d cell-weeks | %d cells | %d weeks | %d cases\n",
+            nrow(wk), uniqueN(wk$zone_id), uniqueN(wk$wk_start), sum(wk$cases)))
+```
+
+# 2. Fit
+
+```{r fit}
+cbs <- list(); cb_cols <- list()
+dat <- data.frame(cases = wk$cases, E = wk$feedlots)
+for (v in VARS) {
+  X  <- as.matrix(wk[, paste0(v, "_Lag", 0:4), with = FALSE])
+  cb <- dlnm::crossbasis(X, lag = c(0, 4), argvar = list(fun = "lin"),
+                         arglag = list(fun = "ns", df = 2))
+  colnames(cb) <- paste0("cb_", v, ".", colnames(cb))
+  cbs[[v]] <- cb; cb_cols[[v]] <- colnames(cb)
+  dat <- cbind(dat, as.data.frame(unclass(cb)))
+}
+dat$id_season <- wk$iso_week                              # cyclic seasonal curve
+dat$id_space  <- as.integer(as.factor(wk$zone_id))        # cell-level differences
+cbn <- unlist(cb_cols)
+
+hyper.iid <- list(theta = list(prior = "pc.prec", param = c(1, 0.01)))
+form <- paste0(
+  "cases ~ 1 + offset(log(E)) + ",
+  "f(id_season, model = 'rw2', hyper = hyper.iid, constr = TRUE, cyclic = TRUE) + ",
+  "f(id_space,  model = 'iid', hyper = hyper.iid) + ",
+  paste(cbn, collapse = " + "))
+
+fit_ts <- INLA::inla(
+  as.formula(form), data = dat, family = "poisson",
+  control.fixed = list(correlation.matrix = TRUE,
+    mean = as.list(setNames(rep(0, length(cbn)), cbn)),
+    prec = as.list(setNames(rep(INLA_PREC_PRIMARY, length(cbn)), cbn)),
+    prec.intercept = 0.001, mean.intercept = 0),
+  control.compute = list(dic = TRUE, waic = TRUE, config = TRUE),
+  control.inla = list(strategy = "simplified.laplace", int.strategy = "eb",
+                      control.vb = list(enable = FALSE)),
+  num.threads = 1)
+
+saveRDS(fit_ts, paste0(models_folder, "timeseries_seasonal_mn.RDS"))
+cat("WAIC", round(fit_ts$waic$waic, 1), "\n")
+```
+
+# 3. Cumulative RR over the 0-4 wk lag window
+
+```{r results}
+# same contrast machinery as c_11: build the lag contrast by hand off the stored covariance
+ts_cumulative <- function(fit, cbs, cb_cols, vars, step = 0.5) {
+  V <- fit$misc$lincomb.derived.covariance.matrix
+  data.table::rbindlist(lapply(vars, function(v) {
+    idx <- match(cb_cols[[v]], fit$names.fixed)
+    b   <- fit$summary.fixed[idx, "mean"]
+    W   <- colSums(do.call(dlnm::onebasis, c(list(x = 0:4), attr(cbs[[v]], "arglag"))))
+    cv  <- step * W
+    lo  <- sum(cv * b)
+    se  <- sqrt(as.numeric(t(cv) %*% V[idx, idx] %*% cv))
+    data.table::data.table(Predictor = unname(INLA_LABELS[v]),
+      RR = exp(lo), low = exp(lo - 1.96 * se), high = exp(lo + 1.96 * se))
+  }))[, `RR (95% CrI)` := sprintf("%.2f (%.2f, %.2f)", RR, low, high)][]
+}
+res_ts <- ts_cumulative(fit_ts, cbs, cb_cols, VARS)
+print(res_ts[, .(Predictor, `RR (95% CrI)`)])
+saveRDS(res_ts, paste0(objects_folder, "timeseries_seasonal_mn_results.RDS"))
+```
+
+# 4. Overdispersion check
+
+```{r overdispersion}
+# 86 events in ~86k cell-weeks is sparse enough that Poisson should be fine, but the
+# waterfowl interval is tight so it's worth confirming rather than assuming.
+dat$id_obs <- seq_len(nrow(dat))
+alt <- function(extra, fam) {
+  f <- INLA::inla(as.formula(paste0(
+      "cases ~ 1 + offset(log(E)) + ",
+      "f(id_season, model='rw2', hyper=hyper.iid, constr=TRUE, cyclic=TRUE) + ",
+      "f(id_space, model='iid', hyper=hyper.iid) + ", extra, paste(cbn, collapse=" + "))),
+    data = dat, family = fam,
+    control.fixed = list(correlation.matrix = TRUE,
+      mean = as.list(setNames(rep(0, length(cbn)), cbn)),
+      prec = as.list(setNames(rep(INLA_PREC_PRIMARY, length(cbn)), cbn)),
+      prec.intercept = 0.001, mean.intercept = 0),
+    control.compute = list(waic = TRUE, config = TRUE),
+    control.inla = list(strategy = "simplified.laplace", int.strategy = "eb",
+                        control.vb = list(enable = FALSE)), num.threads = 1)
+  ts_cumulative(f, cbs, cb_cols, VARS)[, .(Predictor, `RR (95% CrI)`)]
+}
+cmp <- merge(res_ts[, .(Predictor, Poisson = `RR (95% CrI)`)],
+             alt("f(id_obs, model='iid', hyper=hyper.iid) + ", "poisson")[
+               , .(Predictor, `Poisson + OLRE` = `RR (95% CrI)`)], by = "Predictor", sort = FALSE)
+cmp <- merge(cmp, alt("", "nbinomial")[, .(Predictor, NegBin = `RR (95% CrI)`)],
+             by = "Predictor", sort = FALSE)
+print(cmp)
+```
+
+# 5. Seasonal and spatial terms
+
+```{r random-effects}
+s <- fit_ts$summary.random$id_season
+p_season <- ggplot(data.frame(week = s$ID, RR = exp(s$`0.5quant`),
+                              lo = exp(s$`0.025quant`), hi = exp(s$`0.975quant`)),
+                   aes(week, RR)) +
+  geom_hline(yintercept = 1, linetype = 2, colour = "gray40") +
+  geom_ribbon(aes(ymin = lo, ymax = hi), alpha = 0.15) + geom_line(linewidth = 0.7) +
+  labs(x = "ISO week", y = "Relative risk (95% CrI)") +
+  theme_spark() + theme(axis.text.x = element_text(angle = 0, hjust = 0.5))
+ggsave_spark(file.path(figures_main_folder, "figure_ts_seasonal_curve.png"),
+             p_season, width = 6.5, height = 4)
+p_season
+```

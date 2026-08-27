@@ -1,0 +1,384 @@
+---
+title: "Within-window effect timing (weekly non-overlapping) and power analysis"
+author: "Fintan Mooney"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r initiate}
+rm(list = ls())
+# 0a.Declare root directory, folder location and load essential stuff
+project.folder = paste0(print(here::here()), '/')
+source(paste0(project.folder, 'create_folder_structure.R'))
+source(paste0(functions.folder, 'script_initiate.R'))
+library(MASS)
+```
+
+# 1. Load case-crossover dataframe
+
+```{r load}
+case_crossover_df <- readRDS(paste0(objects_folder, "case_crossover_df.RDS"))
+setDT(case_crossover_df)
+N_cases <- sum(case_crossover_df$outbreak_binary == 1)
+cat("Case-zone-days in primary IND+INR analysis: ", N_cases, "\n")
+```
+
+# 2. Build crossbases (primary spec)
+
+```{r crossbases}
+cb_runoff <- crossbasis(
+  as.matrix(case_crossover_df[, paste0("runoff_Lag", 0:28), with = FALSE]),
+  lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 3)
+)
+cb_soil_moisture <- crossbasis(
+  as.matrix(case_crossover_df[, paste0("soil_moisture_Lag", 0:28), with = FALSE]),
+  lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 3)
+)
+cb_temperature <- crossbasis(
+  as.matrix(case_crossover_df[, paste0("temperature_Lag", 0:28), with = FALSE]),
+  lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 3)
+)
+cb_precipitation <- crossbasis(
+  as.matrix(case_crossover_df[, paste0("precipitation_Lag", 0:28), with = FALSE]),
+  lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 3)
+)
+cb_wind_speed <- crossbasis(
+  as.matrix(case_crossover_df[, paste0("wind_speed_Lag", 0:28), with = FALSE]),
+  lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 3)
+)
+cb_anseriformes <- crossbasis(
+  as.matrix(case_crossover_df[, paste0("anseriformes_Lag", 0:28), with = FALSE]),
+  lag = c(0, 28), argvar = list(fun = "lin"),
+  arglag = list(fun = "strata", breaks = c(7, 14, 21))
+)
+```
+
+# 3. Frequentist clogit and Bayesian posterior samples
+
+```{r fit-and-posterior}
+freq_model <- clogit(
+  outbreak_binary ~
+    cb_runoff + cb_soil_moisture + cb_temperature +
+    cb_precipitation + cb_wind_speed + cb_anseriformes +
+    strata(stratum_id),
+  method = "efron", data = case_crossover_df
+)
+
+beta_hat <- coef(freq_model)
+V_hat    <- vcov(freq_model)
+
+set.seed(2026)
+post_flat <- MASS::mvrnorm(10000, beta_hat, V_hat)
+colnames(post_flat) <- names(beta_hat)
+
+# Weakly informative N(0, 0.3) prior
+prior_sd <- 0.3
+V_prior  <- diag(prior_sd^2, nrow = length(beta_hat))
+V_post   <- solve(solve(V_prior) + solve(V_hat))
+mu_post  <- as.vector(V_post %*% solve(V_hat) %*% beta_hat)
+
+set.seed(2026)
+post_info <- MASS::mvrnorm(10000, mu_post, V_post)
+colnames(post_info) <- names(beta_hat)
+```
+
+# 4. Non-overlapping weekly-window contrast vectors
+
+```{r contrasts}
+lag_seq        <- 0:28
+lag_basis_met  <- do.call(dlnm::onebasis,
+                          c(list(x = lag_seq), attr(cb_runoff,       "arglag")))
+lag_basis_bird <- do.call(dlnm::onebasis,
+                          c(list(x = lag_seq), attr(cb_anseriformes, "arglag")))
+
+# Non-overlapping windows — partition the 0-28 d range into four week-long bins
+# (matching the existing weekly-window convention in c_00).
+build_contrast_window <- function(basis, lo, hi) {
+  0.5 * colSums(basis[lag_seq >= lo & lag_seq <= hi, , drop = FALSE])
+}
+
+windows <- list(
+  "0–7 d"    = c(0,  7),
+  "8–14 d"   = c(8,  14),
+  "15–21 d"  = c(15, 21),
+  "22–28 d"  = c(22, 28)
+)
+
+contrasts_met  <- lapply(windows, function(w) build_contrast_window(lag_basis_met,  w[1], w[2]))
+contrasts_bird <- lapply(windows, function(w) build_contrast_window(lag_basis_bird, w[1], w[2]))
+```
+
+# 5. Within-window OR table (frequentist + Bayesian flat + Bayesian informative)
+
+```{r weekly-window-table}
+predictor_specs <- list(
+  "Runoff"        = list(prefix = "cb_runoff",        is_bird = FALSE),
+  "Soil Moisture" = list(prefix = "cb_soil_moisture", is_bird = FALSE),
+  "Temperature"   = list(prefix = "cb_temperature",   is_bird = FALSE),
+  "Precipitation" = list(prefix = "cb_precipitation", is_bird = FALSE),
+  "Wind Speed"    = list(prefix = "cb_wind_speed",    is_bird = FALSE),
+  "Anseriformes"  = list(prefix = "cb_anseriformes",  is_bird = TRUE)
+)
+
+summarize_window <- function(prefix, contrast) {
+  cols <- grep(paste0("^", prefix, "v"), names(beta_hat))
+  b    <- beta_hat[cols]
+  V    <- V_hat[cols, cols]
+
+  log_or_freq <- as.numeric(contrast %*% b)
+  se          <- sqrt(as.numeric(t(contrast) %*% V %*% contrast))
+
+  log_or_flat <- as.numeric(post_flat[, cols, drop = FALSE] %*% contrast)
+  log_or_info <- as.numeric(post_info[, cols, drop = FALSE] %*% contrast)
+
+  list(
+    freq_or   = exp(log_or_freq),
+    freq_lo   = exp(log_or_freq - 1.96 * se),
+    freq_hi   = exp(log_or_freq + 1.96 * se),
+    se        = se,
+    flat_med  = median(exp(log_or_flat)),
+    flat_lo   = unname(quantile(exp(log_or_flat), 0.025)),
+    flat_hi   = unname(quantile(exp(log_or_flat), 0.975)),
+    flat_ppos = mean(log_or_flat > 0),
+    info_med  = median(exp(log_or_info)),
+    info_lo   = unname(quantile(exp(log_or_info), 0.025)),
+    info_hi   = unname(quantile(exp(log_or_info), 0.975)),
+    info_ppos = mean(log_or_info > 0)
+  )
+}
+
+weekly_tbl <- rbindlist(lapply(names(predictor_specs), function(name) {
+  spec <- predictor_specs[[name]]
+  rbindlist(lapply(seq_along(windows), function(i) {
+    contrast <- if (spec$is_bird) contrasts_bird[[i]] else contrasts_met[[i]]
+    s <- summarize_window(spec$prefix, contrast)
+    data.table(
+      Predictor                = name,
+      Window                   = names(windows)[i],
+      `Freq OR (95% CI)`       = sprintf("%.2f (%.2f, %.2f)", s$freq_or, s$freq_lo, s$freq_hi),
+      `Bayes flat OR (95% CrI)`= sprintf("%.2f (%.2f, %.2f)", s$flat_med, s$flat_lo, s$flat_hi),
+      `P(>0) flat`             = sprintf("%.3f", s$flat_ppos),
+      `Bayes info OR (95% CrI)`= sprintf("%.2f (%.2f, %.2f)", s$info_med, s$info_lo, s$info_hi),
+      `P(>0) info`             = sprintf("%.3f", s$info_ppos)
+    )
+  }))
+}))
+
+print(weekly_tbl)
+
+ft_wk <- weekly_tbl %>%
+  flextable() %>%
+  fontsize(size = 9, part = "all") %>%
+  autofit() %>%
+  align(align = "center", part = "all") %>%
+  theme_booktabs()
+
+doc <- read_docx() %>%
+  body_add_flextable(ft_wk) %>%
+  body_add_par(
+    "Within-window cumulative OR estimates for the primary 6-variable case-crossover DLNM. Windows are non-overlapping weekly bins (0-7, 8-14, 15-21, 22-28 d before the case day). For each predictor and window, the cumulative effect is computed by integrating the lag-response over the window at a constant +0.5 SD exposure. Frequentist OR with 95% Wald CI; Bayesian medians with 95% credible intervals under (a) flat prior (asymptotic MVN approximation) and (b) weakly informative N(0, 0.3) prior on each crossbasis coefficient. P(>0) is the posterior probability that the cumulative log-OR within the window exceeds zero.",
+    style = "Normal"
+  )
+print(doc, target = paste0(tables_sensitivity_folder, "Table_Weekly_Window_Bayesian.docx"))
+```
+
+# 5b. Wide-format Bayesian info-prior table (windows as columns)
+
+```{r weekly-window-wide-info}
+# Combine OR (95% CrI) with P(>0) into a single cell per window, then pivot wide.
+weekly_wide_info <- copy(weekly_tbl)
+weekly_wide_info[, cell := paste0(`Bayes info OR (95% CrI)`, ", P=", `P(>0) info`)]
+weekly_wide_info <- dcast(weekly_wide_info, Predictor ~ Window, value.var = "cell")
+setcolorder(weekly_wide_info, c("Predictor", "0–7 d", "8–14 d", "15–21 d", "22–28 d"))
+
+print(weekly_wide_info)
+
+ft_wk_info <- weekly_wide_info %>%
+  flextable() %>%
+  fontsize(size = 10, part = "all") %>%
+  autofit() %>%
+  align(align = "center", part = "all") %>%
+  theme_booktabs()
+
+doc <- read_docx() %>%
+  body_add_flextable(ft_wk_info) %>%
+  body_add_par(
+    "Bayesian posterior summaries for within-window cumulative effects (per +0.5 SD) from the time-stratified daily case-crossover DLNM under a weakly informative N(0, 0.3) prior on each crossbasis coefficient. Cells report posterior median odds ratio with 95% credible interval and the posterior probability that the cumulative log-OR within the window exceeds zero. P > 0.95 or P < 0.05 indicates strong directional evidence; 0.90 < P < 0.95 or 0.05 < P < 0.10 indicates moderate directional evidence.",
+    style = "Normal"
+  )
+print(doc, target = paste0(tables_sensitivity_folder, "Table_Weekly_Window_Info_Wide.docx"))
+```
+
+# 6. Lag-response slice plot (per-day OR at +0.5 SD with credible band)
+
+```{r slice-plot, fig.width = 12, fig.height = 8}
+# Per-day cumulative log-OR at +0.5 SD: each lag day k contributes 0.5 × basis(k) %*% beta
+# Use posterior samples to get a 95% credible band on the lag-response curve.
+draw_slice <- function(prefix, basis, post_samples, ylim_fix = NULL) {
+  cols <- grep(paste0("^", prefix, "v"), colnames(post_samples))
+  # For each lag k, log-OR contribution = 0.5 × basis(k) %*% beta
+  log_or_by_lag <- 0.5 * basis %*% t(post_samples[, cols, drop = FALSE])
+  or_med <- exp(apply(log_or_by_lag, 1, median))
+  or_lo  <- exp(apply(log_or_by_lag, 1, quantile, 0.025))
+  or_hi  <- exp(apply(log_or_by_lag, 1, quantile, 0.975))
+  list(med = or_med, lo = or_lo, hi = or_hi)
+}
+
+png(paste0(figures_sensitivity_folder, "figure_lag_response_bayesian.png"),
+    width = 12, height = 8, units = "in", res = 300)
+par(mfrow = c(2, 3), mar = c(4, 4, 2.5, 1), oma = c(2, 2, 0, 1),
+    cex.main = 1.1, cex.lab = 1.0, cex.axis = 0.9)
+
+for (name in names(predictor_specs)) {
+  spec  <- predictor_specs[[name]]
+  basis <- if (spec$is_bird) lag_basis_bird else lag_basis_met
+  s     <- draw_slice(spec$prefix, basis, post_flat)
+  plot(lag_seq, s$med, type = "l", lwd = 1.5, col = "black",
+       ylim = range(c(s$lo, s$hi)),
+       main = name, xlab = "Lag (days)", ylab = "OR (95% CrI) per +0.5 SD",
+       las = 1)
+  polygon(c(lag_seq, rev(lag_seq)), c(s$lo, rev(s$hi)),
+          col = rgb(0, 0, 0, 0.15), border = NA)
+  abline(h = 1, lty = 2, col = "gray40")
+  for (xv in c(7, 14, 21)) abline(v = xv, lty = 3, col = "gray70")
+}
+
+mtext("Lag-response slices with Bayesian flat-prior 95% credible bands",
+      side = 3, outer = TRUE, line = -1.5, cex = 1.1)
+dev.off()
+```
+
+# 7. Power analysis at the cumulative ≤28 d window
+
+```{r power-analysis}
+# Detectability at α = 0.05 (two-sided) and 80% power requires:
+#   |log-OR| ≥ (z_{α/2} + z_β) × SE = (1.96 + 0.84) × SE = 2.80 × SE
+# MDE at current N: exp(2.80 × SE_observed)
+# N required to detect target OR_t (assuming SE scales as 1/sqrt(N)):
+#   N_target = N_current × (2.80 × SE_current / log(OR_t))^2
+zsum <- qnorm(0.975) + qnorm(0.80)
+
+# Contrast for the cumulative ≤28 d window
+contrast_le28_met  <- 0.5 * colSums(lag_basis_met)
+contrast_le28_bird <- 0.5 * colSums(lag_basis_bird)
+
+power_tbl <- rbindlist(lapply(names(predictor_specs), function(name) {
+  spec <- predictor_specs[[name]]
+  contrast <- if (spec$is_bird) contrast_le28_bird else contrast_le28_met
+  cols <- grep(paste0("^", spec$prefix, "v"), names(beta_hat))
+  b    <- beta_hat[cols]
+  V    <- V_hat[cols, cols]
+  log_or_obs <- as.numeric(contrast %*% b)
+  se         <- sqrt(as.numeric(t(contrast) %*% V %*% contrast))
+
+  mde_or <- exp(zsum * se)
+
+  n_for_or <- function(target_or) {
+    if (target_or <= 1) return(NA_real_)
+    N_cases * (zsum * se / log(target_or))^2
+  }
+
+  data.table(
+    Predictor                          = name,
+    `Observed OR (95% CI), ≤28 d`      = sprintf("%.2f (%.2f, %.2f)",
+                                                exp(log_or_obs),
+                                                exp(log_or_obs - 1.96 * se),
+                                                exp(log_or_obs + 1.96 * se)),
+    `MDE at current N (α=0.05, 80%)`   = sprintf("%.2f", mde_or),
+    `N to detect OR=1.5`               = sprintf("%.0f", n_for_or(1.5)),
+    `N to detect OR=2.0`               = sprintf("%.0f", n_for_or(2.0)),
+    `N to detect OR=2.5`               = sprintf("%.0f", n_for_or(2.5)),
+    `N to detect OR=3.0`               = sprintf("%.0f", n_for_or(3.0))
+  )
+}))
+
+print(power_tbl)
+
+ft_pwr <- power_tbl %>%
+  flextable() %>%
+  fontsize(size = 10, part = "all") %>%
+  autofit() %>%
+  align(align = "center", part = "all") %>%
+  theme_booktabs()
+
+doc <- read_docx() %>%
+  body_add_flextable(ft_pwr) %>%
+  body_add_par(
+    sprintf("Post-hoc power analysis at the cumulative ≤28 d window (current N = %d case-zone-days). MDE: minimum detectable cumulative OR at α = 0.05 (two-sided) with 80%% power. N columns: number of case-zone-days required to detect the indicated target OR with 80%% power, assuming the predictor SE scales as 1/sqrt(N). A standard-error inflation factor of (1.96 + 0.84) = 2.80 is used for the α = 0.05, 80%% power criterion.",
+            N_cases),
+    style = "Normal"
+  )
+print(doc, target = paste0(tables_sensitivity_folder, "Table_Power_Analysis.docx"))
+```
+
+# 8. Power scenarios across plausible multi-state sample sizes
+
+```{r power-scenarios}
+scenarios <- c(
+  "MN only (current)"     = N_cases,
+  "MN + IA"               = round(N_cases * 1.8),
+  "Miss Flyway (MN+IA+WI)"= round(N_cases * 2.9),
+  "Top 5 HPAI states"     = round(N_cases * 4.0),
+  "All CONUS 2022"        = round(N_cases * 6.0)
+)
+
+target_ors <- c(1.5, 2.0, 2.5, 3.0)
+
+power_curves <- rbindlist(lapply(names(predictor_specs), function(name) {
+  spec <- predictor_specs[[name]]
+  contrast <- if (spec$is_bird) contrast_le28_bird else contrast_le28_met
+  cols <- grep(paste0("^", spec$prefix, "v"), names(beta_hat))
+  V    <- V_hat[cols, cols]
+  se_current <- sqrt(as.numeric(t(contrast) %*% V %*% contrast))
+
+  rbindlist(lapply(names(scenarios), function(sc) {
+    n_target <- scenarios[sc]
+    se_target <- se_current * sqrt(N_cases / n_target)
+    powers <- sapply(target_ors, function(or_t) {
+      delta <- log(or_t)
+      pnorm(delta / se_target - qnorm(0.975))
+    })
+    data.table(
+      Predictor      = name,
+      Scenario       = sprintf("%s (N=%d)", sc, n_target),
+      `Power OR=1.5` = sprintf("%.2f", powers[1]),
+      `Power OR=2.0` = sprintf("%.2f", powers[2]),
+      `Power OR=2.5` = sprintf("%.2f", powers[3]),
+      `Power OR=3.0` = sprintf("%.2f", powers[4])
+    )
+  }))
+}))
+
+print(power_curves)
+
+ft_pc <- power_curves %>%
+  flextable() %>%
+  fontsize(size = 9, part = "all") %>%
+  autofit() %>%
+  align(align = "center", part = "all") %>%
+  theme_booktabs()
+
+doc <- read_docx() %>%
+  body_add_flextable(ft_pc) %>%
+  body_add_par(
+    "Power projections across plausible multi-state sample-size expansions. Power computed at α = 0.05 (two-sided) for cumulative ≤28 d OR detection, assuming the per-predictor SE scales as 1/sqrt(N) and the underlying effect size matches the target OR. Multi-state event counts are projections based on USDA APHIS 2022 commercial poultry HPAI outbreak data.",
+    style = "Normal"
+  )
+print(doc, target = paste0(tables_sensitivity_folder, "Table_Power_Scenarios.docx"))
+```
+
+# 9. Save bundle
+
+```{r save}
+saveRDS(list(
+  weekly_tbl   = weekly_tbl,
+  power_tbl    = power_tbl,
+  power_curves = power_curves,
+  N_cases      = N_cases,
+  scenarios    = scenarios
+), paste0(objects_folder, "weekly_window_and_power.RDS"))
+```

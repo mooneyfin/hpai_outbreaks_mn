@@ -1,0 +1,247 @@
+---
+title: "Control-window sensitivity: bidirectional, tighter, looser"
+author: "Fintan Mooney"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r initiate}
+rm(list = ls())
+# 0a.Declare root directory, folder location and load essential stuff
+project.folder = paste0(print(here::here()), '/')
+source(paste0(project.folder, 'create_folder_structure.R'))
+source(paste0(functions.folder, 'script_initiate.R'))
+```
+
+# 1. Load daily timeseries (modeling version) and identify case-zone-days
+
+```{r load}
+daily <- readRDS(paste0(objects_folder, "fishnet_timeseries_daily_modeling.RDS"))
+setDT(daily)
+setkey(daily, zone_id, date)
+
+# 1a.Unit conversion (m → mm) — guarded against re-running
+stopifnot(
+  "runoff already in mm — reload daily before re-running" =
+    max(daily$runoff, na.rm = TRUE) < 1,
+  "precipitation already in mm — reload daily before re-running" =
+    max(daily$precipitation, na.rm = TRUE) < 1
+)
+daily[, runoff        := runoff        * 1000]
+daily[, precipitation := precipitation * 1000]
+
+case_window_start <- as.Date("2022-01-01")
+case_window_end   <- as.Date("2022-12-31")
+case_zd <- daily[outbreak_binary == 1 &
+                 date >= case_window_start & date <= case_window_end,
+                 .(zone_id, date)]
+cat("Case-zone-days in 2022 (IND+INR): ", nrow(case_zd), "\n")
+```
+
+# 2. Build case-crossover dataframe under arbitrary control-offset scheme
+
+```{r build-cc}
+lag_vars <- c("runoff", "soil_moisture", "temperature",
+              "precipitation", "wind_speed", "anseriformes")
+
+# 2a.One pass through the daily panel to compute lag 0-28 columns for every
+#    zone-date; we'll then merge case+control rows against this scaffold.
+src <- copy(daily)
+setkey(src, zone_id, date)
+for (v in lag_vars) {
+  new_names <- paste0(v, "_Lag", 0:28)
+  src[, (new_names) := shift(.SD[[1]], n = 0:28, type = "lag"),
+      by = zone_id, .SDcols = v]
+}
+lag_cols <- as.vector(outer(lag_vars, 0:28, function(v, k) paste0(v, "_Lag", k)))
+
+build_cc <- function(offsets, scheme_name) {
+  # Cases
+  cases <- case_zd[, .(
+    zone_id, date,
+    outbreak_binary = 1L,
+    case_control    = "case",
+    stratum_id      = paste0(scheme_name, "_", zone_id, "_", as.character(date))
+  )]
+
+  # Controls at each offset (same zone, shifted date), share stratum with their case
+  controls <- rbindlist(lapply(offsets, function(off) {
+    case_zd[, .(
+      zone_id,
+      date            = date + off,
+      outbreak_binary = 0L,
+      case_control    = "control",
+      stratum_id      = paste0(scheme_name, "_", zone_id, "_", as.character(date))
+    )]
+  }))
+
+  cc_pool <- rbind(cases, controls)
+
+  # Restrict to dates within the daily panel
+  cc_pool <- cc_pool[date >= min(daily$date) & date <= max(daily$date)]
+
+  # Drop strata that don't have both a case and at least one control
+  keep <- cc_pool[, .(
+    n_case = sum(case_control == "case"),
+    n_ctrl = sum(case_control == "control")
+  ), by = stratum_id][n_case > 0 & n_ctrl > 0, stratum_id]
+  cc_pool <- cc_pool[stratum_id %in% keep]
+
+  # Merge in lag columns
+  cc_pool <- merge(cc_pool,
+                   src[, c("zone_id", "date", ..lag_cols), with = FALSE],
+                   by = c("zone_id", "date"), all.x = TRUE)
+
+  # log1p skewed variables across all 29 lag columns
+  for (v in c("runoff", "precipitation", "anseriformes")) {
+    for (k in 0:28) {
+      col <- paste0(v, "_Lag", k)
+      cc_pool[[col]] <- log1p(cc_pool[[col]])
+    }
+  }
+
+  # z-scale every lag column within this scheme's dataframe
+  for (col in lag_cols) {
+    cc_pool[[col]] <- as.numeric(scale(cc_pool[[col]]))
+  }
+
+  cc_pool
+}
+
+cc_bidir   <- build_cc(c(-28, -21, -14, -7, 7, 14, 21, 28), "bidir")
+cc_tighter <- build_cc(c(-7, 7),                           "tight")
+cc_looser  <- build_cc(c(-14, -7, 7, 14),                  "loose")
+
+cat("\nSample sizes by scheme:\n")
+print(data.table(
+  scheme   = c("Bidirectional ±7/±14/±21/±28", "Tighter ±7", "Looser ±7/±14"),
+  rows     = c(nrow(cc_bidir),   nrow(cc_tighter),   nrow(cc_looser)),
+  cases    = c(sum(cc_bidir$outbreak_binary),   sum(cc_tighter$outbreak_binary),   sum(cc_looser$outbreak_binary)),
+  controls = c(sum(cc_bidir$outbreak_binary == 0), sum(cc_tighter$outbreak_binary == 0), sum(cc_looser$outbreak_binary == 0)),
+  strata   = c(uniqueN(cc_bidir$stratum_id), uniqueN(cc_tighter$stratum_id), uniqueN(cc_looser$stratum_id))
+))
+```
+
+# 3. Fit primary 6-variable case-crossover under each scheme and extract cumulative ≤28 d OR
+
+```{r fit-each-scheme}
+fit_and_extract <- function(cc, scheme_label) {
+  cb_runoff <- crossbasis(
+    as.matrix(cc[, paste0("runoff_Lag", 0:28), with = FALSE]),
+    lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 3)
+  )
+  cb_soil_moisture <- crossbasis(
+    as.matrix(cc[, paste0("soil_moisture_Lag", 0:28), with = FALSE]),
+    lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 3)
+  )
+  cb_temperature <- crossbasis(
+    as.matrix(cc[, paste0("temperature_Lag", 0:28), with = FALSE]),
+    lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 3)
+  )
+  cb_precipitation <- crossbasis(
+    as.matrix(cc[, paste0("precipitation_Lag", 0:28), with = FALSE]),
+    lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 3)
+  )
+  cb_wind_speed <- crossbasis(
+    as.matrix(cc[, paste0("wind_speed_Lag", 0:28), with = FALSE]),
+    lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 3)
+  )
+  cb_anseriformes <- crossbasis(
+    as.matrix(cc[, paste0("anseriformes_Lag", 0:28), with = FALSE]),
+    lag = c(0, 28), argvar = list(fun = "lin"),
+    arglag = list(fun = "strata", breaks = c(7, 14, 21))
+  )
+
+  m <- clogit(
+    outbreak_binary ~
+      cb_runoff + cb_soil_moisture + cb_temperature +
+      cb_precipitation + cb_wind_speed + cb_anseriformes +
+      strata(stratum_id),
+    method = "efron", data = cc
+  )
+
+  beta <- coef(m)
+  V    <- vcov(m)
+
+  lag_seq        <- 0:28
+  lag_basis_met  <- do.call(dlnm::onebasis, c(list(x = lag_seq), attr(cb_runoff,       "arglag")))
+  lag_basis_bird <- do.call(dlnm::onebasis, c(list(x = lag_seq), attr(cb_anseriformes, "arglag")))
+  contrast_met   <- 0.5 * colSums(lag_basis_met)
+  contrast_bird  <- 0.5 * colSums(lag_basis_bird)
+
+  one_pred <- function(prefix, contrast) {
+    cols <- grep(paste0("^", prefix, "v"), names(beta))
+    b    <- beta[cols]; Vsub <- V[cols, cols]
+    lo   <- as.numeric(contrast %*% b)
+    se   <- sqrt(as.numeric(t(contrast) %*% Vsub %*% contrast))
+    sprintf("%.2f (%.2f, %.2f)", exp(lo), exp(lo - 1.96 * se), exp(lo + 1.96 * se))
+  }
+
+  data.table(
+    Predictor = c("Runoff", "Soil Moisture", "Temperature",
+                  "Precipitation", "Wind Speed", "Anseriformes"),
+    Scheme    = scheme_label,
+    OR_CI     = c(
+      one_pred("cb_runoff",        contrast_met),
+      one_pred("cb_soil_moisture", contrast_met),
+      one_pred("cb_temperature",   contrast_met),
+      one_pred("cb_precipitation", contrast_met),
+      one_pred("cb_wind_speed",    contrast_met),
+      one_pred("cb_anseriformes",  contrast_bird)
+    )
+  )
+}
+
+res_bidir   <- fit_and_extract(cc_bidir,   "Bidirectional (±7/±14/±21/±28)")
+res_tighter <- fit_and_extract(cc_tighter, "Tighter (±7)")
+res_looser  <- fit_and_extract(cc_looser,  "Looser (±7/±14)")
+```
+
+# 4. Pull primary (time-stratified zone × year × month × DOW) for comparison
+
+```{r primary-baseline}
+case_crossover_df <- readRDS(paste0(objects_folder, "case_crossover_df.RDS"))
+setDT(case_crossover_df)
+res_primary <- fit_and_extract(case_crossover_df, "Time-stratified (primary)")
+```
+
+# 5. Side-by-side comparison
+
+```{r comparison-table}
+all_res <- rbindlist(list(res_primary, res_bidir, res_tighter, res_looser))
+wide <- dcast(all_res, Predictor ~ Scheme, value.var = "OR_CI")
+print(wide)
+
+ft <- wide %>%
+  flextable() %>%
+  fontsize(size = 10, part = "all") %>%
+  autofit() %>%
+  align(align = "center", part = "all") %>%
+  theme_booktabs()
+
+doc <- read_docx() %>%
+  body_add_flextable(ft) %>%
+  body_add_par(
+    paste0(
+      "Cumulative OR estimates (per +0.5 SD, lag 0-28 d) for the primary case-crossover model under four control-selection schemes. Primary: time-stratified zone × year × month × day-of-week strata (Lu et al. 2020). Bidirectional: 8 controls per case at ±7, ±14, ±21, ±28 days (symmetric pre/post-event). Tighter: 2 controls per case at ±7 d. Looser: 4 controls per case at ±7 and ±14 d. Each scheme creates one stratum per case-zone-day."
+    ),
+    style = "Normal"
+  )
+print(doc, target = paste0(tables_sensitivity_folder, "Table_Control_Window_Sensitivity.docx"))
+```
+
+# 6. Save bundle
+
+```{r save}
+saveRDS(list(
+  res_primary = res_primary,
+  res_bidir   = res_bidir,
+  res_tighter = res_tighter,
+  res_looser  = res_looser,
+  comparison  = wide
+), paste0(objects_folder, "control_window_sensitivity.RDS"))
+```

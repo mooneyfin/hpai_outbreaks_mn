@@ -1,0 +1,333 @@
+---
+title: "Migration-season stratified sensitivity (spring March–May vs fall September–November)"
+author: "Fintan Mooney"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r initiate}
+rm(list = ls())
+# 0a.Declare root directory, folder location and load essential stuff
+project.folder = paste0(print(here::here()), '/')
+source(paste0(project.folder, 'create_folder_structure.R'))
+source(paste0(functions.folder, 'script_initiate.R'))
+```
+
+# 1. Load case-crossover dataframe
+
+```{r load}
+case_crossover_df <- readRDS(paste0(objects_folder, "case_crossover_df.RDS"))
+setDT(case_crossover_df)
+case_crossover_df[, cal_month := lubridate::month(date)]
+```
+
+# 2. Filter to spring and fall migration windows; drop strata without both case and control
+
+```{r filter}
+spring_dt <- case_crossover_df[cal_month %in% c(3, 4, 5)]
+fall_dt   <- case_crossover_df[cal_month %in% c(9, 10, 11)]
+
+spring_keep <- spring_dt[, .(n_case = sum(outbreak_binary == 1),
+                              n_ctrl = sum(outbreak_binary == 0)),
+                          by = stratum_id][n_case > 0 & n_ctrl > 0, stratum_id]
+spring_dt   <- spring_dt[stratum_id %in% spring_keep]
+
+fall_keep <- fall_dt[, .(n_case = sum(outbreak_binary == 1),
+                          n_ctrl = sum(outbreak_binary == 0)),
+                      by = stratum_id][n_case > 0 & n_ctrl > 0, stratum_id]
+fall_dt   <- fall_dt[stratum_id %in% fall_keep]
+
+cat("Spring (Mar–May): ", sum(spring_dt$outbreak_binary), " cases, ",
+    sum(spring_dt$outbreak_binary == 0), " controls, ",
+    uniqueN(spring_dt$stratum_id), " strata\n", sep = "")
+cat("Fall   (Sep–Nov): ", sum(fall_dt$outbreak_binary),   " cases, ",
+    sum(fall_dt$outbreak_binary == 0),   " controls, ",
+    uniqueN(fall_dt$stratum_id),   " strata\n", sep = "")
+```
+
+# 3. Spring model (primary 6-variable spec, lag 0–28 d)
+
+```{r spring}
+cb_runoff <- crossbasis(
+  as.matrix(spring_dt[, paste0("runoff_Lag", 0:28), with = FALSE]),
+  lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 3)
+)
+cb_soil_moisture <- crossbasis(
+  as.matrix(spring_dt[, paste0("soil_moisture_Lag", 0:28), with = FALSE]),
+  lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 3)
+)
+cb_temperature <- crossbasis(
+  as.matrix(spring_dt[, paste0("temperature_Lag", 0:28), with = FALSE]),
+  lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 3)
+)
+cb_precipitation <- crossbasis(
+  as.matrix(spring_dt[, paste0("precipitation_Lag", 0:28), with = FALSE]),
+  lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 3)
+)
+cb_wind_speed <- crossbasis(
+  as.matrix(spring_dt[, paste0("wind_speed_Lag", 0:28), with = FALSE]),
+  lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 3)
+)
+cb_anseriformes <- crossbasis(
+  as.matrix(spring_dt[, paste0("anseriformes_Lag", 0:28), with = FALSE]),
+  lag = c(0, 28), argvar = list(fun = "lin"),
+  arglag = list(fun = "strata", breaks = c(7, 14, 21))
+)
+
+model_spring <- clogit(
+  outbreak_binary ~
+    cb_runoff + cb_soil_moisture + cb_temperature +
+    cb_precipitation + cb_wind_speed + cb_anseriformes +
+    strata(stratum_id),
+  method = "efron", data = spring_dt
+)
+saveRDS(model_spring, paste0(models_folder, "casecrossover_model_spring.RDS"))
+
+cp_runoff_sp <- crosspred(cb_runoff,        model_spring, cen = 0, at = 0.5, cumul = TRUE)
+cp_soil_sp   <- crosspred(cb_soil_moisture, model_spring, cen = 0, at = 0.5, cumul = TRUE)
+cp_temp_sp   <- crosspred(cb_temperature,   model_spring, cen = 0, at = 0.5, cumul = TRUE)
+cp_precip_sp <- crosspred(cb_precipitation, model_spring, cen = 0, at = 0.5, cumul = TRUE)
+cp_wind_sp   <- crosspred(cb_wind_speed,    model_spring, cen = 0, at = 0.5, cumul = TRUE)
+cp_bird_sp   <- crosspred(cb_anseriformes,  model_spring, cen = 0, at = 0.5, cumul = TRUE)
+
+n_sp <- ncol(cp_runoff_sp$cumRRfit)
+or_runoff_sp <- sprintf("%.2f (%.2f, %.2f)", cp_runoff_sp$cumRRfit["0.5", n_sp], cp_runoff_sp$cumRRlow["0.5", n_sp], cp_runoff_sp$cumRRhigh["0.5", n_sp])
+or_soil_sp   <- sprintf("%.2f (%.2f, %.2f)", cp_soil_sp$cumRRfit["0.5", n_sp],   cp_soil_sp$cumRRlow["0.5", n_sp],   cp_soil_sp$cumRRhigh["0.5", n_sp])
+or_temp_sp   <- sprintf("%.2f (%.2f, %.2f)", cp_temp_sp$cumRRfit["0.5", n_sp],   cp_temp_sp$cumRRlow["0.5", n_sp],   cp_temp_sp$cumRRhigh["0.5", n_sp])
+or_precip_sp <- sprintf("%.2f (%.2f, %.2f)", cp_precip_sp$cumRRfit["0.5", n_sp], cp_precip_sp$cumRRlow["0.5", n_sp], cp_precip_sp$cumRRhigh["0.5", n_sp])
+or_wind_sp   <- sprintf("%.2f (%.2f, %.2f)", cp_wind_sp$cumRRfit["0.5", n_sp],   cp_wind_sp$cumRRlow["0.5", n_sp],   cp_wind_sp$cumRRhigh["0.5", n_sp])
+or_bird_sp   <- sprintf("%.2f (%.2f, %.2f)", cp_bird_sp$cumRRfit["0.5", n_sp],   cp_bird_sp$cumRRlow["0.5", n_sp],   cp_bird_sp$cumRRhigh["0.5", n_sp])
+```
+
+# 4. Fall model
+
+```{r fall}
+cb_runoff <- crossbasis(
+  as.matrix(fall_dt[, paste0("runoff_Lag", 0:28), with = FALSE]),
+  lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 3)
+)
+cb_soil_moisture <- crossbasis(
+  as.matrix(fall_dt[, paste0("soil_moisture_Lag", 0:28), with = FALSE]),
+  lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 3)
+)
+cb_temperature <- crossbasis(
+  as.matrix(fall_dt[, paste0("temperature_Lag", 0:28), with = FALSE]),
+  lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 3)
+)
+cb_precipitation <- crossbasis(
+  as.matrix(fall_dt[, paste0("precipitation_Lag", 0:28), with = FALSE]),
+  lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 3)
+)
+cb_wind_speed <- crossbasis(
+  as.matrix(fall_dt[, paste0("wind_speed_Lag", 0:28), with = FALSE]),
+  lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 3)
+)
+cb_anseriformes <- crossbasis(
+  as.matrix(fall_dt[, paste0("anseriformes_Lag", 0:28), with = FALSE]),
+  lag = c(0, 28), argvar = list(fun = "lin"),
+  arglag = list(fun = "strata", breaks = c(7, 14, 21))
+)
+
+model_fall <- clogit(
+  outbreak_binary ~
+    cb_runoff + cb_soil_moisture + cb_temperature +
+    cb_precipitation + cb_wind_speed + cb_anseriformes +
+    strata(stratum_id),
+  method = "efron", data = fall_dt
+)
+saveRDS(model_fall, paste0(models_folder, "casecrossover_model_fall.RDS"))
+
+cp_runoff_fa <- crosspred(cb_runoff,        model_fall, cen = 0, at = 0.5, cumul = TRUE)
+cp_soil_fa   <- crosspred(cb_soil_moisture, model_fall, cen = 0, at = 0.5, cumul = TRUE)
+cp_temp_fa   <- crosspred(cb_temperature,   model_fall, cen = 0, at = 0.5, cumul = TRUE)
+cp_precip_fa <- crosspred(cb_precipitation, model_fall, cen = 0, at = 0.5, cumul = TRUE)
+cp_wind_fa   <- crosspred(cb_wind_speed,    model_fall, cen = 0, at = 0.5, cumul = TRUE)
+cp_bird_fa   <- crosspred(cb_anseriformes,  model_fall, cen = 0, at = 0.5, cumul = TRUE)
+
+n_fa <- ncol(cp_runoff_fa$cumRRfit)
+or_runoff_fa <- sprintf("%.2f (%.2f, %.2f)", cp_runoff_fa$cumRRfit["0.5", n_fa], cp_runoff_fa$cumRRlow["0.5", n_fa], cp_runoff_fa$cumRRhigh["0.5", n_fa])
+or_soil_fa   <- sprintf("%.2f (%.2f, %.2f)", cp_soil_fa$cumRRfit["0.5", n_fa],   cp_soil_fa$cumRRlow["0.5", n_fa],   cp_soil_fa$cumRRhigh["0.5", n_fa])
+or_temp_fa   <- sprintf("%.2f (%.2f, %.2f)", cp_temp_fa$cumRRfit["0.5", n_fa],   cp_temp_fa$cumRRlow["0.5", n_fa],   cp_temp_fa$cumRRhigh["0.5", n_fa])
+or_precip_fa <- sprintf("%.2f (%.2f, %.2f)", cp_precip_fa$cumRRfit["0.5", n_fa], cp_precip_fa$cumRRlow["0.5", n_fa], cp_precip_fa$cumRRhigh["0.5", n_fa])
+or_wind_fa   <- sprintf("%.2f (%.2f, %.2f)", cp_wind_fa$cumRRfit["0.5", n_fa],   cp_wind_fa$cumRRlow["0.5", n_fa],   cp_wind_fa$cumRRhigh["0.5", n_fa])
+or_bird_fa   <- sprintf("%.2f (%.2f, %.2f)", cp_bird_fa$cumRRfit["0.5", n_fa],   cp_bird_fa$cumRRlow["0.5", n_fa],   cp_bird_fa$cumRRhigh["0.5", n_fa])
+```
+
+# 5. Pooled (primary) model for reference
+
+```{r pooled}
+cb_runoff <- crossbasis(
+  as.matrix(case_crossover_df[, paste0("runoff_Lag", 0:28), with = FALSE]),
+  lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 3)
+)
+cb_soil_moisture <- crossbasis(
+  as.matrix(case_crossover_df[, paste0("soil_moisture_Lag", 0:28), with = FALSE]),
+  lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 3)
+)
+cb_temperature <- crossbasis(
+  as.matrix(case_crossover_df[, paste0("temperature_Lag", 0:28), with = FALSE]),
+  lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 3)
+)
+cb_precipitation <- crossbasis(
+  as.matrix(case_crossover_df[, paste0("precipitation_Lag", 0:28), with = FALSE]),
+  lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 3)
+)
+cb_wind_speed <- crossbasis(
+  as.matrix(case_crossover_df[, paste0("wind_speed_Lag", 0:28), with = FALSE]),
+  lag = c(0, 28), argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 3)
+)
+cb_anseriformes <- crossbasis(
+  as.matrix(case_crossover_df[, paste0("anseriformes_Lag", 0:28), with = FALSE]),
+  lag = c(0, 28), argvar = list(fun = "lin"),
+  arglag = list(fun = "strata", breaks = c(7, 14, 21))
+)
+
+model_pooled <- clogit(
+  outbreak_binary ~
+    cb_runoff + cb_soil_moisture + cb_temperature +
+    cb_precipitation + cb_wind_speed + cb_anseriformes +
+    strata(stratum_id),
+  method = "efron", data = case_crossover_df
+)
+
+cp_runoff_pl <- crosspred(cb_runoff,        model_pooled, cen = 0, at = 0.5, cumul = TRUE)
+cp_soil_pl   <- crosspred(cb_soil_moisture, model_pooled, cen = 0, at = 0.5, cumul = TRUE)
+cp_temp_pl   <- crosspred(cb_temperature,   model_pooled, cen = 0, at = 0.5, cumul = TRUE)
+cp_precip_pl <- crosspred(cb_precipitation, model_pooled, cen = 0, at = 0.5, cumul = TRUE)
+cp_wind_pl   <- crosspred(cb_wind_speed,    model_pooled, cen = 0, at = 0.5, cumul = TRUE)
+cp_bird_pl   <- crosspred(cb_anseriformes,  model_pooled, cen = 0, at = 0.5, cumul = TRUE)
+
+n_pl <- ncol(cp_runoff_pl$cumRRfit)
+or_runoff_pl <- sprintf("%.2f (%.2f, %.2f)", cp_runoff_pl$cumRRfit["0.5", n_pl], cp_runoff_pl$cumRRlow["0.5", n_pl], cp_runoff_pl$cumRRhigh["0.5", n_pl])
+or_soil_pl   <- sprintf("%.2f (%.2f, %.2f)", cp_soil_pl$cumRRfit["0.5", n_pl],   cp_soil_pl$cumRRlow["0.5", n_pl],   cp_soil_pl$cumRRhigh["0.5", n_pl])
+or_temp_pl   <- sprintf("%.2f (%.2f, %.2f)", cp_temp_pl$cumRRfit["0.5", n_pl],   cp_temp_pl$cumRRlow["0.5", n_pl],   cp_temp_pl$cumRRhigh["0.5", n_pl])
+or_precip_pl <- sprintf("%.2f (%.2f, %.2f)", cp_precip_pl$cumRRfit["0.5", n_pl], cp_precip_pl$cumRRlow["0.5", n_pl], cp_precip_pl$cumRRhigh["0.5", n_pl])
+or_wind_pl   <- sprintf("%.2f (%.2f, %.2f)", cp_wind_pl$cumRRfit["0.5", n_pl],   cp_wind_pl$cumRRlow["0.5", n_pl],   cp_wind_pl$cumRRhigh["0.5", n_pl])
+or_bird_pl   <- sprintf("%.2f (%.2f, %.2f)", cp_bird_pl$cumRRfit["0.5", n_pl],   cp_bird_pl$cumRRlow["0.5", n_pl],   cp_bird_pl$cumRRhigh["0.5", n_pl])
+```
+
+# 6. Side-by-side comparison table
+
+```{r table}
+comparison <- data.table(
+  Predictor          = c("Runoff", "Soil Moisture", "Temperature",
+                         "Precipitation", "Wind Speed", "Anseriformes"),
+  `Pooled (primary)` = c(or_runoff_pl, or_soil_pl, or_temp_pl, or_precip_pl, or_wind_pl, or_bird_pl),
+  `Spring (Mar–May)` = c(or_runoff_sp, or_soil_sp, or_temp_sp, or_precip_sp, or_wind_sp, or_bird_sp),
+  `Fall (Sep–Nov)`   = c(or_runoff_fa, or_soil_fa, or_temp_fa, or_precip_fa, or_wind_fa, or_bird_fa)
+)
+print(comparison)
+
+ft <- comparison %>%
+  flextable() %>%
+  fontsize(size = 11, part = "all") %>%
+  autofit() %>%
+  align(align = "center", part = "all") %>%
+  theme_booktabs()
+
+doc <- read_docx() %>%
+  body_add_flextable(ft) %>%
+  body_add_par(
+    "Cumulative ORs (per 0.5 SD, lag 0-28 d) for the pooled primary case-crossover model and migration-season stratified sensitivities. Spring = March-May; Fall = September-November.",
+    style = "Normal"
+  )
+print(doc, target = paste0(tables_sensitivity_folder, "Table_Migration_Season_Sensitivity.docx"))
+```
+
+# 7. Weekly-window cumulative ORs by season (0–7 d and 8–14 d)
+
+```{r weekly-windows}
+lag_seq        <- 0:28
+lag_basis_met  <- do.call(dlnm::onebasis, c(list(x = lag_seq), attr(cb_runoff, "arglag")))
+lag_basis_bird <- do.call(dlnm::onebasis, c(list(x = lag_seq), attr(cb_anseriformes, "arglag")))
+
+contrast_0_7      <- 0.5 * colSums(lag_basis_met[lag_seq  >= 0 & lag_seq <=  7, , drop = FALSE])
+contrast_8_14     <- 0.5 * colSums(lag_basis_met[lag_seq  >= 8 & lag_seq <= 14, , drop = FALSE])
+contrast_bird_0_7  <- 0.5 * colSums(lag_basis_bird[lag_seq >= 0 & lag_seq <=  7, , drop = FALSE])
+contrast_bird_8_14 <- 0.5 * colSums(lag_basis_bird[lag_seq >= 8 & lag_seq <= 14, , drop = FALSE])
+
+# 7a.Helper-free per-season per-predictor extraction
+window_or <- function(model, term_prefix, contrast) {
+  idx <- grep(paste0("^", term_prefix, "v"), names(coef(model)))
+  b   <- coef(model)[idx]
+  V   <- vcov(model)[idx, idx]
+  lo  <- sum(contrast * b)
+  se  <- sqrt(as.numeric(t(contrast) %*% V %*% contrast))
+  sprintf("%.2f (%.2f, %.2f)", exp(lo), exp(lo - 1.96 * se), exp(lo + 1.96 * se))
+}
+
+weekly_tbl <- data.table(
+  Predictor = c("Runoff", "Soil Moisture", "Temperature",
+                "Precipitation", "Wind Speed", "Anseriformes"),
+  `Pooled 0–7 d` = c(window_or(model_pooled, "cb_runoff",        contrast_0_7),
+                     window_or(model_pooled, "cb_soil_moisture", contrast_0_7),
+                     window_or(model_pooled, "cb_temperature",   contrast_0_7),
+                     window_or(model_pooled, "cb_precipitation", contrast_0_7),
+                     window_or(model_pooled, "cb_wind_speed",    contrast_0_7),
+                     window_or(model_pooled, "cb_anseriformes",  contrast_bird_0_7)),
+  `Pooled 8–14 d` = c(window_or(model_pooled, "cb_runoff",        contrast_8_14),
+                      window_or(model_pooled, "cb_soil_moisture", contrast_8_14),
+                      window_or(model_pooled, "cb_temperature",   contrast_8_14),
+                      window_or(model_pooled, "cb_precipitation", contrast_8_14),
+                      window_or(model_pooled, "cb_wind_speed",    contrast_8_14),
+                      window_or(model_pooled, "cb_anseriformes",  contrast_bird_8_14)),
+  `Spring 0–7 d` = c(window_or(model_spring, "cb_runoff",        contrast_0_7),
+                     window_or(model_spring, "cb_soil_moisture", contrast_0_7),
+                     window_or(model_spring, "cb_temperature",   contrast_0_7),
+                     window_or(model_spring, "cb_precipitation", contrast_0_7),
+                     window_or(model_spring, "cb_wind_speed",    contrast_0_7),
+                     window_or(model_spring, "cb_anseriformes",  contrast_bird_0_7)),
+  `Spring 8–14 d` = c(window_or(model_spring, "cb_runoff",        contrast_8_14),
+                      window_or(model_spring, "cb_soil_moisture", contrast_8_14),
+                      window_or(model_spring, "cb_temperature",   contrast_8_14),
+                      window_or(model_spring, "cb_precipitation", contrast_8_14),
+                      window_or(model_spring, "cb_wind_speed",    contrast_8_14),
+                      window_or(model_spring, "cb_anseriformes",  contrast_bird_8_14)),
+  `Fall 0–7 d` = c(window_or(model_fall, "cb_runoff",        contrast_0_7),
+                   window_or(model_fall, "cb_soil_moisture", contrast_0_7),
+                   window_or(model_fall, "cb_temperature",   contrast_0_7),
+                   window_or(model_fall, "cb_precipitation", contrast_0_7),
+                   window_or(model_fall, "cb_wind_speed",    contrast_0_7),
+                   window_or(model_fall, "cb_anseriformes",  contrast_bird_0_7)),
+  `Fall 8–14 d` = c(window_or(model_fall, "cb_runoff",        contrast_8_14),
+                    window_or(model_fall, "cb_soil_moisture", contrast_8_14),
+                    window_or(model_fall, "cb_temperature",   contrast_8_14),
+                    window_or(model_fall, "cb_precipitation", contrast_8_14),
+                    window_or(model_fall, "cb_wind_speed",    contrast_8_14),
+                    window_or(model_fall, "cb_anseriformes",  contrast_bird_8_14))
+)
+print(weekly_tbl)
+
+ft_weekly <- weekly_tbl %>%
+  flextable() %>%
+  fontsize(size = 9, part = "all") %>%
+  autofit() %>%
+  align(align = "center", part = "all") %>%
+  theme_booktabs()
+
+doc <- read_docx() %>%
+  body_add_flextable(ft_weekly) %>%
+  body_add_par(
+    "Weekly-window cumulative ORs (per 0.5 SD) under the primary 6-variable case-crossover model, pooled and stratified by migration season.",
+    style = "Normal"
+  )
+print(doc, target = paste0(tables_sensitivity_folder, "Table_Migration_Season_Weekly.docx"))
+```
+
+# 8. Save results bundle
+
+```{r save}
+saveRDS(list(
+  comparison   = comparison,
+  weekly_tbl   = weekly_tbl,
+  model_pooled = model_pooled,
+  model_spring = model_spring,
+  model_fall   = model_fall,
+  spring_n     = c(cases = sum(spring_dt$outbreak_binary), strata = uniqueN(spring_dt$stratum_id)),
+  fall_n       = c(cases = sum(fall_dt$outbreak_binary),   strata = uniqueN(fall_dt$stratum_id))
+), paste0(objects_folder, "migration_season_sensitivity.RDS"))
+```

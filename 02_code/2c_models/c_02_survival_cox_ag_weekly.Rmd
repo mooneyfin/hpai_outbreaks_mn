@@ -1,0 +1,331 @@
+---
+title: "Andersen–Gill recurrent-event Cox model at weekly resolution"
+author: "Fintan Mooney"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r initiate}
+rm(list = ls())
+# 0a.Declare root directory, folder location and load essential stuff
+project.folder = paste0(print(here::here()), '/')
+source(paste0(project.folder, 'create_folder_structure.R'))
+source(paste0(functions.folder, 'script_initiate.R'))
+```
+
+# 1. Load daily panel and aggregate to weekly (zone × week)
+
+```{r aggregate-weekly}
+daily <- readRDS(paste0(objects_folder, "fishnet_timeseries_daily_modeling.RDS"))
+setDT(daily)
+setkey(daily, zone_id, date)
+
+# Unit conversion (m → mm) — guarded
+if (max(daily$runoff, na.rm = TRUE) < 1) {
+  daily[, runoff        := runoff        * 1000]
+  daily[, precipitation := precipitation * 1000]
+}
+
+# Weekly key
+daily[, week_id := paste0(lubridate::isoyear(date), "-W",
+                          formatC(lubridate::isoweek(date), width = 2, flag = "0"))]
+daily[, dow := lubridate::wday(date, week_start = 1)]   # Monday=1; for bird anchoring
+
+weekly <- daily[, .(
+  week_start          = min(date),
+  week_end            = max(date),
+  year                = lubridate::isoyear(min(date)),
+  month               = lubridate::month(min(date)),
+  outbreak_binary     = as.integer(any(outbreak_binary == 1)),
+  birds_au            = first(birds_au),                   # poultry animal-units; zone-fixed
+  temperature         = mean(temperature,         na.rm = TRUE),
+  soil_moisture       = mean(soil_moisture,       na.rm = TRUE),
+  snow_cover          = mean(snow_cover,          na.rm = TRUE),
+  wind_speed          = mean(wind_speed,          na.rm = TRUE),
+  anseriformes        = {                                     # Monday-anchored (weekly anchor, no smearing)
+    m_vals <- .SD[dow == 1, anseriformes]
+    if (length(m_vals) > 0 && !is.na(m_vals[1])) m_vals[1] else first(.SD$anseriformes)
+  },
+  precipitation       = sum(precipitation,        na.rm = TRUE),
+  runoff              = sum(runoff,               na.rm = TRUE)
+), by = .(zone_id, week_id)]
+
+setkey(weekly, zone_id, week_start)
+
+# log1p + z-scale (match daily / weekly clogit transformations)
+weekly[, runoff        := log1p(runoff)]
+weekly[, precipitation := log1p(precipitation)]
+weekly[, snow_cover    := snow_cover / 100]                       # already 0-1 fraction, no log1p needed
+weekly[, anseriformes  := log1p(anseriformes)]
+weekly[, birds_au_z    := as.numeric(scale(log1p(birds_au)))]     # log1p + z (right-skewed: a few large CAFOs dominate)
+for (v in c("runoff", "soil_moisture", "temperature",
+            "precipitation", "wind_speed", "snow_cover", "anseriformes")) {
+  weekly[[v]] <- as.numeric(scale(weekly[[v]]))
+}
+
+# Restrict to case window
+weekly <- weekly[year == 2022]
+
+cat("Weekly panel — zone-weeks (2022): ", nrow(weekly),
+    " | case-weeks: ", sum(weekly$outbreak_binary == 1),
+    " | case zones: ", uniqueN(weekly[outbreak_binary == 1]$zone_id),
+    "\n", sep = "")
+```
+
+# 2. Build (zone, tstart, tstop, event) intervals for Andersen–Gill
+
+```{r ag-intervals}
+setorder(weekly, zone_id, week_start)
+weekly[, `:=`(
+  tstart = seq_len(.N) - 1L,
+  tstop  = seq_len(.N),
+  event  = as.integer(outbreak_binary),
+  stratum_month = month
+), by = zone_id]
+
+case_zones <- weekly[event == 1, unique(zone_id)]
+ag_panel   <- weekly[zone_id %in% case_zones]
+cat("AG panel — rows: ", nrow(ag_panel),
+    " | zones: ", uniqueN(ag_panel$zone_id),
+    " | events: ", sum(ag_panel$event == 1),
+    "\n", sep = "")
+```
+
+# 3. Build weekly crossbases (lag 0–4 weeks, ns df=2)
+
+```{r weekly-crossbases}
+MAX_LAG_WK <- 4
+
+cb_runoff <- crossbasis(
+  ag_panel$runoff, lag = c(0, MAX_LAG_WK),
+  argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 2),
+  group  = ag_panel$zone_id
+)
+cb_soil_moisture <- crossbasis(
+  ag_panel$soil_moisture, lag = c(0, MAX_LAG_WK),
+  argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 2),
+  group  = ag_panel$zone_id
+)
+cb_temperature <- crossbasis(
+  ag_panel$temperature, lag = c(0, MAX_LAG_WK),
+  argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 2),
+  group  = ag_panel$zone_id
+)
+cb_precipitation <- crossbasis(
+  ag_panel$precipitation, lag = c(0, MAX_LAG_WK),
+  argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 2),
+  group  = ag_panel$zone_id
+)
+cb_wind_speed <- crossbasis(
+  ag_panel$wind_speed, lag = c(0, MAX_LAG_WK),
+  argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 2),
+  group  = ag_panel$zone_id
+)
+cb_snow_cover <- crossbasis(
+  ag_panel$snow_cover, lag = c(0, MAX_LAG_WK),
+  argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 2),
+  group  = ag_panel$zone_id
+)
+cb_anseriformes <- crossbasis(
+  ag_panel$anseriformes, lag = c(0, MAX_LAG_WK),
+  argvar = list(fun = "lin"), arglag = list(fun = "ns", df = 2),
+  group  = ag_panel$zone_id
+)
+```
+
+# 4. Fit Andersen–Gill recurrent-event Cox model
+
+```{r fit-ag}
+ag_model <- coxph(
+  Surv(tstart, tstop, event) ~
+    cb_runoff + cb_soil_moisture + cb_temperature +
+    cb_precipitation + cb_wind_speed + cb_snow_cover +
+    cb_anseriformes +
+    birds_au_z +                                    # poultry density (zone-fixed, estimable in Cox AG)
+    strata(stratum_month),
+  data    = ag_panel,
+  ties    = "efron",
+  cluster = zone_id
+)
+saveRDS(ag_model, paste0(models_folder, "weekly_cox_ag_model.RDS"))
+print(summary(ag_model))
+```
+
+# 5. Per-lag-week hazard ratios (+0.5 SD)
+
+```{r per-lag-hr}
+predictor_specs <- list(
+  "Runoff"        = "cb_runoff",
+  "Soil Moisture" = "cb_soil_moisture",
+  "Temperature"   = "cb_temperature",
+  "Precipitation" = "cb_precipitation",
+  "Wind Speed"    = "cb_wind_speed",
+  "Snow Cover"    = "cb_snow_cover",
+  "Anseriformes"  = "cb_anseriformes"
+)
+
+beta <- coef(ag_model); V <- vcov(ag_model)
+lag_basis <- do.call(dlnm::onebasis,
+                     c(list(x = 0:MAX_LAG_WK), attr(cb_runoff, "arglag")))
+
+per_lag <- rbindlist(lapply(names(predictor_specs), function(name) {
+  prefix <- predictor_specs[[name]]
+  cols   <- grep(paste0("^", prefix, "v"), names(beta))
+  b      <- beta[cols]; Vsub <- V[cols, cols]
+  rbindlist(lapply(0:MAX_LAG_WK, function(k) {
+    contrast <- 0.5 * lag_basis[k + 1, ]
+    lo  <- as.numeric(contrast %*% b)
+    se  <- sqrt(as.numeric(t(contrast) %*% Vsub %*% contrast))
+    data.table(
+      Predictor = name,
+      Lag       = paste0("Lag ", k, " wk"),
+      HR_CI     = sprintf("%.2f (%.2f, %.2f)",
+                          exp(lo), exp(lo - 1.96 * se), exp(lo + 1.96 * se))
+    )
+  }))
+}))
+
+wide_perlag <- dcast(per_lag, Predictor ~ Lag, value.var = "HR_CI")
+print(wide_perlag)
+```
+
+# 6. Cumulative HR over the 0–4 week window
+
+```{r cumulative-hr}
+contrast_full <- 0.5 * colSums(lag_basis)
+
+cum_tbl <- rbindlist(lapply(names(predictor_specs), function(name) {
+  prefix <- predictor_specs[[name]]
+  cols   <- grep(paste0("^", prefix, "v"), names(beta))
+  b      <- beta[cols]; Vsub <- V[cols, cols]
+  lo     <- as.numeric(contrast_full %*% b)
+  se     <- sqrt(as.numeric(t(contrast_full) %*% Vsub %*% contrast_full))
+  data.table(
+    Predictor          = name,
+    `Cumulative HR (95% CI)` = sprintf("%.2f (%.2f, %.2f)",
+                              exp(lo), exp(lo - 1.96 * se), exp(lo + 1.96 * se))
+  )
+}))
+
+# Add the time-fixed feedlot covariate (birds_au_z) as a separate row.
+# In a Cox AG with month strata, zone-fixed covariates are estimable because
+# zones differ within each month-stratum.
+ba_idx <- which(names(beta) == "birds_au_z")
+if (length(ba_idx) == 1) {
+  b_ba <- beta[ba_idx]; se_ba <- sqrt(V[ba_idx, ba_idx])
+  cum_tbl <- rbind(cum_tbl, data.table(
+    Predictor          = "Poultry density (birds_au, log+z, per +1 SD)",
+    `Cumulative HR (95% CI)` = sprintf("%.2f (%.2f, %.2f)",
+                              exp(b_ba), exp(b_ba - 1.96*se_ba), exp(b_ba + 1.96*se_ba))
+  ))
+}
+print(cum_tbl)
+```
+
+# 7. Compare against weekly case-crossover primary
+
+```{r compare-to-clogit}
+# Load the 1:4 unidirectional results from c_20
+ab <- readRDS(paste0(objects_folder, "weekly_primary_ab.RDS"))
+res_A <- ab$res_A
+res_B <- ab$res_B
+
+setnames(res_A, "OR_CI", "Conditional logistic OR (95% CI)")
+setnames(res_B, "OR_CI", "time-stratified clogit OR (95% CI)")
+
+compare <- Reduce(function(a, b) merge(a, b, by = "Predictor"),
+                  list(cum_tbl,
+                       res_A[, .(Predictor, `Conditional logistic OR (95% CI)`)],
+                       res_B[, .(Predictor, `time-stratified clogit OR (95% CI)`)]))
+setnames(compare, "Cumulative HR (95% CI)", "Cox AG HR (95% CI)")
+print(compare)
+```
+
+# 8. Export tables
+
+```{r export}
+ft_perlag <- wide_perlag %>%
+  flextable() %>%
+  fontsize(size = 10, part = "all") %>%
+  autofit() %>%
+  align(align = "center", part = "all") %>%
+  theme_booktabs()
+
+doc1 <- read_docx() %>%
+  body_add_flextable(ft_perlag) %>%
+  body_add_par(
+    paste0("Per-lag-week hazard ratios from the Andersen-Gill recurrent-event Cox model at weekly resolution (lag 0-4 weeks, ns df=2), per +0.5 SD increase in each predictor. Baseline hazard stratified by calendar month; cluster-robust SEs clustered on zone. AG panel n = ",
+           nrow(ag_panel), " zone-weeks across ", uniqueN(ag_panel$zone_id), " case zones with ",
+           sum(ag_panel$event == 1), " events."),
+    style = "Normal"
+  )
+print(doc1, target = paste0(tables_main_folder, "Table_Weekly_Cox_AG_PerLag.docx"))
+
+ft_compare <- compare %>%
+  flextable() %>%
+  fontsize(size = 10, part = "all") %>%
+  autofit() %>%
+  align(align = "center", part = "all") %>%
+  theme_booktabs()
+
+doc2 <- read_docx() %>%
+  body_add_flextable(ft_compare) %>%
+  body_add_par(
+    "Cumulative weekly effect estimates (per +0.5 SD, lag 0-4 weeks) across three modeling approaches on the same weekly panel (CSLT excluded): Andersen-Gill recurrent-event Cox model (HR), 1:4 unidirectional case-crossover (Conditional logistic OR), and time-stratified case-crossover (time-stratified clogit OR).",
+    style = "Normal"
+  )
+print(doc2, target = paste0(tables_main_folder, "Table_Weekly_Cox_AG_vs_Clogit.docx"))
+```
+
+# 9. PH diagnostic
+
+```{r ph-test}
+zph_test <- tryCatch(cox.zph(ag_model, transform = "identity"),
+                     error = function(e) NULL)
+if (!is.null(zph_test)) {
+  print(zph_test)
+
+  png(paste0(figures_main_folder, "figure_weekly_cox_ag_ph_diagnostic.png"),
+      width = 12, height = 9, units = "in", res = 300)
+  par(mfrow = c(3, 4), mar = c(4, 4, 2.5, 1))
+  plot(zph_test)
+  dev.off()
+
+  ph_summary <- as.data.frame(zph_test$table) %>%
+    tibble::rownames_to_column("term") %>%
+    mutate(across(c(chisq, df, p), ~ signif(.x, 3)))
+
+  ft_ph <- ph_summary %>%
+    flextable() %>%
+    fontsize(size = 10, part = "all") %>%
+    autofit() %>%
+    align(align = "center", part = "all") %>%
+    theme_booktabs()
+
+  doc3 <- read_docx() %>%
+    body_add_flextable(ft_ph) %>%
+    body_add_par(
+      "Schoenfeld residual test for proportional hazards in the weekly Andersen-Gill Cox model. Low p-values indicate time-varying effects.",
+      style = "Normal"
+    )
+  print(doc3, target = paste0(tables_main_folder, "Table_Weekly_Cox_AG_PH.docx"))
+}
+```
+
+# 10. Save bundle
+
+```{r save}
+saveRDS(list(
+  ag_model    = ag_model,
+  per_lag     = per_lag,
+  wide_perlag = wide_perlag,
+  cum_tbl     = cum_tbl,
+  compare     = compare,
+  weekly      = weekly,
+  ag_panel    = ag_panel
+), paste0(objects_folder, "weekly_cox_ag.RDS"))
+```

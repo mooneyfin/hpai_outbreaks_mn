@@ -1,0 +1,114 @@
+---
+title: "Supporting Information tables"
+author: "Fintan Mooney"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r initiate}
+rm(list = ls())
+project.folder = paste0(print(here::here()), '/')
+source(paste0(project.folder, 'create_folder_structure.R'))
+source(paste0(functions.folder, 'script_initiate.R'))
+source(paste0(functions.folder, 'inla_dlnm_helpers.R'))
+```
+
+Assembles the SI tables from the objects `c_11` saves. Nothing is refitted here, so this is
+cheap to re-run after a spec change; it just fails loudly if `c_11` hasn't been run.
+
+Each comparison is stacked one block per panel (rows = exposure, columns = the four weekly
+windows) rather than laid out side by side. Side-by-side puts 12+ columns on a portrait page
+and the numbers stop being readable.
+
+```{r load}
+need <- c(S2 = "si_referent_design.RDS", S3 = "si_case_definition.RDS",
+          S4 = "si_weekly_model.RDS",     S5 = "si_specification.RDS",
+          S7 = "si_feedlot_runoff.RDS")
+paths <- paste0(objects_folder, need)
+miss  <- need[!file.exists(paths)]
+if (length(miss)) stop("run c_11 first, missing: ", paste(miss, collapse = ", "))
+si <- lapply(setNames(paths, names(need)), function(p) setDT(readRDS(p)))
+# older c_11 runs predate the flag; treat those as "everything identified"
+if (!"shape_unidentified" %in% names(si$S2)) si$S2[, shape_unidentified := FALSE]
+
+WIN <- names(INLA_LAG_WINDOWS)
+ORD <- c("Surface Runoff","Soil Moisture","Temperature","Precipitation",
+         "Wind Speed","Snow Cover","Anseriformes")
+
+# the panel name rides in the table's own spanning header rather than a caption above it, so
+# each block stays self-identifying with no surrounding text
+blk_ft <- function(d, span) {
+  d <- d[match(ORD, Predictor)][!is.na(Predictor)]
+  flextable(d) |>
+    add_header_row(values = c("", span), colwidths = c(1, ncol(d) - 1)) |>
+    autofit() |> theme_booktabs() |>
+    align(j = 2:ncol(d), align = "center", part = "all") |>
+    fontsize(size = 8, part = "all")
+}
+stacked <- function(d, by, doc, lab = identity) {
+  for (lev in unique(d[[by]])) {
+    doc <- doc |>
+      body_add_flextable(blk_ft(d[get(by) == lev, c("Predictor", ..WIN)], lab(lev))) |>
+      body_add_par("", style = "Normal")
+  }
+  doc
+}
+```
+
+# Table S2 — referent design
+
+```{r s2}
+print(dcast(si$S2, Predictor ~ design, value.var = "Lag 22-28 d"))
+```
+
+# Table S3 — case definition and spatial restriction
+
+```{r s3}
+print(unique(si$S3[, .(defn, n)]))
+```
+
+# Table S5 — model specification
+
+```{r s5}
+print(si$S5)
+```
+
+# Export
+
+```{r export}
+out <- function(doc, file) {
+  print(doc, target = file.path(tables_sensitivity_folder, file)); cat("wrote", file, "\n")
+}
+out(stacked(si$S2, "design", read_docx()), "TableS2_referent_design.docx")
+
+# carry n in the block header so the table doesn't need a line of prose under it
+n_by <- unique(si$S3[, .(defn, n)])
+out(stacked(si$S3, "defn", read_docx(),
+            lab = function(x) sprintf("%s (n = %d)", x, n_by$n[match(x, n_by$defn)])),
+    "TableS3_case_definition.docx")
+
+# S4: weekly-resolution model, same layout as Table 2
+out(read_docx() |> body_add_flextable(
+      flextable(si$S4) |> autofit() |> theme_booktabs() |>
+        align(j = 2:ncol(si$S4), align = "center", part = "all") |>
+        fontsize(size = 8, part = "all")),
+    "TableS4_weekly_model.docx")
+
+# S7: runoff stratified by feedlot density, one block per stratum
+n7 <- unique(si$S7[, .(Stratum, n)])
+out(stacked(si$S7, "Stratum", read_docx(),
+            lab = function(x) sprintf("%s (n = %d)", x, n7$n[match(x, n7$Stratum)])),
+    "TableS7_feedlot_runoff.docx")
+
+# merge the repeated Domain labels so S5 reads as grouped blocks
+out(read_docx() |> body_add_flextable(
+      flextable(si$S5) |> autofit() |> theme_booktabs() |>
+        merge_v(j = "Domain") |> valign(j = "Domain", valign = "top") |>
+        align(j = 2:ncol(si$S5), align = "center", part = "all") |>
+        fontsize(size = 8, part = "all")),
+    "TableS5_specification.docx")
+```

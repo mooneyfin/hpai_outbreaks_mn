@@ -1,0 +1,166 @@
+---
+title: "Table 1 — spillover cell characteristics (8-state grid)"
+author: "Fintan Mooney"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
+                      fig.align = "center", dev = "ragg_png", dpi = 150)
+```
+
+```{r initiate}
+rm(list = ls())
+project.folder = paste0(print(here::here()), '/')
+source(paste0(project.folder, 'create_folder_structure.R'))
+source(paste0(functions.folder, 'script_initiate.R'))
+source(paste0(functions.folder, 'inla_dlnm_helpers.R'))
+```
+
+Supersedes `d_00_table_1.Rmd`, which was built on the legacy MN fishnet (numeric `zone_id`,
+3,334 cells). Everything now sits on the **8-state grid** (character `zone_id` like `-4,227`,
+2,306 MN cells), so Table 1 describes the same cells the models actually fit.
+
+Two things worth flagging up front:
+
+* ERA5 ships `temperature` in **Kelvin**. Reporting it raw would print a mean of 279, so it
+  gets converted here. `temperature_C` also exists in the refreshed exports.
+* Only cells that had a spillover appear in Table 1. Non-spillover feedlot cells were in the
+  old version, but they never enter the case-crossover risk set, so describing them invited a
+  comparison the design does not make.
+
+# 1. Spillover cells and their premises
+
+```{r cells}
+panel <- setDT(readRDS(paste0(objects_folder, multistate_ts_daily_rds)))[state == "Minnesota"]
+scr   <- readRDS(paste0(objects_folder, multistate_independence_screening_rds))
+
+# same case definition as the models: drop cross-farm CSLT/NOSEQ events
+count_flagged <- function(s, ids) {
+  if (is.na(s)) return(0L)
+  as.integer(sum(as.numeric(trimws(unlist(strsplit(s, ",")))) %in% ids))
+}
+panel[, nf := vapply(outbreak_id, count_flagged, integer(1), ids = scr$cross_farm_ids)]
+panel[, outbreak_count := pmax(outbreak_count - nf, 0L)][, nf := NULL]
+panel[, outbreak_binary := as.integer(outbreak_count > 0)]
+
+case_cells <- unique(panel[outbreak_binary == 1]$zone_id)
+cells <- unique(panel[zone_id %in% case_cells,
+                      .(zone_id, feedlot_count, au_count, birds_au, cafo_flag, land_cover_label)])
+
+n_events <- sum(panel$outbreak_binary)
+cat(sprintf("%d spillover events across %d cells\n", n_events, length(case_cells)))
+
+num_row <- function(x, lab, dp = 0) data.table::data.table(
+  Characteristic = lab,
+  Value = sprintf(paste0("%.", dp, "f (%.", dp, "f–%.", dp, "f)"),
+                  median(x, na.rm = TRUE), quantile(x, .25, na.rm = TRUE),
+                  quantile(x, .75, na.rm = TRUE)))
+
+tab_premises <- rbindlist(list(
+  data.table(Characteristic = "Spillover events", Value = as.character(n_events)),
+  data.table(Characteristic = "Cells with ≥1 event", Value = as.character(length(case_cells))),
+  num_row(cells$feedlot_count, "Registered feedlots per cell"),
+  num_row(cells$au_count,      "Animal units per cell"),
+  num_row(cells$birds_au,      "Birds per cell"),
+  data.table(Characteristic = "Cells with a CAFO",
+             Value = sprintf("%d (%.0f%%)", sum(cells$cafo_flag, na.rm = TRUE),
+                             100 * mean(cells$cafo_flag, na.rm = TRUE)))
+))
+print(tab_premises)
+```
+
+# 2. Land cover
+
+```{r landcover}
+# NLCD was only ever extracted onto the legacy MN fishnet, so the 8-state panel carries no
+# land cover. The lookup carries it across by areal overlap between the two 10 km grids
+# (see the landcover transfer script); 2,283 of 2,306 cells get a label.
+lcm <- setDT(readRDS(paste0(objects_folder, "mn8_land_cover_lookup.RDS")))
+cells <- merge(cells[, -"land_cover_label"], lcm[, .(zone_id, land_cover_label)],
+               by = "zone_id", all.x = TRUE)
+lc <- cells[!is.na(land_cover_label), .N, by = land_cover_label][order(-N)]
+tab_lc <- if (nrow(lc)) {
+  lc[, Value := sprintf("%d (%.0f%%)", N, 100 * N / sum(N))]
+  lc[, .(Characteristic = land_cover_label, Value)]
+} else {
+  data.table::data.table(Characteristic = "Not available on the 8-state grid (NLCD pending)",
+                         Value = "—")
+}
+print(tab_lc)
+```
+
+# 3. Events by meteorological season
+
+```{r season-events}
+# meteorological seasons: Dec-Feb, Mar-May, Jun-Aug, Sep-Nov (a_02 defines `season` this way)
+ev <- panel[outbreak_binary == 1, .N, by = season][order(-N)]
+ev[, Value := sprintf("%d (%.0f%%)", N, 100 * N / sum(N))]
+tab_season <- ev[, .(Characteristic = as.character(season), Value)]
+print(tab_season)
+```
+
+# 4. Meteorology by season, 2022 vs the 25-year normal
+
+```{r met-season}
+anom <- setDT(readRDS(paste0(objects_folder, "climate_anomaly_panel.RDS")))
+anom <- anom[zone_id %in% case_cells]
+
+# Kelvin -> degC for anything that is a temperature
+MET <- c(temperature = "Temperature (°C)", runoff = "Surface runoff (mm)",
+         soil_moisture = "Soil moisture (m³/m³)", precipitation = "Precipitation (mm)",
+         wind_speed = "Wind speed (m/s)", snow_cover = "Snow cover (%)")
+to_C   <- function(v, x) if (v == "temperature") x - 273.15 else x
+to_mm  <- function(v, x) if (v %in% c("runoff", "precipitation")) x * 1000 else x
+
+seas <- if ("season" %in% names(anom)) anom$season else
+  cut(as.integer(strftime(anom$week_start, "%m")), c(0,2,5,8,11,12),
+      labels = c("Winter","Spring","Summer","Fall","Winter"))
+anom[, seas := seas]
+
+rows <- rbindlist(lapply(names(MET), function(v) {
+  mu <- paste0(v, "_mean_25yr"); zc <- paste0(v, "_z_25yr")
+  if (!all(c(v, mu, zc) %in% names(anom))) return(NULL)
+  anom[, .(Characteristic = MET[[v]],
+           Season   = as.character(seas),
+           Observed = to_mm(v, to_C(v, get(v))),
+           Normal   = to_mm(v, to_C(v, get(mu))),
+           Anomaly  = get(zc))][
+    , .(Value = { o <- mean(Observed, na.rm = TRUE); n <- mean(Normal, na.rm = TRUE)
+                   a <- mean(Anomaly, na.rm = TRUE)
+                   # snow in summer is 0 everywhere, so its climatological sd is 0 and the
+                   # z-score is undefined; report the levels and drop the anomaly
+                   if (is.finite(a)) sprintf("%.1f vs %.1f (%+.2f SD)", o, n, a)
+                   else              sprintf("%.1f vs %.1f (—)", o, n) }),
+      by = .(Characteristic, Season)]
+}))
+tab_met <- dcast(rows, Characteristic ~ Season, value.var = "Value")
+setcolorder(tab_met, c("Characteristic", intersect(c("Winter","Spring","Summer","Fall"), names(tab_met))))
+print(tab_met)
+```
+
+# 5. Assemble and export
+
+```{r export}
+sec <- function(t, lab) rbindlist(list(data.table(Characteristic = lab, Value = ""), t), fill = TRUE)
+tab1 <- rbindlist(list(sec(tab_premises, "Premises"), sec(tab_lc, "Land cover"),
+                       sec(tab_season, "Events by season")), fill = TRUE)
+
+ft <- flextable(tab1) |>
+  bold(i = which(tab1$Value == ""), j = 1) |>
+  autofit() |> theme_booktabs() |> align(j = 2, align = "right", part = "all")
+ft_met <- flextable(tab_met) |> autofit() |> theme_booktabs() |>
+  align(j = 2:ncol(tab_met), align = "center", part = "all")
+
+# also stash the pieces so the exhibit register can render them inline
+saveRDS(list(cells = tab1, meteorology = tab_met),
+        paste0(objects_folder, "table1_parts.RDS"))
+
+# bare tables, no caption or note; those go in the manuscript text
+read_docx() |> body_add_flextable(ft) |>
+  print(target = file.path(tables_main_folder, "Table1_spillover_cells.docx"))
+read_docx() |> body_add_flextable(ft_met) |>
+  print(target = file.path(tables_main_folder, "Table1_meteorology_by_season.docx"))
+cat("wrote Table1_spillover_cells.docx and Table1_meteorology_by_season.docx\n")
+```

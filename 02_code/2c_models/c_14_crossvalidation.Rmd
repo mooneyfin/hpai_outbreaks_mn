@@ -1,0 +1,121 @@
+---
+title: "Cross-validation by held-out stratum"
+author: "Fintan Mooney"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r initiate}
+rm(list = ls())
+project.folder = paste0(print(here::here()), '/')
+source(paste0(project.folder, 'create_folder_structure.R'))
+source(paste0(functions.folder, 'script_initiate.R'))
+stopifnot(requireNamespace("INLA", quietly = TRUE))
+library(INLA); library(Matrix)
+INLA::inla.setOption(num.threads = 1)
+source(paste0(functions.folder, 'inla_dlnm_helpers.R'))
+```
+
+INLA's CPO is leave-one-*observation*-out and is invalid here: every stratum carries its own
+free intercept, so removing one row changes its own stratum's fit and the approximation breaks.
+INLA agrees — it flags all 2,604 observations as CPO failures.
+
+The design does support cross-validation at the level it was built on: **hold out whole matched
+sets**. For a held-out stratum the natural question is the one the case-crossover actually asks —
+given the exposures on each day in this set, which day was the case? The conditional
+log-likelihood answers it, and the stratum intercept cancels out of that quantity, so nothing
+has to be estimated for the held-out set. Higher is better; a set of *m* days scores
+`log(1/m)` under chance.
+
+```{r cv-machinery}
+K_FOLDS <- 5
+SEED    <- 20260827
+
+PRIM <- setDT(readRDS(paste0(objects_folder, "case_crossover_df_sym_g14.RDS")))[
+  state == "Minnesota"]
+
+# Fix the temperature threshold on the full panel. Left to itself, assemble_cc_dlnm derives it
+# per-panel, so a training subset would get a different basis from its own test set.
+TEMP_AV <- list(temperature = list(fun = "thr", side = "h",
+                                   thr.value = temp_threshold_z(PRIM)))
+
+# Linear predictor from the crossbasis and weekly terms only. The stratum intercept is
+# deliberately excluded: it cancels in the conditional likelihood.
+eta_fixed <- function(fit, obj) {
+  cbn <- unlist(obj$cb_cols)
+  eta <- rep(0, nrow(obj$data))
+  if (length(cbn)) {
+    b <- fit$summary.fixed[match(cbn, rownames(fit$summary.fixed)), "mean"]
+    eta <- eta + as.matrix(obj$data[, cbn, drop = FALSE]) %*% b
+  }
+  for (v in obj$weekly_vars) {
+    w <- obj$weekly[[v]]
+    bb <- utils::tail(fit$summary.random[[w$idx]], length(w$knots))$mean
+    eta <- eta + w$Z %*% bb
+  }
+  as.numeric(eta)
+}
+
+# conditional log-likelihood of the observed case day within each held-out stratum
+cond_ll <- function(eta, y, stratum) {
+  d <- data.table(eta, y, stratum)
+  d[, .(ll = eta[y == 1][1] - (max(eta) + log(sum(exp(eta - max(eta)))))), by = stratum]$ll
+}
+
+cv_score <- function(label, panel = PRIM, ...) {
+  set.seed(SEED)
+  st   <- unique(panel$stratum_id)
+  fold <- setNames(sample(rep_len(1:K_FOLDS, length(st))), st)
+  ll <- unlist(lapply(1:K_FOLDS, function(k) {
+    tr <- panel[stratum_id %in% names(fold)[fold != k]]
+    te <- panel[stratum_id %in% names(fold)[fold == k]]
+    o_tr <- do.call(assemble_cc_dlnm, c(list(tr), list(argvar_by_var = TEMP_AV), list(...)))
+    o_te <- do.call(assemble_cc_dlnm, c(list(te), list(argvar_by_var = TEMP_AV), list(...)))
+    f_tr <- fit_cc_inla_dlnm(o_tr)
+    cond_ll(eta_fixed(f_tr, o_te), o_te$data$outbreak_binary, te$stratum_id)
+  }))
+  # keep the per-stratum values: mean differences between specifications are paired, and
+  # without the pairing there is no way to tell a real gap from fold noise
+  data.table(Specification = label, stratum = seq_along(ll), ll = ll)
+}
+```
+
+```{r cv-run}
+SKEW  <- c("runoff", "precipitation")
+NOLOG <- setDT(readRDS(paste0(objects_folder, "case_crossover_df_sym_g14_nolog.RDS")))[
+  state == "Minnesota"]
+
+cv_raw <- rbindlist(list(
+  cv_score("Primary"),
+  cv_score("No bird term",        weekly_vars = character(0)),
+  cv_score("+ predators",         weekly_vars = c("anseriformes", "predators")),
+  cv_score("Lag window 14 d",     max_lag = 14, bird_knots = c(0, 7, 14)),
+  cv_score("Lag window 56 d",     max_lag = 56, bird_knots = seq(0, 56, 7)),
+  cv_score("No log, scale only",  panel = NOLOG)
+))
+cv <- cv_raw[, .(n_strata = .N,
+                 `Mean conditional log-likelihood` = round(mean(ll), 4),
+                 Total = round(sum(ll), 1)), by = Specification]
+# chance level: a stratum of m days scores log(1/m)
+chance <- log(1 / (nrow(PRIM) / uniqueN(PRIM$stratum_id)))
+cv[, `vs chance` := round(`Mean conditional log-likelihood` - chance, 4)]
+print(cv)
+cat(sprintf("\nchance level for a %.0f-day matched set: %.4f\n",
+            nrow(PRIM) / uniqueN(PRIM$stratum_id), chance))
+# paired comparison against the primary: same held-out strata, so difference them per stratum
+W <- dcast(cv_raw, stratum ~ Specification, value.var = "ll")
+ref <- "Primary"
+pair <- rbindlist(lapply(setdiff(names(W), c("stratum", ref)), function(nm) {
+  d <- W[[nm]] - W[[ref]]
+  data.table(Specification = nm, `Mean difference vs primary` = round(mean(d), 4),
+             SE = round(sd(d) / sqrt(length(d)), 4),
+             `z` = round(mean(d) / (sd(d) / sqrt(length(d))), 2))
+}))
+print(pair)
+saveRDS(cv, paste0(objects_folder, "si_crossvalidation.RDS"))
+saveRDS(pair, paste0(objects_folder, "si_crossvalidation_paired.RDS"))
+```

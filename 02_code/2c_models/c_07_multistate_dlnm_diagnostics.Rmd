@@ -1,0 +1,111 @@
+---
+title: "Multi-state DLNM specification diagnostics (independent events)"
+author: "Fintan Mooney"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r initiate}
+rm(list = ls())
+# 0a. Declare root directory, folder location and load essential stuff
+project.folder = paste0(print(here::here()), '/')
+source(paste0(project.folder, 'create_folder_structure.R'))
+source(paste0(functions.folder, 'script_initiate.R'))
+conflict_prefer("year",  "lubridate", quiet = TRUE)
+conflict_prefer("month", "lubridate", quiet = TRUE)
+```
+
+Diagnostics to decide the DLNM lag-basis specification for the gridded multi-state
+case-crossover models (`c_05` daily, `c_06` weekly), independent events only. Three checks:
+
+1. **Events-per-parameter (EPV)** across candidate lag df — is the daily model over-parameterised?
+2. **Collinearity** among the 7 exposures (correlation matrix + VIF) — what is driving the wide daily CIs?
+3. **AIC** of the daily/weekly joint models across lag df — does the extra flexibility earn its parameters?
+
+```{r load}
+daily  <- setDT(readRDS(paste0(objects_folder, "case_crossover_df_multistate_daily.RDS")))
+weekly <- setDT(readRDS(paste0(objects_folder, "case_crossover_df_multistate_weekly.RDS")))
+
+predictors <- c("runoff", "soil_moisture", "temperature", "precipitation",
+                "wind_speed", "snow_cover", "anseriformes")
+pred_labels <- c(runoff = "Runoff", soil_moisture = "Soil Moisture",
+                 temperature = "Temperature", precipitation = "Precipitation",
+                 wind_speed = "Wind Speed", snow_cover = "Snow Cover",
+                 anseriformes = "Anseriformes")
+```
+
+# 1. Fit one spec, return params / EPV / AIC
+
+```{r fit-spec}
+# Build the joint clogit DLNM at a given met-lag df and report fit metrics. In the daily
+# model the bird term keeps its weekly-strata basis (4 params) regardless of met df; in the
+# weekly model every term shares ns(df=k).
+fit_spec <- function(df, res, met_df) {
+  max_lag <- if (res == "daily") 28 else 4
+  cbs <- setNames(lapply(predictors, function(v) {
+    X  <- as.matrix(df[, paste0(v, "_Lag", 0:max_lag), with = FALSE])
+    al <- if (res == "daily" && v == "anseriformes") list(fun = "strata", breaks = c(7, 14, 21))
+          else list(fun = "ns", df = met_df)
+    crossbasis(X, lag = c(0, max_lag), argvar = list(fun = "lin"), arglag = al)
+  }), paste0("cb_", predictors))
+  list2env(cbs, environment())
+  m <- clogit(as.formula(paste("outbreak_binary ~", paste(names(cbs), collapse = " + "),
+                               "+ strata(stratum_id)")), method = "efron", data = df)
+  n_cases <- sum(df$outbreak_binary == 1); k <- length(coef(m))
+  data.table(resolution = res, met_lag_df = met_df, n_params = k, n_cases = n_cases,
+             EPV = round(n_cases / k, 1), AIC = round(AIC(m), 1))
+}
+```
+
+# 2. EPV + AIC across candidate lag df
+
+```{r epv-aic}
+daily_specs  <- rbindlist(lapply(c(2, 3, 4), function(k) fit_spec(daily,  "daily",  k)))
+weekly_specs <- rbindlist(lapply(c(1, 2, 3), function(k) fit_spec(weekly, "weekly", k)))
+
+cat("DAILY (current primary = met ns df=3; bird strata adds 4 params):\n")
+print(daily_specs)
+cat("\nWEEKLY (current primary = ns df=2):\n")
+print(weekly_specs)
+cat("\nGuide: EPV >= 10 conventional; dAIC < 2 = no meaningful gain from the extra df.\n")
+```
+
+# 3. Collinearity among the 7 exposures (contemporaneous, lag 0)
+
+```{r collinearity}
+# Correlation matrix and variance-inflation factors from the lag-0 (contemporaneous)
+# z-scaled exposures. VIF_j = j-th diagonal of the inverse correlation matrix (standardised
+# predictors). Exposures are highly autocorrelated across lags, so lag 0 is a fair proxy
+# for the cross-exposure collinearity entering the joint model.
+lag0  <- paste0(predictors, "_Lag0")
+X0    <- as.matrix(daily[, ..lag0]); colnames(X0) <- predictors
+R     <- cor(X0, use = "complete.obs")
+VIF   <- diag(solve(R))
+
+cat("Correlation matrix (lag 0):\n")
+print(round(R, 2))
+
+vif_tbl <- data.table(Predictor = pred_labels[predictors], VIF = round(VIF, 2))[order(-VIF)]
+cat("\nVariance inflation factors (lag 0):\n")
+print(vif_tbl)
+cat("\nGuide: VIF > 5 = notable collinearity; VIF > 10 = severe.\n")
+```
+
+# 4. Read-out
+
+```{r summary}
+best_daily  <- daily_specs[which.min(AIC)]
+hi_vif      <- vif_tbl[VIF > 5]
+cat(sprintf("Daily: current df=3 gives EPV %.1f (params %d). df=2 gives EPV %.1f.\n",
+            daily_specs[met_lag_df == 3, EPV], daily_specs[met_lag_df == 3, n_params],
+            daily_specs[met_lag_df == 2, EPV]))
+cat(sprintf("Lowest-AIC daily spec: met df=%d (AIC %.1f). dAIC(df2 - df3) = %.1f.\n",
+            best_daily$met_lag_df, best_daily$AIC,
+            daily_specs[met_lag_df == 2, AIC] - daily_specs[met_lag_df == 3, AIC]))
+cat(sprintf("Exposures with VIF > 5: %s\n",
+            if (nrow(hi_vif)) paste(hi_vif$Predictor, collapse = ", ") else "none"))
+```

@@ -1,78 +1,48 @@
 ---
-title: "Create Time-Stratified Case-Crossover Dataframe (Daily)"
+title: "Time-stratified case-crossover dataframe (daily)"
 author: "Fintan Mooney"
-date: "2026-05-12"
+date: "`r Sys.Date()`"
 output: html_document
 ---
 
-# NOTE: This script can be re-run from the publicly-available daily timeseries
-# (fishnet_timeseries_daily.RDS) — it does not require the confidential raw
-# spillover file directly.
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
 
-# Builds the DAILY time-stratified case-crossover dataset for the HPAI
-# outbreak analysis (May 2026 GeoHealth revision).
-#
-# Design (Lu et al. 2020, PLoS Medicine, doi:10.1371/journal.pmed.1003176;
-# Gasparrini 2022, BMC Med Res Methodol 22:129):
-#   - Stratum = zone_id × ISO year × calendar month × day-of-week
-#   - Cases are zone-days with at least one independent HPAI detection
-#     (after 500m × 28-day spatial-temporal independence screen)
-#   - Controls are all other days in the same stratum that are NOT case-days
-#   - Each case typically has 3–4 controls (other matching weekdays in the same month)
-#
-# Lagged exposures (lag 0–28 days) for DLNM crossbasis terms are constructed
-# from the underlying daily zone timeseries.
-
-```{r 0a-initiate, include=FALSE}
-# 0a. Declare root directory, folder locations, and load packages + helpers
+```{r initiate}
 rm(list = ls())
+# 0a.Declare root directory, folder location and load essential stuff
 project.folder = paste0(print(here::here()), '/')
 source(paste0(project.folder, 'create_folder_structure.R'))
 source(paste0(functions.folder, 'script_initiate.R'))
 ```
 
-## 1. Load daily timeseries (modeling version — non-independent later events removed)
+# 1. Load daily timeseries (modeling version)
 
-```{r 1a-load}
-
-daily <- readRDS(file.path(objects_folder, "fishnet_timeseries_daily_modeling.RDS"))
+```{r load}
+daily     <- readRDS(paste0(objects_folder, "fishnet_timeseries_daily_modeling.RDS"))
 setDT(daily)
 setkey(daily, zone_id, date)
 
-# Independence-screening details (for sensitivity variants at 1km / 200m)
-screening <- readRDS(file.path(objects_folder, "independence_screening_daily.RDS"))
+screening <- readRDS(paste0(objects_folder, "independence_screening_daily.RDS"))
 
 case_window_start <- as.Date("2022-01-01")
 case_window_end   <- as.Date("2022-12-31")
-
 ```
 
-## 2. CONSORT: starting counts before stratification
+# 2. Starting counts
 
-```{r 2a-consort-starting}
-
-# Restrict to the 2022 case window for stratum construction; leading 2021 days
-# stay in the panel only as lag exposure history.
+```{r start-counts}
 case_year <- daily[date >= case_window_start & date <= case_window_end]
 
-starting_events       <- sum(case_year$outbreak_count, na.rm = TRUE)
-starting_case_zonedays<- sum(case_year$outbreak_binary, na.rm = TRUE)
-starting_case_zones   <- uniqueN(case_year[outbreak_binary == 1]$zone_id)
-
-cat("Starting (after independence screening):\n")
-cat("  Independent events     :", starting_events, "\n")
-cat("  Case zone-days         :", starting_case_zonedays, "\n")
-cat("  Unique case zones      :", starting_case_zones, "\n")
-
+starting_events        <- sum(case_year$outbreak_count, na.rm = TRUE)
+starting_case_zonedays <- sum(case_year$outbreak_binary, na.rm = TRUE)
+starting_case_zones    <- uniqueN(case_year[outbreak_binary == 1]$zone_id)
 ```
 
-## 3. Time-stratified case-crossover construction
+# 3. Construct strata (zone × year × calendar month × day-of-week)
 
-```{r 3a-construct}
-
-# Stratum key on every zone-day — calendar year × calendar month × DOW × zone
-# (Lu et al. style; ensures controls are non-case days in the same zone,
-#  the same calendar month, and share the case's weekday.)
+```{r construct}
 case_year[, `:=`(
   cal_year  = lubridate::year(date),
   cal_month = lubridate::month(date),
@@ -80,76 +50,47 @@ case_year[, `:=`(
 )]
 case_year[, stratum_id := sprintf("%d-%02d-%d-z%d", cal_year, cal_month, dow, zone_id)]
 
-# Identify case days
-case_days <- case_year[outbreak_binary == 1, .(zone_id, case_date = date, stratum_id)]
-
-# Restrict to strata that contain at least one case day
+case_days     <- case_year[outbreak_binary == 1, .(zone_id, case_date = date, stratum_id)]
 active_strata <- unique(case_days$stratum_id)
-cc_pool <- case_year[stratum_id %in% active_strata]
+cc_pool       <- case_year[stratum_id %in% active_strata]
 
-# Within each active stratum, mark case vs control
 cc_pool[, case_control := fifelse(outbreak_binary == 1, "case", "control")]
 cc_pool[, outbreak_binary := as.integer(outbreak_binary == 1)]
 
-# Drop strata that have no controls (single-day month-DOW slot) — these
-# contribute no information to the conditional likelihood.
-controls_per_stratum <- cc_pool[case_control == "control", .N, by = stratum_id]
-strata_with_controls <- controls_per_stratum[N >= 1]$stratum_id
+controls_per_stratum   <- cc_pool[case_control == "control", .N, by = stratum_id]
+strata_with_controls   <- controls_per_stratum[N >= 1]$stratum_id
 strata_dropped_no_ctrl <- length(active_strata) - length(strata_with_controls)
-cc_pool <- cc_pool[stratum_id %in% strata_with_controls]
-
-cat("\nStratum construction:\n")
-cat("  Active strata (≥1 case)        :", length(active_strata), "\n")
-cat("  Strata dropped (no controls)   :", strata_dropped_no_ctrl, "\n")
-cat("  Strata kept                    :", length(strata_with_controls), "\n")
-cat("  Cases  (final)                 :", sum(cc_pool$outbreak_binary == 1), "\n")
-cat("  Controls (final)               :", sum(cc_pool$outbreak_binary == 0), "\n")
-
-cat("\nControls per case-stratum:\n")
-print(cc_pool[case_control == "control", .N, by = stratum_id][, .N, by = N][order(N)])
-
+cc_pool                <- cc_pool[stratum_id %in% strata_with_controls]
 ```
 
-## 4. Build lag 0–28 exposure history for each row (DLNM-ready)
+# 4. Build lag 0–28 d exposure history
 
-```{r 4a-build-lags}
-
-# Variables to lag — meteorological + bird
+```{r lags}
 lag_vars <- c(
   "temperature", "dewpoint", "relative_humidity", "wind_speed",
-  "soil_moisture", "snow_density", "precipitation", "runoff",
+  "skin_temperature", "soil_temperature",
+  "soil_moisture", "soil_moisture_2",
+  "snow_depth", "snow_cover", "snow_density",
+  "precipitation", "snowfall", "runoff",
   "evapotranspiration", "leaf_area_index", "shortwave_radiation",
   "longwave_radiation", "surface_pressure",
   "total_bird_abundance", "anseriformes", "predators"
 )
 
-# Convert precipitation and runoff from m → mm (cosmetic; affects coefficient
-# units only). NB: this mutates `daily` AND `cc_pool` in place via data.table
-# reference semantics. Re-running this chunk without first re-loading `daily`
-# would multiply by 1000 a second time. The stopifnot() guard below catches that.
-#
-# ERA5-Land daily precipitation in meters caps at ~0.2 m even on extreme days
-# (200 mm/day); runoff is similarly bounded. If max > 1 we're already in mm.
+# 4a.Convert runoff and precipitation from m to mm. stopifnot() guards against
+#    re-running this chunk on an already-converted panel.
 stopifnot(
-  "runoff already in mm — re-load `daily` (and re-build `cc_pool`) before re-running this chunk" =
+  "runoff already in mm — reload `daily` before re-running" =
     max(daily$runoff,        na.rm = TRUE) < 1,
-  "precipitation already in mm — re-load `daily` (and re-build `cc_pool`) before re-running this chunk" =
+  "precipitation already in mm — reload `daily` before re-running" =
     max(daily$precipitation, na.rm = TRUE) < 1
 )
-
 cc_pool[, runoff        := runoff        * 1000]
 cc_pool[, precipitation := precipitation * 1000]
 daily[,   runoff        := runoff        * 1000]
 daily[,   precipitation := precipitation * 1000]
 
-# For each variable and lag k, attach the value from (zone_id, date − k days).
-# We pull from `daily` (the full 2021-Nov–2022-Dec panel) so early-year cases
-# don't run off the start of 2022.
-#
-# Implementation: shift each variable in-zone using data.table::shift() across
-# the densely-keyed source panel, then merge ALL lag columns in a single join.
-# This replaces 16 × 29 = 464 per-(var, lag) merges with one merge — identical
-# result because `daily` is a complete zone × date crossing with no gaps.
+# 4b.Single-pass lag matrix builder
 build_lag_matrix <- function(target_df, source_df, vars, max_lag = 28) {
   src <- copy(source_df)
   setkey(src, zone_id, date)
@@ -160,44 +101,23 @@ build_lag_matrix <- function(target_df, source_df, vars, max_lag = 28) {
         by = zone_id, .SDcols = v]
     lag_cols <- c(lag_cols, new_names)
   }
-  out <- merge(
+  merge(
     target_df[, .(zone_id, date, stratum_id, outbreak_binary, case_control)],
     src[, c("zone_id", "date", ..lag_cols)],
     by = c("zone_id", "date"), all.x = TRUE
   )
-  out
 }
 
-cat("Building lag 0–28 exposure matrix…\n")
 lag_mat <- build_lag_matrix(cc_pool, daily, lag_vars, max_lag = 28)
 
-# Re-attach all the non-lag columns (covariates, indicators)
-non_lag_cols <- setdiff(names(cc_pool), names(lag_mat))
+non_lag_cols      <- setdiff(names(cc_pool), names(lag_mat))
 case_crossover_df <- merge(lag_mat, cc_pool[, c("zone_id", "date", ..non_lag_cols)],
                            by = c("zone_id", "date"))
-
-cat("Case-crossover df: ", nrow(case_crossover_df), "rows × ", ncol(case_crossover_df), "cols\n")
-
-# Check for any missing lag values (would indicate the 2021 leading window is insufficient)
-lag0_cols <- grep("_Lag0$", names(case_crossover_df), value = TRUE)
-na_summary <- case_crossover_df[, lapply(.SD, function(x) sum(is.na(x))), .SDcols = lag0_cols]
-n_missing_lag0 <- sum(unlist(na_summary))
-cat("Missing Lag0 values across vars:", n_missing_lag0, "\n")
-
-deepest_lag_cols <- grep("_Lag28$", names(case_crossover_df), value = TRUE)
-deep_na <- case_crossover_df[, lapply(.SD, function(x) sum(is.na(x))), .SDcols = deepest_lag_cols]
-n_missing_lag28 <- sum(unlist(deep_na))
-cat("Missing Lag28 values across vars:", n_missing_lag28, "\n")
-if (n_missing_lag28 > 0) {
-  warning("Some Lag28 exposures are NA — extend the GEE daily extraction back further than Nov 15 2021.")
-}
-
 ```
 
-## 5. Transform skewed variables (log1p) and z-scale
+# 5. Transform and z-scale
 
-```{r 5a-transform}
-
+```{r transform}
 skewed_vars <- c("total_bird_abundance", "runoff", "precipitation",
                  "anseriformes", "predators")
 for (v in skewed_vars) {
@@ -208,9 +128,6 @@ for (v in skewed_vars) {
     }
   }
 }
-
-# Scale each lag column (z-scale across the full case-crossover pool so the
-# 0.5-SD OR interpretation in the manuscript remains valid).
 for (v in lag_vars) {
   for (k in 0:28) {
     col <- paste0(v, "_Lag", k)
@@ -219,49 +136,35 @@ for (v in lag_vars) {
     }
   }
 }
-
 ```
 
-## 6. CONSORT sample-size cascade (final numbers)
+# 6. CONSORT cascade (final counts)
 
-```{r 6a-consort-export}
-
+```{r cascade}
 cascade <- list(
-  date_revised             = Sys.Date(),
-  design                   = "Time-stratified case-crossover (zone × year × month × DOW), DLNM lag 0–28 d",
-  # NB: `daily` here is the modeling panel (post-independence screening), so
-  # `outbreak_count` is the independent event count. The raw event total lives
-  # in spillover_summary$total (b_create_timeseries_df.Rmd).
-  events_independent       = starting_events,
-  case_zonedays_input      = starting_case_zonedays,
-  case_zones_input         = starting_case_zones,
-  strata_active            = length(active_strata),
-  strata_dropped_no_ctrl   = strata_dropped_no_ctrl,
-  strata_final             = length(strata_with_controls),
-  cases_final              = sum(case_crossover_df$outbreak_binary == 1),
-  controls_final           = sum(case_crossover_df$outbreak_binary == 0)
+  design                 = "Time-stratified case-crossover (zone × year × month × DOW), DLNM lag 0–28 d",
+  events_independent     = starting_events,
+  case_zonedays_input    = starting_case_zonedays,
+  case_zones_input       = starting_case_zones,
+  strata_active          = length(active_strata),
+  strata_dropped_no_ctrl = strata_dropped_no_ctrl,
+  strata_final           = length(strata_with_controls),
+  cases_final            = sum(case_crossover_df$outbreak_binary == 1),
+  controls_final         = sum(case_crossover_df$outbreak_binary == 0)
 )
-saveRDS(cascade, file.path(objects_folder, "case_crossover_cascade.RDS"))
-
-cat("\n--- CONSORT cascade ---\n")
-print(cascade)
-
+saveRDS(cascade, paste0(objects_folder, "case_crossover_cascade.RDS"))
 ```
 
-## 7. Export primary case-crossover dataframe (500 m / 28 d screen applied upstream)
+# 7. Export primary case-crossover dataframe
 
-```{r 7a-export-primary}
-
-saveRDS(case_crossover_df, file.path(objects_folder, "case_crossover_df.RDS"))
-fwrite(case_crossover_df,
-       file.path(processed_data, "case_crossover_df_daily_ind_500m.csv"))
-
+```{r export-primary}
+saveRDS(case_crossover_df, paste0(objects_folder, "case_crossover_df.RDS"))
+fwrite(case_crossover_df,  paste0(processed_data, "case_crossover_df_daily_ind_500m.csv"))
 ```
 
-## 8. Sensitivity variants: 1 km and 200 m spatial-independence thresholds
+# 8. Sensitivity: 1 km and 200 m thresholds
 
-```{r 8a-sensitivity-variants}
-
+```{r sens-spatial}
 count_flagged_ids <- function(id_str, flagged_ids) {
   if (is.na(id_str)) return(0L)
   ids <- as.numeric(trimws(unlist(strsplit(id_str, ","))))
@@ -269,7 +172,6 @@ count_flagged_ids <- function(id_str, flagged_ids) {
 }
 
 build_sensitivity <- function(threshold_label, flag_ids) {
-  # Re-derive the modeling outbreak counts using a different flag set
   flagged_zone_days <- daily[
     outbreak_binary == 1 & date >= case_window_start & date <= case_window_end
   ][, n_flagged := vapply(outbreak_id, count_flagged_ids, integer(1),
@@ -283,7 +185,6 @@ build_sensitivity <- function(threshold_label, flag_ids) {
   variant[, outbreak_binary := as.integer(outbreak_count > 0)]
   variant[, n_flagged := NULL]
 
-  # Stratum construction
   v_window <- variant[date >= case_window_start & date <= case_window_end]
   v_window[, cal_year  := lubridate::year(date)]
   v_window[, cal_month := lubridate::month(date)]
@@ -294,14 +195,14 @@ build_sensitivity <- function(threshold_label, flag_ids) {
   v_pool <- v_window[stratum_id %in% active]
   v_pool[, case_control := fifelse(outbreak_binary == 1, "case", "control")]
 
-  ctrl_per <- v_pool[case_control == "control", .N, by = stratum_id]
+  ctrl_per    <- v_pool[case_control == "control", .N, by = stratum_id]
   keep_strata <- ctrl_per[N >= 1]$stratum_id
-  v_pool <- v_pool[stratum_id %in% keep_strata]
+  v_pool      <- v_pool[stratum_id %in% keep_strata]
 
-  lag_v <- build_lag_matrix(v_pool, variant, lag_vars, max_lag = 28)
+  lag_v   <- build_lag_matrix(v_pool, variant, lag_vars, max_lag = 28)
   non_lag <- setdiff(names(v_pool), names(lag_v))
-  out_df <- merge(lag_v, v_pool[, c("zone_id", "date", ..non_lag)],
-                  by = c("zone_id", "date"))
+  out_df  <- merge(lag_v, v_pool[, c("zone_id", "date", ..non_lag)],
+                   by = c("zone_id", "date"))
 
   for (v in skewed_vars) for (k in 0:28) {
     col <- paste0(v, "_Lag", k)
@@ -311,47 +212,226 @@ build_sensitivity <- function(threshold_label, flag_ids) {
     col <- paste0(v, "_Lag", k)
     if (col %in% names(out_df)) out_df[[col]] <- as.numeric(scale(out_df[[col]]))
   }
-
-  cat(sprintf("\n[%s] cases: %d  controls: %d  strata: %d\n",
-              threshold_label,
-              sum(out_df$outbreak_binary == 1),
-              sum(out_df$outbreak_binary == 0),
-              length(keep_strata)))
   out_df
 }
 
-cc_1km  <- build_sensitivity("1 km", screening$ids_1km)
+cc_1km  <- build_sensitivity("1 km",  screening$ids_1km)
 cc_200m <- build_sensitivity("200 m", screening$ids_200m)
 
-saveRDS(cc_1km,  file.path(objects_folder, "case_crossover_df_1km.RDS"))
-saveRDS(cc_200m, file.path(objects_folder, "case_crossover_df_200m.RDS"))
-fwrite(cc_1km,  file.path(processed_data, "case_crossover_df_daily_ind_1km.csv"))
-fwrite(cc_200m, file.path(processed_data, "case_crossover_df_daily_ind_200m.csv"))
-
+saveRDS(cc_1km,  paste0(objects_folder, "case_crossover_df_1km.RDS"))
+saveRDS(cc_200m, paste0(objects_folder, "case_crossover_df_200m.RDS"))
+fwrite(cc_1km,   paste0(processed_data, "case_crossover_df_daily_ind_1km.csv"))
+fwrite(cc_200m,  paste0(processed_data, "case_crossover_df_daily_ind_200m.csv"))
 ```
 
-## 9. Sensitivity variants: lag-window length (14, 42, 56 days)
+# 9. Sensitivity: lag-window length (14, 42, 56 d)
 
-```{r 9a-lag-sensitivity}
+```{r sens-lag}
+# Lag variants (used only by c_01_lag_sensitivity, which tests how the primary
+# model's lag-response changes with different max_lag windows). Only the
+# variables in the primary model formula need lag columns built at these wider
+# windows — including the full `lag_vars` (now 21 variables) blew memory past
+# the 24 Gb cap on macOS R when max_lag = 56 (21 vars × 57 lags × 1.37 M rows).
+primary_lag_vars <- c("runoff", "soil_moisture", "temperature",
+                      "precipitation", "wind_speed", "snow_depth",
+                      "anseriformes")
 
-# Same case-crossover stratum structure, but with different lag matrix depth.
-# Used by 02_code/2c_models/c_01_lag_sensitivity.Rmd.
-
-build_lag_variant <- function(max_lag) {
-  lv <- build_lag_matrix(cc_pool, daily, lag_vars, max_lag = max_lag)
+build_lag_variant <- function(max_lag, vars = primary_lag_vars) {
+  lv      <- build_lag_matrix(cc_pool, daily, vars, max_lag = max_lag)
   non_lag <- setdiff(names(cc_pool), names(lv))
-  out <- merge(lv, cc_pool[, c("zone_id", "date", ..non_lag)], by = c("zone_id", "date"))
+  out     <- merge(lv, cc_pool[, c("zone_id", "date", ..non_lag)], by = c("zone_id", "date"))
   for (v in skewed_vars) for (k in 0:max_lag) {
     col <- paste0(v, "_Lag", k); if (col %in% names(out)) out[[col]] <- log1p(out[[col]])
   }
-  for (v in lag_vars) for (k in 0:max_lag) {
+  for (v in vars) for (k in 0:max_lag) {
     col <- paste0(v, "_Lag", k); if (col %in% names(out)) out[[col]] <- as.numeric(scale(out[[col]]))
   }
   out
 }
 
-saveRDS(build_lag_variant(14), file.path(objects_folder, "case_crossover_df_14lag.RDS"))
-saveRDS(build_lag_variant(42), file.path(objects_folder, "case_crossover_df_42lag.RDS"))
-saveRDS(build_lag_variant(56), file.path(objects_folder, "case_crossover_df_56lag.RDS"))
+saveRDS(build_lag_variant(14), paste0(objects_folder, "case_crossover_df_14lag.RDS"))
+gc()                                                        # release the 14-lag intermediate
+saveRDS(build_lag_variant(42), paste0(objects_folder, "case_crossover_df_42lag.RDS"))
+gc()
+saveRDS(build_lag_variant(56), paste0(objects_folder, "case_crossover_df_56lag.RDS"))
+gc()
+```
 
+# 10. Unidirectional referent panels for the Bayesian DLNM (c_11)
+
+```{r uni-setup}
+# §3-7 build the time-stratified (bidirectional) design: controls are same-weekday days
+# from the case's calendar month, before and after. c_11 uses a UNIDIRECTIONAL primary
+# instead, controls sitting 7/14/21/28 d before the case, because once a farm has had an
+# outbreak we can't call the days after it virus-free.
+#
+# Primary case definition is CSLT-excluded with NO spatial restriction (n = 88). Note
+# fishnet_timeseries_daily_modeling.RDS also strips the 500 m non-independent events, so
+# we go back to the un-stripped panel here and keep the spatial thresholds as sensitivities.
+daily_uni <- setDT(readRDS(paste0(objects_folder, "fishnet_timeseries_daily.RDS")))
+
+# m -> mm, same guard as §4a
+stopifnot(
+  "runoff already in mm — reload before re-running"        = max(daily_uni$runoff, na.rm = TRUE) < 1,
+  "precipitation already in mm — reload before re-running" = max(daily_uni$precipitation, na.rm = TRUE) < 1
+)
+daily_uni[, `:=`(runoff = runoff * 1000, precipitation = precipitation * 1000)]
+
+OFFSETS_UNI <- c(0, 7, 14, 21, 28)   # case day plus the four weekly referents behind it
+```
+
+```{r uni-builder}
+# one builder covers every variant. offsets are in whatever unit tcol steps in, so the
+# same code does daily (7-day steps) and weekly (7-day steps on week_start).
+build_uni <- function(panel, max_lag = 28, offsets = OFFSETS_UNI, tcol = "date",
+                      vars = lag_vars) {
+  p <- copy(panel)
+  p[, tkey := as.Date(get(tcol))]
+  p[, is_outbreak_raw := as.integer(outbreak_binary == 1)]
+  p[, (tcol) := NULL]   # drop it or we end up with two date columns after the rename
+
+  cases <- p[outbreak_binary == 1 & tkey >= case_window_start & tkey <= case_window_end,
+             .(zone_id, ct = tkey)]
+  if (!nrow(cases)) stop("no cases in the window")
+  cases[, stratum_id := paste0("z", zone_id, "_", format(ct, "%Y%m%d"))]
+  cases[, cid := .I]
+
+  # lag history built on the case zones' full series, so every referent carries its own past
+  src <- p[zone_id %in% unique(cases$zone_id)]
+  setorder(src, zone_id, tkey)
+  for (v in vars) {
+    nm <- paste0(v, "_Lag", 0:max_lag)
+    src[, (nm) := shift(.SD[[1]], n = 0:max_lag, type = "lag"), by = zone_id, .SDcols = v]
+  }
+
+  # blow each case out into its matched set, then kick out referents that were themselves
+  # outbreaks and any stratum that lost its case or all of its controls
+  sets <- cases[, .(tkey = ct - offsets,
+                    is_case = c(1L, rep(0L, length(offsets) - 1L))),
+                by = .(cid, zone_id, stratum_id)]
+  m <- merge(sets, src, by = c("zone_id", "tkey"), all.x = FALSE)
+  m <- m[is_case == 1L | is_outbreak_raw == 0L]
+  keep <- m[, .(nc = sum(is_case == 1L), nk = sum(is_case == 0L)),
+            by = stratum_id][nc >= 1 & nk >= 1, stratum_id]
+  m <- m[stratum_id %in% keep]
+  m[, `:=`(outbreak_binary = is_case,
+           case_control    = fifelse(is_case == 1L, "case", "control"))]
+  setnames(m, "tkey", tcol)
+  m[]
+}
+
+# log1p the skewed ones, then z-scale every lag column so effects read per SD
+transform_lags <- function(dt, max_lag, vars = lag_vars) {
+  for (v in intersect(skewed_vars, vars)) for (k in 0:max_lag) {
+    col <- paste0(v, "_Lag", k); if (col %in% names(dt)) dt[[col]] <- log1p(dt[[col]])
+  }
+  for (v in vars) for (k in 0:max_lag) {
+    col <- paste0(v, "_Lag", k); if (col %in% names(dt)) dt[[col]] <- as.numeric(scale(dt[[col]]))
+  }
+  dt
+}
+
+report_panel <- function(d, lab) cat(sprintf("%-36s %3d cases / %4d controls / %3d strata\n",
+  lab, sum(d$outbreak_binary == 1), sum(d$outbreak_binary == 0), uniqueN(d$stratum_id)))
+```
+
+```{r uni-primary}
+# 10a. primary panel
+cc_uni <- transform_lags(build_uni(daily_uni), 28)
+saveRDS(cc_uni, paste0(objects_folder, "case_crossover_df_uni.RDS"))
+report_panel(cc_uni, "primary (CSLT-excl, no spatial)")
+```
+
+```{r uni-cslt}
+# 10b. CSLT-inclusive, for Table S3. a_02 drops CSLT before the panel is ever built, so
+# re-derive the outcome from the raw file with every link kept and paste it back onto the
+# same exposure panel. exposures are untouched, only which zone-days count as cases.
+hpai_all <- read_csv(paste0(spillover_data, spillover_data_file), show_col_types = FALSE) %>%
+  filter(state == "MN",
+         dplyr::between(as.Date(date_confirmed), case_window_start, case_window_end))
+
+fishnet_geom <- st_read(paste0(spatial_data, fishnet_gpkg), quiet = TRUE) %>%
+  distinct(zone_id, geom)
+
+cslt_cells <- hpai_all %>%
+  st_as_sf(coords = c("lon", "lat"), crs = 4326) %>%
+  st_transform(st_crs(fishnet_geom)) %>%
+  st_join(fishnet_geom, join = st_within) %>%
+  st_drop_geometry() %>%
+  filter(!is.na(zone_id)) %>%
+  count(zone_id, date = as.Date(date_confirmed), name = "n_all") %>%
+  as.data.table()
+
+daily_cslt <- copy(daily_uni)
+daily_cslt[, c("outbreak_count", "outbreak_binary") := NULL]
+daily_cslt <- merge(daily_cslt, cslt_cells, by = c("zone_id", "date"), all.x = TRUE)
+daily_cslt[, outbreak_count  := fcoalesce(as.integer(n_all), 0L)][, n_all := NULL]
+daily_cslt[, outbreak_binary := as.integer(outbreak_count > 0)]
+
+cc_cslt <- transform_lags(build_uni(daily_cslt), 28)
+saveRDS(cc_cslt, paste0(objects_folder, "case_crossover_df_uni_cslt.RDS"))
+report_panel(cc_cslt, "CSLT-inclusive")
+```
+
+```{r uni-spatial}
+# 10c. spatial-independence thresholds. repo-only sensitivity, not in the manuscript SI,
+# but cheap to keep around. drops events flagged as non-independent at each distance.
+drop_flagged <- function(panel, flag_ids) {
+  p <- copy(panel)
+  hits <- p[outbreak_binary == 1 & date >= case_window_start & date <= case_window_end
+          ][, nf := vapply(outbreak_id, count_flagged_ids, integer(1), flagged_ids = flag_ids)
+          ][nf > 0, .(zone_id, date, nf)]
+  p <- merge(p, hits, by = c("zone_id", "date"), all.x = TRUE)
+  p[, nf := fcoalesce(nf, 0L)]
+  p[, outbreak_count := outbreak_count - nf][, nf := NULL]
+  p[, outbreak_binary := as.integer(outbreak_count > 0)]
+  p
+}
+
+for (nm in c("200m", "500m", "1km")) {
+  ids <- screening[[paste0("ids_", nm)]]
+  d   <- transform_lags(build_uni(drop_flagged(daily_uni, ids)), 28)
+  saveRDS(d, paste0(objects_folder, "case_crossover_df_uni_", nm, ".RDS"))
+  report_panel(d, paste0("spatial restriction ", nm))
+}
+```
+
+```{r uni-lagwindow}
+# 10d. lag-window variants for Table S5. only the model's own exposures get lag columns,
+# building all 22 at 42 lags blows past the memory cap.
+primary_vars <- c("runoff", "soil_moisture", "temperature", "precipitation",
+                  "wind_speed", "snow_cover", "anseriformes", "predators")
+
+for (L in c(14, 42)) {
+  d <- transform_lags(build_uni(daily_uni, max_lag = L, vars = primary_vars), L, primary_vars)
+  saveRDS(d, paste0(objects_folder, "case_crossover_df_uni_", L, "lag.RDS"))
+  report_panel(d, paste0("lag window ", L, " d"))
+  gc()
+}
+```
+
+```{r uni-weekly}
+# 10e. weekly panel for Table S4. the old weekly panel (fishnet_timeseries.RDS) predates
+# snow_cover, so roll the daily panel up to ISO weeks instead and keep the same 8 exposures.
+# precip/runoff/snowfall/ET accumulate over the week, everything else averages.
+sum_vars  <- intersect(c("precipitation", "runoff", "snowfall", "evapotranspiration"), lag_vars)
+mean_vars <- setdiff(lag_vars, sum_vars)
+
+weekly_uni <- daily_uni[, c(
+    .(week_start   = min(date),
+      outbreak_count = sum(outbreak_count, na.rm = TRUE)),
+    lapply(.SD, mean, na.rm = TRUE)
+  ), by = .(zone_id, iso_year, iso_week), .SDcols = mean_vars]
+weekly_sums <- daily_uni[, lapply(.SD, sum, na.rm = TRUE),
+                         by = .(zone_id, iso_year, iso_week), .SDcols = sum_vars]
+weekly_uni <- merge(weekly_uni, weekly_sums, by = c("zone_id", "iso_year", "iso_week"))
+weekly_uni[, outbreak_binary := as.integer(outbreak_count > 0)]
+setorder(weekly_uni, zone_id, week_start)
+
+# referents are the 4 weeks before the case week, so offsets in days are still 0/7/14/21/28
+cc_weekly <- transform_lags(
+  build_uni(weekly_uni, max_lag = 4, offsets = OFFSETS_UNI, tcol = "week_start"),
+  4)
+saveRDS(cc_weekly, paste0(objects_folder, "case_crossover_df_uni_weekly.RDS"))
+report_panel(cc_weekly, "weekly (lag 0-4 wk)")
 ```

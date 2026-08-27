@@ -1,0 +1,87 @@
+---
+title: "SI Tables S4 and S7"
+author: "Fintan Mooney"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r initiate}
+rm(list = ls())
+project.folder = paste0(print(here::here()), '/')
+source(paste0(project.folder, 'create_folder_structure.R'))
+source(paste0(functions.folder, 'script_initiate.R'))
+stopifnot(requireNamespace("INLA", quietly = TRUE))
+library(INLA); library(Matrix)
+INLA::inla.setOption(num.threads = 1)
+source(paste0(functions.folder, 'inla_dlnm_helpers.R'))
+```
+
+# Table S4 — weekly-resolution model
+
+The previous submission was weekly. This refits the same design one step coarser — referents at
+±2 to ±4 weeks (the week equivalent of ±14 to ±28 days), lags 0–4 weeks — so the only thing that
+changes is exposure resolution. Slightly fewer cases (82 vs 85) because two events in the same
+cell and week collapse into one.
+
+```{r s4}
+WK <- setDT(readRDS(paste0(objects_folder, "case_crossover_df_sym_weekly.RDS")))[
+  state == "Minnesota"]
+o_wk <- assemble_cc_dlnm(WK, max_lag = 4, bird_knots = 0:4)
+f_wk <- fit_cc_inla_dlnm(o_wk)
+cat(sprintf("weekly model: %d cases, %d referents, WAIC %.1f\n",
+            sum(o_wk$data$outbreak_binary == 1), sum(o_wk$data$outbreak_binary == 0),
+            f_wk$waic$waic))
+
+# INLA_LAG_WINDOWS is in days, so build the weekly table directly off the basis
+fmt <- function(e) sprintf("%.2f (%.2f, %.2f)", e["OR"], e["low"], e["high"])
+s4_met <- rbindlist(lapply(o_wk$met_vars, function(v) {
+  wk_cells <- vapply(0:4, function(k) fmt(met_lag_effect(f_wk, o_wk, v, k)), character(1))
+  as.data.table(c(list(Predictor = unname(INLA_LABELS[v])),
+                  setNames(as.list(wk_cells), paste0("Week ", 0:4)),
+                  list(Cumulative = fmt(met_lag_effect(f_wk, o_wk, v, 0:4)))))
+}))
+s4_bird <- rbindlist(lapply(o_wk$weekly_vars, function(v) {
+  s <- weekly_lag_summary(f_wk, o_wk, v)
+  cm <- s$cumulative
+  as.data.table(c(list(Predictor = unname(INLA_LABELS[v])),
+                  setNames(as.list(sprintf("%.2f (%.2f, %.2f)", s$lagspec$OR, s$lagspec$low,
+                                           s$lagspec$high)), paste0("Week ", 0:4)),
+                  list(Cumulative = sprintf("%.2f (%.2f, %.2f)",
+                                            cm[["OR"]], cm[["low"]], cm[["high"]]))))
+}))
+s4 <- rbind(s4_met, s4_bird)
+print(s4)
+saveRDS(s4, paste0(objects_folder, "si_weekly_model.RDS"))
+```
+
+# Table S7 — feedlot density and runoff
+
+Does the runoff association track poultry density, as a transport mechanism onto premises would
+predict? Case cells are split at the median feedlot count and the model refitted in each half.
+This is a stratified comparison rather than a formal interaction term: at 85 events an
+interaction on a distributed lag basis is not estimable, and splitting keeps the contrast
+readable.
+
+```{r s7}
+PRIM <- setDT(readRDS(paste0(objects_folder, "case_crossover_df_sym_g14.RDS")))[
+  state == "Minnesota"]
+cell_fl <- unique(PRIM[, .(zone_id, feedlot_count)])
+cut_fl  <- median(cell_fl$feedlot_count, na.rm = TRUE)
+PRIM[, fl_group := fifelse(feedlot_count > cut_fl, "High feedlot density", "Low feedlot density")]
+cat(sprintf("median feedlot count per case cell: %.0f\n", cut_fl))
+
+s7 <- rbindlist(lapply(c("Low feedlot density", "High feedlot density"), function(g) {
+  d <- PRIM[fl_group == g]
+  o <- assemble_cc_dlnm(d); f <- fit_cc_inla_dlnm(o)
+  t <- lag_window_table(f, o, "cumulative", labels = INLA_LABELS)
+  t[, `:=`(Stratum = g, n = sum(o$data$outbreak_binary == 1))][]
+}))
+print(dcast(s7[Predictor %in% c("Surface Runoff", "Soil Moisture", "Anseriformes")],
+            Predictor ~ Stratum, value.var = "Lag 0-7 d"))
+print(unique(s7[, .(Stratum, n)]))
+saveRDS(s7, paste0(objects_folder, "si_feedlot_runoff.RDS"))
+```

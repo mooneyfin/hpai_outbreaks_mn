@@ -16,23 +16,42 @@ source(paste0(functions.folder,'script_initiate.R'))
 ```
 
 ```{r, read in timeseries df}
+# Table 1 describes the MN spillover cells, and those live on the 8-state grid
+# now: 2306 of them, zone_id a character grid coordinate like "-4,227". reading
+# the legacy MN fishnet here would describe a different set of cells from the one
+# the models are fitted on, and the anomaly join below would match nothing.
+fishnet_timeseries <- readRDS(
+  file.path(objects_folder, "multistate_fishnet_timeseries_daily.RDS")) %>%
+  filter(state == "Minnesota") %>%
+  mutate(zone_id = as.character(zone_id))
 
-# Daily zone × date panel (May 2026 revision). Climate-anomaly z-scores are
-# derived from the weekly climate-anomaly panel for the descriptive z-score
-# columns; the daily timeseries supplies the absolute environmental values.
-fishnet_timeseries <- readRDS(file.path(objects_folder, "fishnet_timeseries_daily.RDS"))
-
-# Attach weekly anomaly z-scores by ISO week (sensitivity-only object)
 anomaly_path <- file.path(objects_folder, "climate_anomaly_panel.RDS")
 if (file.exists(anomaly_path)) {
   anomaly <- readRDS(anomaly_path)
   z_cols  <- grep("_z_|_mean_25yr$", names(anomaly), value = TRUE)
+  # bin onto the same Jan-1-anchored week grid the anomaly panel uses, see
+  # b_00_climate_anomaly_setup.Rmd. isoweek() looked fine and wasn't: Dec 26-31
+  # 2022 is isoweek 52, which in this panel is the week of Jan 1, and the Nov-Dec
+  # 2021 lead-in landed on 2022 rows sharing an isoweek. panel is 2022-only, so
+  # 2021 dates go NA now, which is what they should always have done. Dec 31 sits
+  # in a 53rd stub week, so clamp it into week 51 rather than binning the day.
   fishnet_timeseries <- fishnet_timeseries %>%
-    mutate(week = lubridate::isoweek(date)) %>%
-    left_join(anomaly %>% select(zone_id, week, all_of(z_cols)),
-              by = c("zone_id", "week"))
-} else {
-  message("climate_anomaly_panel.RDS not found — z-score columns will be omitted from Table 1.")
+    mutate(week_idx = if_else(
+      lubridate::year(date) == 2022L,
+      pmin(as.integer(floor(as.numeric(date - as.Date("2022-01-01")) / 7)), 51L),
+      NA_integer_
+    )) %>%
+    left_join(anomaly %>% mutate(zone_id = as.character(zone_id)) %>%
+                select(zone_id, week_idx, all_of(z_cols)),
+              by = c("zone_id", "week_idx"))
+
+  matched <- sum(!is.na(fishnet_timeseries[[z_cols[1]]]))
+  if (matched == 0) {
+    stop("Anomaly join matched 0 rows. Timeseries zone_id e.g. '",
+         fishnet_timeseries$zone_id[1], "', anomaly zone_id e.g. '",
+         anomaly$zone_id[1], "'. Are both on the 8-state grid?")
+  }
+  message("Anomaly join: ", matched, " rows carry z-scores.")
 }
 ```
 
@@ -95,7 +114,7 @@ vars_subset <- c(
 
   # --- ID, time, outbreak, and context ---
   "zone_id",
-  "week",
+  "week_idx",
   "season",
   "total_bird_abundance",
   "any_outbreak",
@@ -130,7 +149,13 @@ fishnet_t1 <- fishnet_subset %>%
     ## Temperature: Kelvin -> Celsius
     temperature_C = temperature - 273.15,
 
-    ## Precipitation & Runoff: meters -> millimeters
+    ## precip & runoff: metres -> millimetres. both are DAILY totals and the 25yr
+    ## climatology is a mean of daily values, so these are rates (mm/day).
+    ## heads up: the old MN weekly files summed fluxes over the week, so anything
+    ## diffed against Table 2b from that era looks ~7x smaller here. that's the
+    ## unit change, not a data problem.
+    ## `runoff` is SURFACE runoff on the 8-state grid (surface_runoff_sum), not
+    ## the surface + sub-surface total the legacy MN files meant.
     precipitation_mm = precipitation * 1000,
     runoff_mm        = runoff * 1000,
 
@@ -229,8 +254,8 @@ label(fishnet_t1$longwave_radiation)   <- "Longwave Radiation (MJ/m²)"
 label(fishnet_t1$relative_humidity)    <- "Relative Humidity (%)"
 label(fishnet_t1$wind_speed)           <- "Wind Speed (m/s)"
 label(fishnet_t1$soil_moisture)        <- "Soil Moisture (m³/m³)"
-label(fishnet_t1$runoff_mm)            <- "Surface & Sub-Surface Runoff (mm)"
-label(fishnet_t1$precipitation_mm)     <- "Precipitation (mm)"
+label(fishnet_t1$runoff_mm)            <- "Surface Runoff (mm/day)"
+label(fishnet_t1$precipitation_mm)     <- "Precipitation (mm/day)"
 label(fishnet_t1$snow_density)         <- "Snow Density (kg/m³)"
 label(fishnet_t1$leaf_area_index)      <- "Leaf Area Index"
 label(fishnet_t1$anseriformes)         <- "Anseriformes Abundance (%)"
@@ -320,7 +345,7 @@ label(fishnet_t1$leaf_area_index_z_25yr)     <- "Leaf Area Index (Z-score)"
 label(fishnet_t1$longwave_radiation_z_25yr)  <- "Longwave Radiation (Z-score)"
 label(fishnet_t1$precipitation_z_25yr)       <- "Precipitation (Z-score)"
 label(fishnet_t1$relative_humidity_z_25yr)   <- "Relative Humidity (Z-score)"
-label(fishnet_t1$runoff_z_25yr)              <- "Surface & Sub-Surface Runoff (Z-score)"
+label(fishnet_t1$runoff_z_25yr)              <- "Surface Runoff (Z-score)"
 label(fishnet_t1$shortwave_radiation_z_25yr) <- "Shortwave Radiation (Z-score)"
 label(fishnet_t1$snow_density_z_25yr)        <- "Snow Density (Z-score)"
 label(fishnet_t1$soil_moisture_z_25yr)       <- "Soil Moisture (Z-score)"
@@ -427,8 +452,8 @@ table_1_gt <- fishnet_t1 %>%
       relative_humidity ~ "Relative Humidity (%)",
       wind_speed ~ "Wind Speed (m/s)",
       soil_moisture ~ "Soil Moisture (m³/m³)",
-      runoff_mm ~ "Surface & Sub-Surface Runoff (mm)",
-      precipitation_mm ~ "Precipitation (mm)",
+      runoff_mm ~ "Surface Runoff (mm/day)",
+      precipitation_mm ~ "Precipitation (mm/day)",
       snow_density ~ "Snow Density (kg/m³)",
       leaf_area_index ~ "Leaf Area Index",
       anseriformes ~ "Anseriformes Relative Abundance",
@@ -510,7 +535,7 @@ ft <- as_flex_table(table_1_gt) %>%
 
 ft
 
-save_as_docx(ft, path = file.path(tables_folder, "Table1_Primary.docx"))
+save_as_docx(ft, path = file.path(tables_main_folder, "Table1_Primary.docx"))
 
 ```
 
@@ -518,7 +543,6 @@ save_as_docx(ft, path = file.path(tables_folder, "Table1_Primary.docx"))
 
 ```{r, season strat table 1 export}
 
-# Compute season spillover counts from the daily modeling dataframe (May 2026 revision)
 fishnet_timeseries_modeling <- readRDS(file.path(objects_folder, "fishnet_timeseries_daily_modeling.RDS"))
 fishnet_timeseries_raw      <- readRDS(file.path(objects_folder, "fishnet_timeseries_daily.RDS"))
 
@@ -585,8 +609,8 @@ table_season_gt <- fishnet_outbreak %>%
       relative_humidity ~ "Relative Humidity (%)",
       wind_speed ~ "Wind Speed (m/s)",
       soil_moisture ~ "Soil Moisture (m\u00B3/m\u00B3)",
-      runoff_mm ~ "Surface & Sub-Surface Runoff (mm)",
-      precipitation_mm ~ "Precipitation (mm)",
+      runoff_mm ~ "Surface Runoff (mm/day)",
+      precipitation_mm ~ "Precipitation (mm/day)",
       snow_density ~ "Snow Density (kg/m\u00B3)",
       leaf_area_index ~ "Leaf Area Index",
       anseriformes ~ "Anseriformes Relative Abundance",
@@ -636,7 +660,7 @@ ft_season <- as_flex_table(table_season_gt) %>%
   line_spacing(space = 0.8, part = "all") %>%
   autofit()
 
-save_as_docx(ft_season, path = file.path(tables_folder, "Table1_Season.docx"))
+save_as_docx(ft_season, path = file.path(tables_main_folder, "Table1_Season.docx"))
 ```
 
 
@@ -674,8 +698,8 @@ var_labels <- c(
   relative_humidity   = "Relative Humidity (%)",
   wind_speed          = "Wind Speed (m/s)",
   soil_moisture       = "Soil Moisture (m\u00B3/m\u00B3)",
-  runoff_mm           = "Surface & Sub-Surface Runoff (mm)",
-  precipitation_mm    = "Precipitation (mm)",
+  runoff_mm           = "Surface Runoff (mm/day)",
+  precipitation_mm    = "Precipitation (mm/day)",
   snow_density        = "Snow Density (kg/m\u00B3)",
   leaf_area_index     = "Leaf Area Index"
 )
@@ -720,7 +744,7 @@ ft_compare_wide <- flextable(compare_wide) %>%
 
 save_as_docx(
   "Table 2b. Outbreak Cells: Current vs 25-yr Means by Season" = ft_compare_wide,
-  path = file.path(tables_folder, "Table2b_Season_vs_25yr.docx")
+  path = file.path(tables_main_folder, "Table2b_Season_vs_25yr.docx")
 )
 ```
 
@@ -770,17 +794,17 @@ if (length(missing_means)) {
 emm_options(lmer.df = "asymptotic")
 
 fit_anomaly_once <- function(dat, abs_name, mean_name) {
-  stopifnot("week" %in% names(dat))
+  stopifnot("week_idx" %in% names(dat))
   dd <- dat %>%
     transmute(
-      zone_id, season, week,
+      zone_id, season, week_idx,
       .abs    = .data[[abs_name]],
       .mean25 = .data[[mean_name]],
       .anom   = .abs - .mean25
     )
 
   fit <- lmerTest::lmer(
-    .anom ~ season + (1|zone_id) + (1|week),
+    .anom ~ season + (1|zone_id) + (1|week_idx),
     data = dd, REML = TRUE,
     control = lme4::lmerControl(check.conv.singular = "ignore")
   )
@@ -825,8 +849,8 @@ label_map <- c(
   relative_humidity   = "Relative Humidity (%)",
   wind_speed          = "Wind Speed (m/s)",
   soil_moisture       = "Soil Moisture (m\u00B3/m\u00B3)",
-  runoff_mm           = "Surface & Sub-Surface Runoff (mm)",
-  precipitation_mm    = "Precipitation (mm)",
+  runoff_mm           = "Surface Runoff (mm/day)",
+  precipitation_mm    = "Precipitation (mm/day)",
   snow_density        = "Snow Density (kg/m\u00B3)",
   leaf_area_index     = "Leaf Area Index"
 )
@@ -934,7 +958,7 @@ for (k in seq_along(delta_row_indices)) {
 
 ft_tbl
 
-save_as_docx(ft_tbl, path = file.path(tables_folder, "Table_Season_w25yr_comp.docx"))
+save_as_docx(ft_tbl, path = file.path(tables_main_folder, "Table_Season_w25yr_comp.docx"))
 ```
 
 
@@ -1005,7 +1029,7 @@ cat("fishnet_t1:", nrow(fishnet_t1), "\n")
 
 # confirm what the 'unit' is
 cat("unique zone_id:", dplyr::n_distinct(fishnet_t1$zone_id), "\n")
-cat("unique zone_id-week:", dplyr::n_distinct(paste(fishnet_t1$zone_id, fishnet_t1$week)), "\n")
+cat("unique zone_id-week_idx:", dplyr::n_distinct(paste(fishnet_t1$zone_id, fishnet_t1$week_idx)), "\n")
 
 # full season distribution INCLUDING missing
 table(fishnet_t1$season, useNA = "ifany")
@@ -1020,7 +1044,7 @@ vars_in_table1 <- c(
   "outbreak_count", "temperature_C", "shortwave_radiation", "longwave_radiation",
   "relative_humidity", "wind_speed", "soil_moisture", "runoff_mm", "precipitation_mm",
   "snow_density", "leaf_area_index", "anseriformes", "predators", "au_count", "birds_au",
-  "land_cover_label", "any_outbreak", "season", "zone_id", "week"
+  "land_cover_label", "any_outbreak", "season", "zone_id", "week_idx"
 )
 
 cc_n <- fishnet_t1 |>

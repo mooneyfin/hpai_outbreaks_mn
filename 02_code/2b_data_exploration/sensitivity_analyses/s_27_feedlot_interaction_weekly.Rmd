@@ -1,0 +1,338 @@
+---
+title: "Sensitivity: poultry-density × runoff interaction (1:4 unidirectional weekly)"
+author: "Fintan Mooney"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r initiate}
+rm(list = ls())
+project.folder = paste0(print(here::here()), '/')
+source(paste0(project.folder, 'create_folder_structure.R'))
+source(paste0(functions.folder, 'script_initiate.R'))
+```
+
+# Hypothesis (same as c_26)
+
+If runoff is the spillover mechanism, the runoff effect should amplify in
+zones with higher poultry density. We replicate the daily interaction test
+on the **1:4 unidirectional weekly** model (1:4 unidirectional, CSLT excluded) to
+confirm the pattern holds at the weekly resolution. The 1:4 unidirectional case-crossover has
+the runoff cumulative HR finding that the manuscript's discussion section
+references (HR 4.59 [1.28, 16.46]), so this is the design where the
+interaction matters most.
+
+# 1. Load weekly bundle and daily case-crossover (for birds_au)
+
+```{r load}
+ab        <- readRDS(paste0(objects_folder, "weekly_primary_ab.RDS"))
+cc_A      <- copy(ab$cc_A); setDT(cc_A)
+m_primary <- ab$model_A
+
+# Detect snow variable (cc_A may have snow_depth_* or snow_cover_* depending on
+# whether c_20 has been re-run with the snow_cover swap). Prefer snow_cover.
+snow_var <- if (any(grepl("^snow_cover_Lag", names(cc_A)))) "snow_cover" else
+            if (any(grepl("^snow_depth_Lag", names(cc_A)))) "snow_depth" else
+            stop("Neither snow_cover_Lag* nor snow_depth_Lag* found in cc_A — re-run c_20 first")
+cat("Snow variable in cc_A: ", snow_var, "\n", sep = "")
+
+# birds_au is zone-fixed; load from the full daily fishnet (has all zones,
+# not just case-crossover cells). Falls back to the daily case-crossover df if
+# the processed fishnet is unavailable.
+if (file.exists("03_output/3b_model_output/dataframes/mn_fishnet_daily_processed.rds")) {
+  full <- readRDS("03_output/3b_model_output/dataframes/mn_fishnet_daily_processed.rds")
+  setDT(full)
+  zone_birds <- unique(full[, .(zone_id, birds_au)])
+} else {
+  daily_cc <- readRDS(paste0(objects_folder, "case_crossover_df.RDS"))
+  setDT(daily_cc)
+  zone_birds <- unique(daily_cc[, .(zone_id, birds_au)])
+}
+
+cc_A <- merge(cc_A, zone_birds, by = "zone_id", all.x = TRUE)
+# Any zones still missing birds_au get 0 (these are typically cells with no
+# registered feedlots — biologically the "no poultry density" baseline)
+n_na <- sum(is.na(cc_A$birds_au))
+if (n_na > 0) {
+  cc_A[is.na(birds_au), birds_au := 0]
+  cat("Filled ", n_na, " NA birds_au cells with 0 (no registered feedlots)\n", sep = "")
+}
+cat("Weekly 1:4 unidirectional rows: ", nrow(cc_A),
+    " | cases: ", sum(cc_A$outbreak_binary == 1),
+    " | strata: ", uniqueN(cc_A$stratum_id), "\n", sep = "")
+cat("birds_au range: [", paste(round(range(cc_A$birds_au)), collapse=", "), "]\n", sep = "")
+```
+
+# 2. Standardise poultry density (log+z, weekly scale)
+
+```{r standardise-birds-au}
+cc_A[, birds_au_z := as.numeric(scale(log1p(birds_au)))]
+print(summary(cc_A$birds_au_z))
+```
+
+# 3. Rebuild weekly crossbases (matching primary spec)
+
+```{r weekly-cb}
+MAX_LAG_WK <- 4
+ARGLAG_WK  <- list(fun = "ns", df = 2)
+ARGVAR_WK  <- list(fun = "lin")
+
+mk_cb_wk <- function(varname) {
+  X <- as.matrix(cc_A[, paste0(varname, "_Lag", 0:MAX_LAG_WK), with = FALSE])
+  crossbasis(X, lag = c(0, MAX_LAG_WK), argvar = ARGVAR_WK, arglag = ARGLAG_WK)
+}
+cb_runoff_A         <- mk_cb_wk("runoff")
+cb_soil_moisture_A  <- mk_cb_wk("soil_moisture")
+cb_temperature_A    <- mk_cb_wk("temperature")
+cb_precipitation_A  <- mk_cb_wk("precipitation")
+cb_wind_speed_A     <- mk_cb_wk("wind_speed")
+cb_snow_A           <- mk_cb_wk(snow_var)              # snow_cover or snow_depth, whichever is present
+cb_anseriformes_A   <- mk_cb_wk("anseriformes")
+```
+
+# 4. Build interaction crossbasis (weekly runoff × birds_au_z)
+
+```{r interaction-cb-weekly}
+runoff_mat_wk    <- as.matrix(cc_A[, paste0("runoff_Lag", 0:MAX_LAG_WK), with = FALSE])
+runoff_x_birds   <- runoff_mat_wk * cc_A$birds_au_z
+cb_runoff_x_birds_A <- crossbasis(runoff_x_birds,
+                                   lag    = c(0, MAX_LAG_WK),
+                                   argvar = ARGVAR_WK,
+                                   arglag = ARGLAG_WK)
+```
+
+# 5. Refit primary + interaction
+
+```{r fit-weekly}
+# Refit primary on the freshly-rebuilt crossbases (so coef names match below)
+m_primary_wk <- clogit(
+  outbreak_binary ~ cb_runoff_A + cb_soil_moisture_A + cb_temperature_A +
+                    cb_precipitation_A + cb_wind_speed_A + cb_snow_A +
+                    cb_anseriformes_A + strata(stratum_id),
+  data = cc_A, method = "efron")
+
+m_inter_wk <- clogit(
+  outbreak_binary ~ cb_runoff_A + cb_runoff_x_birds_A +
+                    cb_soil_moisture_A + cb_temperature_A +
+                    cb_precipitation_A + cb_wind_speed_A + cb_snow_A +
+                    cb_anseriformes_A + strata(stratum_id),
+  data = cc_A, method = "efron")
+
+cat("\n--- Fit comparison (1:4 unidirectional weekly) ---\n")
+cat(sprintf("Primary       AIC: %.2f\n", AIC(m_primary_wk)))
+cat(sprintf("+ Interaction AIC: %.2f  (ΔAIC = %+.2f)\n",
+            AIC(m_inter_wk), AIC(m_inter_wk) - AIC(m_primary_wk)))
+chi <- 2 * (as.numeric(logLik(m_inter_wk)) - as.numeric(logLik(m_primary_wk)))
+ddf <- attr(logLik(m_inter_wk), "df") - attr(logLik(m_primary_wk), "df")
+p_lrt <- pchisq(chi, df = ddf, lower.tail = FALSE)
+cat(sprintf("LRT (interaction): chi^2 = %.2f, df = %d, p = %.4f\n",
+            chi, ddf, p_lrt))
+```
+
+# 6. Cumulative + lag-specific runoff OR by density
+
+```{r weekly-or-by-density}
+beta <- coef(m_inter_wk); V <- vcov(m_inter_wk)
+i_main <- grep("^cb_runoff_Av",            names(beta))
+i_intx <- grep("^cb_runoff_x_birds_Av",    names(beta))
+b_main <- beta[i_main]; b_intx <- beta[i_intx]
+V_mm   <- V[i_main, i_main]; V_ii <- V[i_intx, i_intx]; V_mi <- V[i_main, i_intx]
+
+lag_basis_wk <- do.call(dlnm::onebasis,
+                        c(list(x = 0:MAX_LAG_WK), ARGLAG_WK))
+
+or_at_wk <- function(contrast, ba_z) {
+  lo  <- as.numeric(contrast %*% (b_main + ba_z * b_intx))
+  var <- as.numeric(t(contrast) %*% (V_mm + 2 * ba_z * V_mi + ba_z^2 * V_ii) %*% contrast)
+  se  <- sqrt(var)
+  c(OR = exp(lo), lo = exp(lo - 1.96*se), hi = exp(lo + 1.96*se))
+}
+
+ba_low    <- quantile(cc_A$birds_au_z, 0.10)
+ba_median <- quantile(cc_A$birds_au_z, 0.50)
+ba_high   <- quantile(cc_A$birds_au_z, 0.90)
+ba_grid_raw <- exp(c(ba_low, ba_median, ba_high) * sd(log1p(cc_A$birds_au), na.rm=TRUE) +
+                   mean(log1p(cc_A$birds_au), na.rm=TRUE)) - 1
+
+# 6a. Cumulative OR (weekly lag 0-4 = days 0-28)
+contrast_cum_wk <- 0.5 * colSums(lag_basis_wk)
+cum_tbl_wk <- data.table(
+  Density_label = c("Low (10th pctl)", "Median (50th pctl)", "High (90th pctl)"),
+  birds_au_raw  = round(ba_grid_raw, 1),
+  Cumulative_runoff_OR_95CI = c(
+    sprintf("%.2f (%.2f, %.2f)", or_at_wk(contrast_cum_wk, ba_low)["OR"],
+            or_at_wk(contrast_cum_wk, ba_low)["lo"], or_at_wk(contrast_cum_wk, ba_low)["hi"]),
+    sprintf("%.2f (%.2f, %.2f)", or_at_wk(contrast_cum_wk, ba_median)["OR"],
+            or_at_wk(contrast_cum_wk, ba_median)["lo"], or_at_wk(contrast_cum_wk, ba_median)["hi"]),
+    sprintf("%.2f (%.2f, %.2f)", or_at_wk(contrast_cum_wk, ba_high)["OR"],
+            or_at_wk(contrast_cum_wk, ba_high)["lo"], or_at_wk(contrast_cum_wk, ba_high)["hi"])
+  )
+)
+cat("\n--- Cumulative weekly runoff OR over lag 0-4 wk by poultry density ---\n")
+print(cum_tbl_wk)
+
+# 6b. Lag-specific OR at each weekly lag point (5 points = 0, 7, 14, 21, 28 d)
+lag_specific_wk <- rbindlist(lapply(0:MAX_LAG_WK, function(k) {
+  c_k <- 0.5 * lag_basis_wk[k + 1, ]
+  data.table(
+    lag_days       = k * 7,
+    Low_OR_95CI    = sprintf("%.2f (%.2f, %.2f)", or_at_wk(c_k, ba_low)["OR"],
+                              or_at_wk(c_k, ba_low)["lo"], or_at_wk(c_k, ba_low)["hi"]),
+    Median_OR_95CI = sprintf("%.2f (%.2f, %.2f)", or_at_wk(c_k, ba_median)["OR"],
+                              or_at_wk(c_k, ba_median)["lo"], or_at_wk(c_k, ba_median)["hi"]),
+    High_OR_95CI   = sprintf("%.2f (%.2f, %.2f)", or_at_wk(c_k, ba_high)["OR"],
+                              or_at_wk(c_k, ba_high)["lo"], or_at_wk(c_k, ba_high)["hi"])
+  )
+}))
+cat("\n--- Lag-specific weekly runoff OR (per +0.5 SD on that week) ---\n")
+print(lag_specific_wk)
+
+# Numeric long form for plotting
+lag_specific_wk_long <- rbindlist(lapply(0:MAX_LAG_WK, function(k) {
+  c_k <- 0.5 * lag_basis_wk[k + 1, ]
+  rbindlist(lapply(list(Low = ba_low, Median = ba_median, High = ba_high), function(z) {
+    o <- or_at_wk(c_k, z)
+    data.table(lag_days = k * 7, OR = o["OR"], OR_lo = o["lo"], OR_hi = o["hi"])
+  }), idcol = "Density")
+}))
+lag_specific_wk_long[, Density := factor(Density, levels = c("Low", "Median", "High"))]
+```
+
+# 7. Verdict
+
+```{r verdict-weekly}
+verdict <- if (p_lrt < 0.05 && AIC(m_inter_wk) - AIC(m_primary_wk) < -2) {
+  "SUPPORTED — interaction is jointly significant (LRT p<0.05) and improves AIC by >2"
+} else if (p_lrt < 0.05) {
+  "PARTIAL — LRT significant but ΔAIC does not exceed -2"
+} else {
+  "NOT SUPPORTED — interaction is not jointly significant at α=0.05"
+}
+cat("Decision rule: LRT p < 0.05 AND ΔAIC < -2 → adopt interaction\n")
+cat("Verdict: ", verdict, "\n", sep = "")
+```
+
+# 8. Lag-specific figure (weekly)
+
+```{r lag-specific-figure-wk, fig.width = 10, fig.height = 5}
+p_wk <- ggplot(lag_specific_wk_long, aes(x = lag_days, y = OR,
+                                          color = Density, fill = Density)) +
+  geom_hline(yintercept = 1, linetype = "dashed", color = "gray40") +
+  geom_ribbon(aes(ymin = OR_lo, ymax = OR_hi), alpha = 0.18, color = NA) +
+  geom_line(linewidth = 0.9) +
+  geom_point(size = 2.2) +
+  scale_y_log10() +
+  scale_x_continuous(breaks = c(0, 7, 14, 21, 28)) +
+  scale_color_manual(values = c("Low" = "steelblue",
+                                "Median" = "gray40",
+                                "High" = "firebrick")) +
+  scale_fill_manual( values = c("Low" = "steelblue",
+                                "Median" = "gray40",
+                                "High" = "firebrick")) +
+  labs(
+    x = "Lag (days)",
+    y = "Weekly runoff OR (95% CI), per +0.5 SD on that lag week",
+    color = "Poultry density", fill = "Poultry density",
+    title    = "Lag-specific runoff OR by poultry density — 1:4 unidirectional weekly",
+    subtitle = "Weekly lin × ns(df=2); density = standardised log birds_au at 10th/50th/90th pctl"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(panel.grid.minor = element_blank(), legend.position = "top",
+        strip.text = element_text(face = "bold"))
+ggsave(paste0(figures_sensitivity_folder, "figure_feedlot_runoff_lag_specific_weekly.png"),
+       p_wk, width = 10, height = 5, units = "in", dpi = 300)
+print(p_wk)
+```
+
+# 9. Combined daily + weekly lag-specific figure (if daily bundle is on disk)
+
+```{r combined-figure, fig.width = 12, fig.height = 6}
+daily_bundle_path <- paste0(objects_folder, "feedlot_interaction_daily.RDS")
+if (file.exists(daily_bundle_path)) {
+  d_bundle <- readRDS(daily_bundle_path)
+  d_long   <- d_bundle$lag_specific_numeric
+  d_long[, Resolution := "Daily"]
+  w_long <- copy(lag_specific_wk_long); w_long[, Resolution := "Weekly"]
+  combined <- rbind(d_long, w_long, fill = TRUE)
+  combined[, Density := factor(Density, levels = c("Low", "Median", "High"))]
+
+  p_combo <- ggplot(combined, aes(x = lag_days, y = OR,
+                                  color = Density, fill = Density)) +
+    geom_hline(yintercept = 1, linetype = "dashed", color = "gray40") +
+    geom_ribbon(aes(ymin = OR_lo, ymax = OR_hi), alpha = 0.15, color = NA) +
+    geom_line(linewidth = 0.9) +
+    facet_wrap(~ Resolution, scales = "free_y") +
+    scale_y_log10() +
+    scale_x_continuous(breaks = c(0, 7, 14, 21, 28)) +
+    scale_color_manual(values = c("Low" = "steelblue",
+                                  "Median" = "gray40",
+                                  "High" = "firebrick")) +
+    scale_fill_manual( values = c("Low" = "steelblue",
+                                  "Median" = "gray40",
+                                  "High" = "firebrick")) +
+    labs(
+      x = "Lag (days)",
+      y = "Runoff OR (95% CI), per +0.5 SD",
+      color = "Poultry density", fill = "Poultry density",
+      title    = "Runoff × poultry-density interaction — daily vs weekly",
+      subtitle = "Lag-specific OR at three poultry-density levels; lines = point estimate, ribbons = 95% CI"
+    ) +
+    theme_minimal(base_size = 12) +
+    theme(panel.grid.minor = element_blank(), legend.position = "top",
+          strip.text = element_text(face = "bold"))
+  ggsave(paste0(figures_sensitivity_folder, "figure_feedlot_runoff_lag_specific_combined.png"),
+         p_combo, width = 12, height = 6, units = "in", dpi = 300)
+  print(p_combo)
+} else {
+  cat("Daily bundle not found at ", daily_bundle_path,
+      " — run c_26 first to enable the combined figure.\n", sep = "")
+}
+```
+
+# 10. Export tables
+
+```{r export-wk}
+fit_tbl_wk <- data.table(
+  Spec    = c("Primary (snow_cover, 1:4 unidirectional weekly)",
+              "+ runoff × poultry-density interaction"),
+  AIC     = c(round(AIC(m_primary_wk), 2), round(AIC(m_inter_wk), 2)),
+  dAIC    = c(0, round(AIC(m_inter_wk) - AIC(m_primary_wk), 2)),
+  LRT_chi = c("—", sprintf("%.2f", chi)),
+  LRT_df  = c("—", as.character(ddf)),
+  LRT_p   = c("—", sprintf("%.4f", p_lrt))
+)
+
+doc <- read_docx() %>%
+  body_add_par("Sensitivity Analysis: Poultry-density × Runoff Interaction (Weekly 1:4 unidirectional)",
+               style = "heading 1") %>%
+  body_add_par(paste0("Sample: ", sum(cc_A$outbreak_binary == 1),
+                      " case-weeks across ", uniqueN(cc_A$stratum_id),
+                      " strata. Interaction tested via a 2-df runoff × birds_au_z ",
+                      "crossbasis on the 1:4 unidirectional weekly primary spec."),
+               style = "Normal") %>%
+  body_add_par("Model fit", style = "heading 2") %>%
+  body_add_flextable(flextable(fit_tbl_wk) %>% autofit() %>% theme_booktabs()) %>%
+  body_add_par("Cumulative weekly runoff OR (per +0.5 SD across lag 0–4 wk)",
+               style = "heading 2") %>%
+  body_add_flextable(flextable(cum_tbl_wk) %>% autofit() %>% theme_booktabs()) %>%
+  body_add_par("Lag-specific weekly runoff OR (per +0.5 SD on that lag week)",
+               style = "heading 2") %>%
+  body_add_flextable(flextable(lag_specific_wk) %>% autofit() %>% theme_booktabs())
+
+print(doc, target = paste0(tables_sensitivity_folder, "Table_Feedlot_Interaction_Weekly.docx"))
+cat("Saved: ", tables_sensitivity_folder, "Table_Feedlot_Interaction_Weekly.docx\n", sep = "")
+
+saveRDS(list(
+  m_primary_wk    = m_primary_wk,
+  m_inter_wk      = m_inter_wk,
+  fit_tbl_wk      = fit_tbl_wk,
+  cum_tbl_wk      = cum_tbl_wk,
+  lag_specific_wk = lag_specific_wk,
+  lag_specific_wk_long = lag_specific_wk_long,
+  LRT_p           = p_lrt
+), paste0(objects_folder, "feedlot_interaction_weekly.RDS"))
+```
