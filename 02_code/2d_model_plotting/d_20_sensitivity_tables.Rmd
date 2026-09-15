@@ -69,7 +69,7 @@ NOTES <- c(
     "This is not INLA's CPO, which drops one observation at a time and so is not a stratum hold-out in a conditional model."),
   TableS7a_interaction = paste(
     "Post hoc analysis. The meteorological crossbasis is multiplied by the standardised Anseriformes abundance at lag 21-28 days, centred within stratum, so the",
-    "interaction is continuous; effects are shown at +1 SD (high) and -1 SD (low) of that modifier. Lag bins are estimated independently (strata basis, break at day 8).",
+    "interaction is continuous; effects are shown at +1 SD (high) and -1 SD (low) of that modifier. Lag bins are estimated independently (strata basis, break at day 8); the 0-14 day column is their cumulative, from the same posterior.",
     "Ratio is high divided by low. Same prior as the primary model. Estimates and P(dir) come from 4,000 draws of the joint posterior."),
   TableS7b_interaction_robust = paste(
     "Ratio of the meteorological effect at high versus low prior waterfowl, for each of six specifications.",
@@ -266,18 +266,18 @@ show_tbl(s6, font_size = 11, indent_rows = which(lv == 2L), bold_rows = which(lv
 ```{r s7a}
 ip <- setDT(readRDS(paste0(objects_folder, "si_interaction_primary.RDS")))          # c_50
 ip[, Kind := norm_model(Kind)]
-WIN2 <- c("0-7 days", "8-14 days")
+WIN2 <- c("0-7 days", "8-14 days", "0-14 days")
 LEAF <- c("High waterfowl", "Low waterfowl", "Ratio", "P(dir) ratio")
-CN7  <- as.vector(outer(c("hi", "lo", "rt", "pd"), c("a", "b"), paste0))
+CN7  <- as.vector(outer(c("hi", "lo", "rt", "pd"), c("a", "b", "c"), paste0))
 b8 <- build_sections(names(KIND), setdiff(EXPO, "Anseriformes"), names(PANEL), function(mn, ex, pn) {
   r <- ip[Kind == mn & Exposure == ex & Panel == pn]
   if (!nrow(r)) return(NULL)
   unlist(lapply(WIN2, function(w) { x <- r[Window == w][1]
     c(x$`High waterfowl`, x$`Low waterfowl`, x$Ratio, sprintf("%.2f", x$`P(dir) ratio`)) }), use.names = FALSE)
 }, CN7)
-S7LAB <- c(" ", rep(c("High", "Low", "High / low", "P(dir)"), 2))
-SPAN8 <- c(" " = 1, "Lag 0-7 days" = 4, "Lag 8-14 days" = 4)
-emit(b8$dt, "TableS7a_interaction", font_size = 7, max_width = 9.4, span = SPAN8, col_labels = S7LAB,
+S7LAB <- c(" ", rep(c("High", "Low", "High / low", "P(dir)"), 3))
+SPAN8 <- c(" " = 1, "Lag 0-7 days" = 4, "Lag 8-14 days" = 4, "Lag 0-14 days, cumulative" = 4)
+emit(b8$dt, "TableS7a_interaction", font_size = 6, max_width = 9.6, span = SPAN8, col_labels = S7LAB,
      indent_rows = b8$g2, indent2 = b8$g3, bold_rows = b8$g1, rule_after = b8$g1[2] - 1)
 rr_show(b8$dt, font_size = 10, span = SPAN8, col_labels = S7LAB,
         indent_rows = b8$g2, indent2 = b8$g3, bold_rows = b8$g1)
@@ -287,12 +287,13 @@ rr_show(b8$dt, font_size = 10, span = SPAN8, col_labels = S7LAB,
 ir <- setDT(readRDS(paste0(objects_folder, "si_interaction_robustness.RDS")))     # c_47
 ir[, Kind := norm_model(Kind)]
 CHECKS <- unique(ir$Check)
+WINB <- c("0-7 days", "8-14 days")            # c_47 fits the two bins, not the cumulative
 PN2 <- c("Minnesota", "Pooled")
 CN7b <- as.vector(outer(c("a", "b"), c("mn", "pl"), paste0))
 b9 <- build_sections(names(KIND), setdiff(EXPO, "Anseriformes"), CHECKS, function(mn, ex, ck) {
   r <- ir[Kind == mn & Exposure == ex & Check == ck]
   if (!nrow(r)) return(NULL)
-  unlist(lapply(PN2, function(pn) vapply(WIN2, function(w) {
+  unlist(lapply(PN2, function(pn) vapply(WINB, function(w) {
     x <- r[Panel == pn & Window == w]; if (nrow(x)) x$ratio[1] else "–" }, character(1))),
     use.names = FALSE)
 }, CN7b)

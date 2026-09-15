@@ -1873,7 +1873,7 @@ NOTES &lt;- c(
     &quot;This is not INLA&#39;s CPO, which drops one observation at a time and so is not a stratum hold-out in a conditional model.&quot;),
   TableS7a_interaction = paste(
     &quot;Post hoc analysis. The meteorological crossbasis is multiplied by the standardised Anseriformes abundance at lag 21-28 days, centred within stratum, so the&quot;,
-    &quot;interaction is continuous; effects are shown at +1 SD (high) and -1 SD (low) of that modifier. Lag bins are estimated independently (strata basis, break at day 8).&quot;,
+    &quot;interaction is continuous; effects are shown at +1 SD (high) and -1 SD (low) of that modifier. Lag bins are estimated independently (strata basis, break at day 8); the 0-14 day column is their cumulative, from the same posterior.&quot;,
     &quot;Ratio is high divided by low. Same prior as the primary model. Estimates and P(dir) come from 4,000 draws of the joint posterior.&quot;),
   TableS7b_interaction_robust = paste(
     &quot;Ratio of the meteorological effect at high versus low prior waterfowl, for each of six specifications.&quot;,
@@ -8315,18 +8315,18 @@ reference
 <h2>S7. The interaction</h2>
 <pre class="r"><code>ip &lt;- setDT(readRDS(paste0(objects_folder, &quot;si_interaction_primary.RDS&quot;)))          # c_50
 ip[, Kind := norm_model(Kind)]
-WIN2 &lt;- c(&quot;0-7 days&quot;, &quot;8-14 days&quot;)
+WIN2 &lt;- c(&quot;0-7 days&quot;, &quot;8-14 days&quot;, &quot;0-14 days&quot;)
 LEAF &lt;- c(&quot;High waterfowl&quot;, &quot;Low waterfowl&quot;, &quot;Ratio&quot;, &quot;P(dir) ratio&quot;)
-CN7  &lt;- as.vector(outer(c(&quot;hi&quot;, &quot;lo&quot;, &quot;rt&quot;, &quot;pd&quot;), c(&quot;a&quot;, &quot;b&quot;), paste0))
+CN7  &lt;- as.vector(outer(c(&quot;hi&quot;, &quot;lo&quot;, &quot;rt&quot;, &quot;pd&quot;), c(&quot;a&quot;, &quot;b&quot;, &quot;c&quot;), paste0))
 b8 &lt;- build_sections(names(KIND), setdiff(EXPO, &quot;Anseriformes&quot;), names(PANEL), function(mn, ex, pn) {
   r &lt;- ip[Kind == mn &amp; Exposure == ex &amp; Panel == pn]
   if (!nrow(r)) return(NULL)
   unlist(lapply(WIN2, function(w) { x &lt;- r[Window == w][1]
     c(x$`High waterfowl`, x$`Low waterfowl`, x$Ratio, sprintf(&quot;%.2f&quot;, x$`P(dir) ratio`)) }), use.names = FALSE)
 }, CN7)
-S7LAB &lt;- c(&quot; &quot;, rep(c(&quot;High&quot;, &quot;Low&quot;, &quot;High / low&quot;, &quot;P(dir)&quot;), 2))
-SPAN8 &lt;- c(&quot; &quot; = 1, &quot;Lag 0-7 days&quot; = 4, &quot;Lag 8-14 days&quot; = 4)
-emit(b8$dt, &quot;TableS7a_interaction&quot;, font_size = 7, max_width = 9.4, span = SPAN8, col_labels = S7LAB,
+S7LAB &lt;- c(&quot; &quot;, rep(c(&quot;High&quot;, &quot;Low&quot;, &quot;High / low&quot;, &quot;P(dir)&quot;), 3))
+SPAN8 &lt;- c(&quot; &quot; = 1, &quot;Lag 0-7 days&quot; = 4, &quot;Lag 8-14 days&quot; = 4, &quot;Lag 0-14 days, cumulative&quot; = 4)
+emit(b8$dt, &quot;TableS7a_interaction&quot;, font_size = 6, max_width = 9.6, span = SPAN8, col_labels = S7LAB,
      indent_rows = b8$g2, indent2 = b8$g3, bold_rows = b8$g1, rule_after = b8$g1[2] - 1)
 rr_show(b8$dt, font_size = 10, span = SPAN8, col_labels = S7LAB,
         indent_rows = b8$g2, indent2 = b8$g3, bold_rows = b8$g1)</code></pre>
@@ -8345,9 +8345,26 @@ Lag 0-7 days
 Lag 8-14 days
 </div>
 </th>
+<th style="border-bottom:hidden;padding-bottom:0; padding-left:3px;padding-right:3px;text-align: center; font-weight: bold; " colspan="4">
+<div style="border-bottom: 1px solid #ddd; padding-bottom: 5px; ">
+Lag 0-14 days, cumulative
+</div>
+</th>
 </tr>
 <tr>
 <th style="text-align:left;font-weight: bold;">
+</th>
+<th style="text-align:right;font-weight: bold;">
+High
+</th>
+<th style="text-align:right;font-weight: bold;">
+Low
+</th>
+<th style="text-align:right;font-weight: bold;">
+High / low
+</th>
+<th style="text-align:right;font-weight: bold;">
+P(dir)
 </th>
 <th style="text-align:right;font-weight: bold;">
 High
@@ -8396,10 +8413,26 @@ Absolute conditions
 </td>
 <td style="text-align:right;font-weight: bold;">
 </td>
+<td style="text-align:right;font-weight: bold;">
+</td>
+<td style="text-align:right;font-weight: bold;">
+</td>
+<td style="text-align:right;font-weight: bold;">
+</td>
+<td style="text-align:right;font-weight: bold;">
+</td>
 </tr>
 <tr>
 <td style="text-align:left;padding-left: 2em;" indentlevel="1">
 Temperature
+</td>
+<td style="text-align:right;">
+</td>
+<td style="text-align:right;">
+</td>
+<td style="text-align:right;">
+</td>
+<td style="text-align:right;">
 </td>
 <td style="text-align:right;">
 </td>
@@ -8423,28 +8456,40 @@ Temperature
 Minnesota
 </td>
 <td style="text-align:right;">
-1.26 (0.80, 1.95)
+1.25 (0.80, 2.00)
 </td>
 <td style="text-align:right;">
-1.07 (0.70, 1.63)
+1.06 (0.68, 1.63)
 </td>
 <td style="text-align:right;">
-1.18 (0.63, 2.20)
+1.18 (0.62, 2.24)
 </td>
 <td style="text-align:right;">
-0.70
+0.69
 </td>
 <td style="text-align:right;">
-1.18 (0.68, 2.08)
+1.20 (0.67, 2.08)
 </td>
 <td style="text-align:right;">
-0.76 (0.46, 1.23)
+0.76 (0.47, 1.23)
 </td>
 <td style="text-align:right;">
-1.55 (0.75, 3.26)
+1.57 (0.73, 3.35)
 </td>
 <td style="text-align:right;">
 0.88
+</td>
+<td style="text-align:right;">
+1.49 (0.65, 3.39)
+</td>
+<td style="text-align:right;">
+0.81 (0.39, 1.64)
+</td>
+<td style="text-align:right;">
+1.88 (0.63, 5.42)
+</td>
+<td style="text-align:right;">
+0.86
 </td>
 </tr>
 <tr>
@@ -8452,28 +8497,40 @@ Minnesota
 Other flyway states
 </td>
 <td style="text-align:right;">
-0.87 (0.61, 1.24)
+0.87 (0.62, 1.25)
 </td>
 <td style="text-align:right;">
-1.25 (0.89, 1.74)
+1.24 (0.90, 1.73)
 </td>
 <td style="text-align:right;">
-0.70 (0.44, 1.10)
+0.70 (0.44, 1.12)
 </td>
 <td style="text-align:right;">
-0.94
+0.93
 </td>
 <td style="text-align:right;">
-0.96 (0.65, 1.43)
+0.96 (0.63, 1.46)
 </td>
 <td style="text-align:right;">
-0.86 (0.60, 1.24)
+0.87 (0.60, 1.25)
 </td>
 <td style="text-align:right;">
-1.12 (0.69, 1.82)
+1.12 (0.68, 1.82)
 </td>
 <td style="text-align:right;">
-0.68
+0.67
+</td>
+<td style="text-align:right;">
+0.84 (0.46, 1.56)
+</td>
+<td style="text-align:right;">
+1.07 (0.66, 1.75)
+</td>
+<td style="text-align:right;">
+0.78 (0.42, 1.46)
+</td>
+<td style="text-align:right;">
+0.78
 </td>
 </tr>
 <tr>
@@ -8481,28 +8538,40 @@ Other flyway states
 Pooled
 </td>
 <td style="text-align:right;">
-0.94 (0.68, 1.29)
+0.94 (0.69, 1.29)
 </td>
 <td style="text-align:right;">
-<strong>1.38 (1.03, 1.88)</strong>
+<strong>1.39 (1.03, 1.87)</strong>
 </td>
 <td style="text-align:right;">
-0.68 (0.44, 1.04)
+0.68 (0.44, 1.05)
+</td>
+<td style="text-align:right;">
+0.96
+</td>
+<td style="text-align:right;">
+1.11 (0.78, 1.58)
+</td>
+<td style="text-align:right;">
+0.74 (0.53, 1.02)
+</td>
+<td style="text-align:right;">
+1.50 (0.96, 2.33)
 </td>
 <td style="text-align:right;">
 0.96
 </td>
 <td style="text-align:right;">
-1.10 (0.78, 1.57)
+1.04 (0.63, 1.73)
 </td>
 <td style="text-align:right;">
-0.74 (0.53, 1.03)
+1.03 (0.69, 1.54)
 </td>
 <td style="text-align:right;">
-1.49 (0.96, 2.34)
+1.02 (0.59, 1.77)
 </td>
 <td style="text-align:right;">
-0.96
+0.52
 </td>
 </tr>
 <tr>
@@ -8525,19 +8594,27 @@ Precipitation
 </td>
 <td style="text-align:right;">
 </td>
+<td style="text-align:right;">
+</td>
+<td style="text-align:right;">
+</td>
+<td style="text-align:right;">
+</td>
+<td style="text-align:right;">
+</td>
 </tr>
 <tr>
 <td style="text-align:left;padding-left: 4em;" indentlevel="1">
 Minnesota
 </td>
 <td style="text-align:right;">
-0.82 (0.51, 1.28)
+0.80 (0.52, 1.26)
 </td>
 <td style="text-align:right;">
-1.14 (0.69, 1.86)
+1.14 (0.69, 1.90)
 </td>
 <td style="text-align:right;">
-0.72 (0.34, 1.48)
+0.71 (0.34, 1.44)
 </td>
 <td style="text-align:right;">
 0.82
@@ -8546,13 +8623,25 @@ Minnesota
 0.63 (0.40, 1.00)
 </td>
 <td style="text-align:right;">
-1.04 (0.60, 1.78)
+1.04 (0.59, 1.78)
 </td>
 <td style="text-align:right;">
-0.61 (0.29, 1.30)
+0.60 (0.28, 1.28)
 </td>
 <td style="text-align:right;">
-0.89
+0.90
+</td>
+<td style="text-align:right;">
+0.51 (0.24, 1.11)
+</td>
+<td style="text-align:right;">
+1.19 (0.47, 2.93)
+</td>
+<td style="text-align:right;">
+0.43 (0.12, 1.54)
+</td>
+<td style="text-align:right;">
+0.90
 </td>
 </tr>
 <tr>
@@ -8560,28 +8649,40 @@ Minnesota
 Other flyway states
 </td>
 <td style="text-align:right;">
-1.00 (0.66, 1.53)
+1.01 (0.66, 1.53)
 </td>
 <td style="text-align:right;">
-0.76 (0.48, 1.19)
+0.76 (0.48, 1.21)
 </td>
 <td style="text-align:right;">
-1.32 (0.74, 2.39)
+1.32 (0.74, 2.44)
 </td>
 <td style="text-align:right;">
-0.82
+0.84
 </td>
 <td style="text-align:right;">
-0.93 (0.61, 1.43)
+0.93 (0.59, 1.46)
 </td>
 <td style="text-align:right;">
-0.73 (0.44, 1.21)
+0.73 (0.44, 1.19)
 </td>
 <td style="text-align:right;">
-1.26 (0.70, 2.29)
+1.27 (0.71, 2.34)
 </td>
 <td style="text-align:right;">
-0.78
+0.79
+</td>
+<td style="text-align:right;">
+0.94 (0.45, 2.01)
+</td>
+<td style="text-align:right;">
+0.55 (0.25, 1.26)
+</td>
+<td style="text-align:right;">
+1.67 (0.64, 4.73)
+</td>
+<td style="text-align:right;">
+0.86
 </td>
 </tr>
 <tr>
@@ -8589,28 +8690,40 @@ Other flyway states
 Pooled
 </td>
 <td style="text-align:right;">
-0.95 (0.68, 1.34)
+0.96 (0.67, 1.35)
 </td>
 <td style="text-align:right;">
-0.87 (0.59, 1.28)
+0.86 (0.59, 1.27)
 </td>
 <td style="text-align:right;">
-1.11 (0.66, 1.86)
+1.10 (0.64, 1.89)
 </td>
 <td style="text-align:right;">
-0.64
+0.65
 </td>
 <td style="text-align:right;">
 0.76 (0.55, 1.05)
 </td>
 <td style="text-align:right;">
-0.73 (0.49, 1.09)
+0.74 (0.49, 1.10)
 </td>
 <td style="text-align:right;">
-1.04 (0.63, 1.65)
+1.03 (0.64, 1.71)
 </td>
 <td style="text-align:right;">
-0.56
+0.55
+</td>
+<td style="text-align:right;">
+0.73 (0.43, 1.27)
+</td>
+<td style="text-align:right;">
+0.64 (0.33, 1.22)
+</td>
+<td style="text-align:right;">
+1.14 (0.50, 2.62)
+</td>
+<td style="text-align:right;">
+0.62
 </td>
 </tr>
 <tr>
@@ -8633,34 +8746,54 @@ Soil moisture
 </td>
 <td style="text-align:right;">
 </td>
+<td style="text-align:right;">
+</td>
+<td style="text-align:right;">
+</td>
+<td style="text-align:right;">
+</td>
+<td style="text-align:right;">
+</td>
 </tr>
 <tr>
 <td style="text-align:left;padding-left: 4em;" indentlevel="1">
 Minnesota
 </td>
 <td style="text-align:right;">
-0.91 (0.56, 1.47)
+0.91 (0.55, 1.46)
 </td>
 <td style="text-align:right;">
-1.05 (0.63, 1.77)
+1.06 (0.62, 1.78)
 </td>
 <td style="text-align:right;">
-0.86 (0.48, 1.54)
+0.86 (0.48, 1.56)
 </td>
 <td style="text-align:right;">
 0.70
 </td>
 <td style="text-align:right;">
-0.93 (0.57, 1.52)
+0.94 (0.57, 1.55)
 </td>
 <td style="text-align:right;">
-1.14 (0.65, 2.05)
+1.14 (0.63, 2.09)
 </td>
 <td style="text-align:right;">
-0.81 (0.45, 1.46)
+0.83 (0.45, 1.47)
 </td>
 <td style="text-align:right;">
-0.76
+0.73
+</td>
+<td style="text-align:right;">
+0.86 (0.38, 1.92)
+</td>
+<td style="text-align:right;">
+1.20 (0.47, 2.98)
+</td>
+<td style="text-align:right;">
+0.71 (0.32, 1.58)
+</td>
+<td style="text-align:right;">
+0.80
 </td>
 </tr>
 <tr>
@@ -8668,28 +8801,40 @@ Minnesota
 Other flyway states
 </td>
 <td style="text-align:right;">
-1.21 (0.81, 1.80)
+1.21 (0.81, 1.82)
 </td>
 <td style="text-align:right;">
-0.95 (0.60, 1.46)
+0.94 (0.60, 1.45)
 </td>
 <td style="text-align:right;">
-1.27 (0.80, 2.04)
+1.29 (0.80, 2.08)
 </td>
 <td style="text-align:right;">
 0.85
 </td>
 <td style="text-align:right;">
-1.40 (0.87, 2.21)
+1.39 (0.88, 2.18)
 </td>
 <td style="text-align:right;">
-0.97 (0.59, 1.58)
+0.98 (0.58, 1.59)
 </td>
 <td style="text-align:right;">
-1.44 (0.83, 2.45)
+1.43 (0.84, 2.51)
 </td>
 <td style="text-align:right;">
 0.91
+</td>
+<td style="text-align:right;">
+1.68 (0.84, 3.43)
+</td>
+<td style="text-align:right;">
+0.92 (0.42, 1.97)
+</td>
+<td style="text-align:right;">
+1.84 (0.91, 3.80)
+</td>
+<td style="text-align:right;">
+0.95
 </td>
 </tr>
 <tr>
@@ -8697,28 +8842,40 @@ Other flyway states
 Pooled
 </td>
 <td style="text-align:right;">
-1.07 (0.75, 1.51)
+1.07 (0.74, 1.52)
 </td>
 <td style="text-align:right;">
-1.00 (0.68, 1.47)
+1.00 (0.68, 1.44)
 </td>
 <td style="text-align:right;">
-1.07 (0.72, 1.59)
+1.07 (0.71, 1.60)
 </td>
 <td style="text-align:right;">
 0.63
 </td>
 <td style="text-align:right;">
-1.16 (0.79, 1.68)
+1.17 (0.80, 1.70)
 </td>
 <td style="text-align:right;">
-1.10 (0.73, 1.68)
+1.10 (0.73, 1.65)
 </td>
 <td style="text-align:right;">
-1.06 (0.70, 1.59)
+1.05 (0.68, 1.59)
 </td>
 <td style="text-align:right;">
 0.60
+</td>
+<td style="text-align:right;">
+1.24 (0.70, 2.21)
+</td>
+<td style="text-align:right;">
+1.10 (0.58, 2.05)
+</td>
+<td style="text-align:right;">
+1.12 (0.68, 1.86)
+</td>
+<td style="text-align:right;">
+0.68
 </td>
 </tr>
 <tr>
@@ -8741,34 +8898,54 @@ Wind speed
 </td>
 <td style="text-align:right;">
 </td>
+<td style="text-align:right;">
+</td>
+<td style="text-align:right;">
+</td>
+<td style="text-align:right;">
+</td>
+<td style="text-align:right;">
+</td>
 </tr>
 <tr>
 <td style="text-align:left;padding-left: 4em;" indentlevel="1">
 Minnesota
 </td>
 <td style="text-align:right;">
-0.94 (0.70, 1.26)
+0.94 (0.70, 1.27)
 </td>
 <td style="text-align:right;">
-0.98 (0.72, 1.32)
+0.98 (0.73, 1.34)
 </td>
 <td style="text-align:right;">
-0.96 (0.64, 1.44)
+0.96 (0.63, 1.47)
 </td>
 <td style="text-align:right;">
-0.58
+0.56
 </td>
 <td style="text-align:right;">
-1.00 (0.71, 1.40)
+1.00 (0.71, 1.43)
 </td>
 <td style="text-align:right;">
-1.11 (0.77, 1.59)
+1.11 (0.78, 1.60)
 </td>
 <td style="text-align:right;">
-0.90 (0.54, 1.45)
+0.91 (0.54, 1.50)
 </td>
 <td style="text-align:right;">
-0.66
+0.65
+</td>
+<td style="text-align:right;">
+0.94 (0.52, 1.70)
+</td>
+<td style="text-align:right;">
+1.08 (0.60, 1.98)
+</td>
+<td style="text-align:right;">
+0.87 (0.37, 2.03)
+</td>
+<td style="text-align:right;">
+0.62
 </td>
 </tr>
 <tr>
@@ -8776,28 +8953,40 @@ Minnesota
 Other flyway states
 </td>
 <td style="text-align:right;">
-1.12 (0.86, 1.46)
+1.12 (0.86, 1.45)
 </td>
 <td style="text-align:right;">
-0.93 (0.70, 1.23)
+0.93 (0.69, 1.24)
 </td>
 <td style="text-align:right;">
-1.21 (0.87, 1.67)
+1.21 (0.88, 1.68)
 </td>
 <td style="text-align:right;">
 0.88
 </td>
 <td style="text-align:right;">
-1.17 (0.86, 1.59)
+1.16 (0.87, 1.57)
 </td>
 <td style="text-align:right;">
-0.84 (0.60, 1.19)
+0.84 (0.60, 1.16)
 </td>
 <td style="text-align:right;">
-1.39 (0.93, 2.02)
+1.38 (0.95, 2.04)
 </td>
 <td style="text-align:right;">
-0.95
+0.96
+</td>
+<td style="text-align:right;">
+1.31 (0.81, 2.15)
+</td>
+<td style="text-align:right;">
+0.78 (0.45, 1.34)
+</td>
+<td style="text-align:right;">
+1.67 (0.96, 3.02)
+</td>
+<td style="text-align:right;">
+0.96
 </td>
 </tr>
 <tr>
@@ -8808,10 +8997,10 @@ Pooled
 1.05 (0.84, 1.32)
 </td>
 <td style="text-align:right;">
-0.95 (0.75, 1.20)
+0.95 (0.76, 1.20)
 </td>
 <td style="text-align:right;">
-1.11 (0.83, 1.49)
+1.11 (0.84, 1.46)
 </td>
 <td style="text-align:right;">
 0.77
@@ -8823,10 +9012,22 @@ Pooled
 1.01 (0.77, 1.33)
 </td>
 <td style="text-align:right;">
-1.07 (0.78, 1.49)
+1.07 (0.77, 1.48)
 </td>
 <td style="text-align:right;">
-0.67
+0.68
+</td>
+<td style="text-align:right;">
+1.15 (0.76, 1.73)
+</td>
+<td style="text-align:right;">
+0.96 (0.62, 1.49)
+</td>
+<td style="text-align:right;">
+1.20 (0.72, 1.94)
+</td>
+<td style="text-align:right;">
+0.77
 </td>
 </tr>
 <tr>
@@ -8849,34 +9050,54 @@ Runoff
 </td>
 <td style="text-align:right;">
 </td>
+<td style="text-align:right;">
+</td>
+<td style="text-align:right;">
+</td>
+<td style="text-align:right;">
+</td>
+<td style="text-align:right;">
+</td>
 </tr>
 <tr>
 <td style="text-align:left;padding-left: 4em;" indentlevel="1">
 Minnesota
 </td>
 <td style="text-align:right;">
-1.04 (0.66, 1.63)
+1.05 (0.67, 1.65)
 </td>
 <td style="text-align:right;">
-0.93 (0.60, 1.47)
+0.93 (0.60, 1.46)
 </td>
 <td style="text-align:right;">
-1.12 (0.58, 2.14)
+1.13 (0.60, 2.10)
 </td>
 <td style="text-align:right;">
 0.64
 </td>
 <td style="text-align:right;">
-1.24 (0.72, 2.12)
+1.24 (0.73, 2.10)
 </td>
 <td style="text-align:right;">
-0.87 (0.51, 1.50)
+0.88 (0.51, 1.48)
 </td>
 <td style="text-align:right;">
-1.42 (0.66, 2.98)
+1.42 (0.66, 3.00)
 </td>
 <td style="text-align:right;">
-0.81
+0.82
+</td>
+<td style="text-align:right;">
+1.30 (0.53, 3.20)
+</td>
+<td style="text-align:right;">
+0.81 (0.34, 1.99)
+</td>
+<td style="text-align:right;">
+1.61 (0.45, 5.54)
+</td>
+<td style="text-align:right;">
+0.77
 </td>
 </tr>
 <tr>
@@ -8884,28 +9105,40 @@ Minnesota
 Other flyway states
 </td>
 <td style="text-align:right;">
-0.99 (0.55, 1.78)
+0.98 (0.55, 1.74)
 </td>
 <td style="text-align:right;">
-0.93 (0.53, 1.65)
+0.92 (0.52, 1.67)
 </td>
 <td style="text-align:right;">
-1.06 (0.47, 2.39)
+1.06 (0.47, 2.38)
 </td>
 <td style="text-align:right;">
 0.56
 </td>
 <td style="text-align:right;">
-1.00 (0.49, 2.02)
+1.01 (0.50, 2.04)
 </td>
 <td style="text-align:right;">
 0.88 (0.44, 1.77)
 </td>
 <td style="text-align:right;">
-1.15 (0.41, 3.09)
+1.15 (0.43, 3.01)
 </td>
 <td style="text-align:right;">
-0.62
+0.60
+</td>
+<td style="text-align:right;">
+0.99 (0.31, 3.17)
+</td>
+<td style="text-align:right;">
+0.81 (0.26, 2.69)
+</td>
+<td style="text-align:right;">
+1.20 (0.23, 6.11)
+</td>
+<td style="text-align:right;">
+0.59
 </td>
 </tr>
 <tr>
@@ -8913,33 +9146,53 @@ Other flyway states
 Pooled
 </td>
 <td style="text-align:right;">
-1.04 (0.69, 1.54)
+1.04 (0.70, 1.58)
 </td>
 <td style="text-align:right;">
-0.92 (0.61, 1.41)
+0.92 (0.61, 1.40)
 </td>
 <td style="text-align:right;">
-1.13 (0.63, 1.99)
+1.13 (0.63, 2.00)
 </td>
 <td style="text-align:right;">
-0.66
+0.67
 </td>
 <td style="text-align:right;">
-1.20 (0.76, 1.90)
+1.21 (0.77, 1.93)
 </td>
 <td style="text-align:right;">
-0.84 (0.53, 1.38)
+0.85 (0.53, 1.35)
 </td>
 <td style="text-align:right;">
-1.43 (0.75, 2.65)
+1.42 (0.77, 2.70)
 </td>
 <td style="text-align:right;">
-0.86
+0.87
+</td>
+<td style="text-align:right;">
+1.27 (0.59, 2.73)
+</td>
+<td style="text-align:right;">
+0.78 (0.35, 1.75)
+</td>
+<td style="text-align:right;">
+1.61 (0.55, 4.91)
+</td>
+<td style="text-align:right;">
+0.81
 </td>
 </tr>
 <tr>
 <td style="text-align:left;font-weight: bold;">
 90-day shock
+</td>
+<td style="text-align:right;font-weight: bold;">
+</td>
+<td style="text-align:right;font-weight: bold;">
+</td>
+<td style="text-align:right;font-weight: bold;">
+</td>
+<td style="text-align:right;font-weight: bold;">
 </td>
 <td style="text-align:right;font-weight: bold;">
 </td>
@@ -8978,34 +9231,54 @@ Temperature
 </td>
 <td style="text-align:right;">
 </td>
+<td style="text-align:right;">
+</td>
+<td style="text-align:right;">
+</td>
+<td style="text-align:right;">
+</td>
+<td style="text-align:right;">
+</td>
 </tr>
 <tr>
 <td style="text-align:left;padding-left: 4em;" indentlevel="1">
 Minnesota
 </td>
 <td style="text-align:right;">
-0.98 (0.59, 1.63)
+0.99 (0.59, 1.68)
 </td>
 <td style="text-align:right;">
-1.48 (0.87, 2.53)
+1.47 (0.87, 2.45)
 </td>
 <td style="text-align:right;">
-0.66 (0.32, 1.38)
+0.67 (0.32, 1.39)
 </td>
 <td style="text-align:right;">
-0.87
+0.86
 </td>
 <td style="text-align:right;">
-1.22 (0.74, 2.07)
+1.20 (0.73, 1.99)
 </td>
 <td style="text-align:right;">
-1.18 (0.68, 2.01)
+1.16 (0.68, 2.02)
 </td>
 <td style="text-align:right;">
-1.04 (0.52, 2.05)
+1.03 (0.51, 2.01)
 </td>
 <td style="text-align:right;">
-0.54
+0.53
+</td>
+<td style="text-align:right;">
+1.19 (0.52, 2.77)
+</td>
+<td style="text-align:right;">
+1.72 (0.73, 4.03)
+</td>
+<td style="text-align:right;">
+0.69 (0.24, 2.07)
+</td>
+<td style="text-align:right;">
+0.75
 </td>
 </tr>
 <tr>
@@ -9013,25 +9286,37 @@ Minnesota
 Other flyway states
 </td>
 <td style="text-align:right;">
-1.28 (0.77, 2.09)
+1.28 (0.78, 2.12)
 </td>
 <td style="text-align:right;">
-0.67 (0.40, 1.10)
+0.67 (0.41, 1.10)
 </td>
 <td style="text-align:right;">
-<strong>1.93 (1.09, 3.52)</strong>
+<strong>1.91 (1.08, 3.51)</strong>
 </td>
 <td style="text-align:right;">
 0.99
 </td>
 <td style="text-align:right;">
-1.52 (0.88, 2.66)
+1.52 (0.89, 2.65)
 </td>
 <td style="text-align:right;">
 <strong>0.36 (0.20, 0.67)</strong>
 </td>
 <td style="text-align:right;">
-<strong>4.20 (2.01, 8.50)</strong>
+<strong>4.18 (2.07, 8.73)</strong>
+</td>
+<td style="text-align:right;">
+1.00
+</td>
+<td style="text-align:right;">
+1.95 (0.83, 4.71)
+</td>
+<td style="text-align:right;">
+<strong>0.24 (0.10, 0.59)</strong>
+</td>
+<td style="text-align:right;">
+<strong>7.95 (2.91, 22.43)</strong>
 </td>
 <td style="text-align:right;">
 1.00
@@ -9042,25 +9327,37 @@ Other flyway states
 Pooled
 </td>
 <td style="text-align:right;">
-1.27 (0.86, 1.83)
+1.26 (0.89, 1.82)
 </td>
 <td style="text-align:right;">
-1.13 (0.77, 1.65)
+1.13 (0.77, 1.69)
 </td>
 <td style="text-align:right;">
 1.12 (0.70, 1.79)
 </td>
 <td style="text-align:right;">
-0.69
+0.68
 </td>
 <td style="text-align:right;">
-<strong>1.64 (1.12, 2.44)</strong>
+<strong>1.65 (1.13, 2.38)</strong>
 </td>
 <td style="text-align:right;">
-<strong>0.66 (0.45, 0.98)</strong>
+<strong>0.66 (0.44, 0.97)</strong>
 </td>
 <td style="text-align:right;">
-<strong>2.48 (1.51, 3.99)</strong>
+<strong>2.50 (1.53, 4.05)</strong>
+</td>
+<td style="text-align:right;">
+1.00
+</td>
+<td style="text-align:right;">
+<strong>2.09 (1.17, 3.68)</strong>
+</td>
+<td style="text-align:right;">
+0.74 (0.42, 1.35)
+</td>
+<td style="text-align:right;">
+<strong>2.77 (1.43, 5.45)</strong>
 </td>
 <td style="text-align:right;">
 1.00
@@ -9069,6 +9366,14 @@ Pooled
 <tr>
 <td style="text-align:left;padding-left: 2em;" indentlevel="1">
 Precipitation
+</td>
+<td style="text-align:right;">
+</td>
+<td style="text-align:right;">
+</td>
+<td style="text-align:right;">
+</td>
+<td style="text-align:right;">
 </td>
 <td style="text-align:right;">
 </td>
@@ -9095,22 +9400,34 @@ Minnesota
 0.80 (0.61, 1.04)
 </td>
 <td style="text-align:right;">
-1.08 (0.81, 1.44)
+1.08 (0.82, 1.43)
 </td>
 <td style="text-align:right;">
-0.75 (0.48, 1.15)
+0.74 (0.48, 1.15)
 </td>
 <td style="text-align:right;">
 0.91
 </td>
 <td style="text-align:right;">
-<strong>0.67 (0.49, 0.91)</strong>
+<strong>0.67 (0.49, 0.90)</strong>
 </td>
 <td style="text-align:right;">
 1.11 (0.81, 1.52)
 </td>
 <td style="text-align:right;">
-0.60 (0.36, 1.01)
+0.61 (0.36, 1.00)
+</td>
+<td style="text-align:right;">
+0.97
+</td>
+<td style="text-align:right;">
+<strong>0.53 (0.32, 0.87)</strong>
+</td>
+<td style="text-align:right;">
+1.19 (0.72, 2.00)
+</td>
+<td style="text-align:right;">
+0.45 (0.20, 1.00)
 </td>
 <td style="text-align:right;">
 0.97
@@ -9121,28 +9438,40 @@ Minnesota
 Other flyway states
 </td>
 <td style="text-align:right;">
-0.95 (0.71, 1.27)
+0.95 (0.70, 1.27)
 </td>
 <td style="text-align:right;">
-0.85 (0.58, 1.26)
+0.85 (0.58, 1.25)
 </td>
 <td style="text-align:right;">
-1.11 (0.67, 1.81)
+1.11 (0.69, 1.78)
 </td>
 <td style="text-align:right;">
-0.67
+0.68
 </td>
 <td style="text-align:right;">
 1.00 (0.69, 1.43)
 </td>
 <td style="text-align:right;">
-0.89 (0.56, 1.39)
+0.87 (0.56, 1.37)
 </td>
 <td style="text-align:right;">
-1.13 (0.62, 2.07)
+1.14 (0.64, 2.05)
 </td>
 <td style="text-align:right;">
-0.65
+0.67
+</td>
+<td style="text-align:right;">
+0.94 (0.53, 1.68)
+</td>
+<td style="text-align:right;">
+0.74 (0.36, 1.56)
+</td>
+<td style="text-align:right;">
+1.27 (0.50, 3.25)
+</td>
+<td style="text-align:right;">
+0.69
 </td>
 </tr>
 <tr>
@@ -9150,33 +9479,53 @@ Other flyway states
 Pooled
 </td>
 <td style="text-align:right;">
-0.90 (0.73, 1.11)
+0.90 (0.72, 1.11)
 </td>
 <td style="text-align:right;">
-0.88 (0.69, 1.14)
+0.89 (0.68, 1.14)
 </td>
 <td style="text-align:right;">
-1.01 (0.71, 1.45)
+1.01 (0.71, 1.44)
 </td>
 <td style="text-align:right;">
-0.53
+0.51
 </td>
 <td style="text-align:right;">
-<strong>0.77 (0.60, 0.99)</strong>
+<strong>0.77 (0.60, 0.98)</strong>
 </td>
 <td style="text-align:right;">
-0.92 (0.70, 1.22)
+0.92 (0.70, 1.21)
 </td>
 <td style="text-align:right;">
-0.84 (0.55, 1.25)
+0.83 (0.55, 1.26)
 </td>
 <td style="text-align:right;">
-0.80
+0.81
+</td>
+<td style="text-align:right;">
+<strong>0.69 (0.47, 0.99)</strong>
+</td>
+<td style="text-align:right;">
+0.82 (0.53, 1.25)
+</td>
+<td style="text-align:right;">
+0.85 (0.44, 1.59)
+</td>
+<td style="text-align:right;">
+0.70
 </td>
 </tr>
 <tr>
 <td style="text-align:left;padding-left: 2em;" indentlevel="1">
 Soil moisture
+</td>
+<td style="text-align:right;">
+</td>
+<td style="text-align:right;">
+</td>
+<td style="text-align:right;">
+</td>
+<td style="text-align:right;">
 </td>
 <td style="text-align:right;">
 </td>
@@ -9203,25 +9552,37 @@ Minnesota
 0.83 (0.62, 1.11)
 </td>
 <td style="text-align:right;">
-0.99 (0.75, 1.31)
+0.99 (0.75, 1.33)
 </td>
 <td style="text-align:right;">
-0.83 (0.56, 1.23)
+0.83 (0.56, 1.26)
+</td>
+<td style="text-align:right;">
+0.81
+</td>
+<td style="text-align:right;">
+0.84 (0.62, 1.13)
+</td>
+<td style="text-align:right;">
+1.01 (0.76, 1.35)
+</td>
+<td style="text-align:right;">
+0.82 (0.54, 1.25)
 </td>
 <td style="text-align:right;">
 0.82
 </td>
 <td style="text-align:right;">
-0.83 (0.62, 1.12)
+0.69 (0.44, 1.10)
 </td>
 <td style="text-align:right;">
-1.02 (0.77, 1.37)
+1.00 (0.67, 1.54)
 </td>
 <td style="text-align:right;">
-0.82 (0.54, 1.24)
+0.69 (0.38, 1.26)
 </td>
 <td style="text-align:right;">
-0.83
+0.89
 </td>
 </tr>
 <tr>
@@ -9232,25 +9593,37 @@ Other flyway states
 0.95 (0.74, 1.21)
 </td>
 <td style="text-align:right;">
-<strong>0.74 (0.58, 0.95)</strong>
+<strong>0.74 (0.56, 0.95)</strong>
 </td>
 <td style="text-align:right;">
-1.28 (0.92, 1.80)
+1.28 (0.91, 1.80)
 </td>
 <td style="text-align:right;">
-0.92
+0.93
 </td>
 <td style="text-align:right;">
-0.88 (0.66, 1.20)
+0.88 (0.65, 1.19)
 </td>
 <td style="text-align:right;">
-0.74 (0.54, 1.00)
+0.74 (0.54, 1.01)
 </td>
 <td style="text-align:right;">
-1.19 (0.79, 1.82)
+1.20 (0.80, 1.81)
 </td>
 <td style="text-align:right;">
 0.81
+</td>
+<td style="text-align:right;">
+0.84 (0.54, 1.31)
+</td>
+<td style="text-align:right;">
+<strong>0.55 (0.34, 0.88)</strong>
+</td>
+<td style="text-align:right;">
+1.54 (0.85, 2.72)
+</td>
+<td style="text-align:right;">
+0.93
 </td>
 </tr>
 <tr>
@@ -9258,28 +9631,40 @@ Other flyway states
 Pooled
 </td>
 <td style="text-align:right;">
-0.97 (0.78, 1.20)
+0.97 (0.79, 1.21)
 </td>
 <td style="text-align:right;">
-<strong>0.80 (0.65, 0.99)</strong>
+<strong>0.80 (0.64, 0.99)</strong>
 </td>
 <td style="text-align:right;">
-1.21 (0.90, 1.62)
+1.22 (0.91, 1.63)
 </td>
 <td style="text-align:right;">
-0.90
+0.91
 </td>
 <td style="text-align:right;">
-0.90 (0.73, 1.13)
+0.91 (0.73, 1.13)
 </td>
 <td style="text-align:right;">
-0.87 (0.70, 1.10)
+0.87 (0.70, 1.08)
 </td>
 <td style="text-align:right;">
-1.04 (0.75, 1.42)
+1.05 (0.77, 1.43)
 </td>
 <td style="text-align:right;">
-0.60
+0.61
+</td>
+<td style="text-align:right;">
+0.88 (0.65, 1.23)
+</td>
+<td style="text-align:right;">
+<strong>0.69 (0.51, 0.97)</strong>
+</td>
+<td style="text-align:right;">
+1.27 (0.82, 1.96)
+</td>
+<td style="text-align:right;">
+0.86
 </td>
 </tr>
 <tr>
@@ -9302,16 +9687,24 @@ Wind speed
 </td>
 <td style="text-align:right;">
 </td>
+<td style="text-align:right;">
+</td>
+<td style="text-align:right;">
+</td>
+<td style="text-align:right;">
+</td>
+<td style="text-align:right;">
+</td>
 </tr>
 <tr>
 <td style="text-align:left;padding-left: 4em;" indentlevel="1">
 Minnesota
 </td>
 <td style="text-align:right;">
-1.06 (0.85, 1.34)
+1.06 (0.85, 1.32)
 </td>
 <td style="text-align:right;">
-0.94 (0.74, 1.18)
+0.94 (0.75, 1.19)
 </td>
 <td style="text-align:right;">
 1.13 (0.83, 1.56)
@@ -9320,16 +9713,28 @@ Minnesota
 0.77
 </td>
 <td style="text-align:right;">
-1.12 (0.87, 1.48)
+1.12 (0.86, 1.45)
 </td>
 <td style="text-align:right;">
-1.07 (0.83, 1.41)
+1.08 (0.83, 1.42)
 </td>
 <td style="text-align:right;">
-1.04 (0.70, 1.55)
+1.04 (0.70, 1.53)
 </td>
 <td style="text-align:right;">
 0.58
+</td>
+<td style="text-align:right;">
+1.19 (0.77, 1.83)
+</td>
+<td style="text-align:right;">
+1.02 (0.65, 1.60)
+</td>
+<td style="text-align:right;">
+1.17 (0.63, 2.20)
+</td>
+<td style="text-align:right;">
+0.68
 </td>
 </tr>
 <tr>
@@ -9337,28 +9742,40 @@ Minnesota
 Other flyway states
 </td>
 <td style="text-align:right;">
-0.99 (0.78, 1.24)
+0.99 (0.79, 1.25)
 </td>
 <td style="text-align:right;">
-1.09 (0.83, 1.45)
+1.10 (0.81, 1.44)
 </td>
 <td style="text-align:right;">
-0.90 (0.65, 1.27)
+0.91 (0.65, 1.25)
 </td>
 <td style="text-align:right;">
-0.73
+0.72
 </td>
 <td style="text-align:right;">
 0.95 (0.69, 1.30)
 </td>
 <td style="text-align:right;">
-1.25 (0.92, 1.70)
+1.25 (0.93, 1.69)
 </td>
 <td style="text-align:right;">
-0.76 (0.48, 1.20)
+0.76 (0.48, 1.19)
 </td>
 <td style="text-align:right;">
-0.88
+0.89
+</td>
+<td style="text-align:right;">
+0.94 (0.59, 1.49)
+</td>
+<td style="text-align:right;">
+1.38 (0.82, 2.22)
+</td>
+<td style="text-align:right;">
+0.69 (0.35, 1.31)
+</td>
+<td style="text-align:right;">
+0.87
 </td>
 </tr>
 <tr>
@@ -9366,16 +9783,16 @@ Other flyway states
 Pooled
 </td>
 <td style="text-align:right;">
-1.04 (0.88, 1.26)
+1.04 (0.88, 1.24)
 </td>
 <td style="text-align:right;">
-1.03 (0.85, 1.24)
+1.02 (0.86, 1.23)
 </td>
 <td style="text-align:right;">
-1.01 (0.80, 1.29)
+1.02 (0.80, 1.29)
 </td>
 <td style="text-align:right;">
-0.54
+0.56
 </td>
 <td style="text-align:right;">
 1.10 (0.90, 1.36)
@@ -9384,10 +9801,22 @@ Pooled
 1.19 (0.97, 1.47)
 </td>
 <td style="text-align:right;">
-0.92 (0.68, 1.25)
+0.93 (0.68, 1.26)
 </td>
 <td style="text-align:right;">
-0.69
+0.68
+</td>
+<td style="text-align:right;">
+1.16 (0.83, 1.59)
+</td>
+<td style="text-align:right;">
+1.22 (0.88, 1.71)
+</td>
+<td style="text-align:right;">
+0.94 (0.60, 1.49)
+</td>
+<td style="text-align:right;">
+0.60
 </td>
 </tr>
 <tr>
@@ -9410,34 +9839,54 @@ Runoff
 </td>
 <td style="text-align:right;">
 </td>
+<td style="text-align:right;">
+</td>
+<td style="text-align:right;">
+</td>
+<td style="text-align:right;">
+</td>
+<td style="text-align:right;">
+</td>
 </tr>
 <tr>
 <td style="text-align:left;padding-left: 4em;" indentlevel="1">
 Minnesota
 </td>
 <td style="text-align:right;">
-1.12 (0.83, 1.52)
+1.12 (0.84, 1.51)
 </td>
 <td style="text-align:right;">
-0.96 (0.73, 1.29)
+0.96 (0.71, 1.30)
 </td>
 <td style="text-align:right;">
-1.16 (0.75, 1.76)
+1.17 (0.76, 1.80)
 </td>
 <td style="text-align:right;">
-0.75
+0.76
 </td>
 <td style="text-align:right;">
-1.40 (0.99, 2.00)
+1.41 (0.99, 1.99)
 </td>
 <td style="text-align:right;">
-1.03 (0.74, 1.47)
+1.03 (0.72, 1.47)
 </td>
 <td style="text-align:right;">
-1.36 (0.81, 2.27)
+1.37 (0.80, 2.27)
 </td>
 <td style="text-align:right;">
 0.88
+</td>
+<td style="text-align:right;">
+1.58 (0.88, 2.81)
+</td>
+<td style="text-align:right;">
+1.00 (0.56, 1.76)
+</td>
+<td style="text-align:right;">
+1.58 (0.67, 3.68)
+</td>
+<td style="text-align:right;">
+0.86
 </td>
 </tr>
 <tr>
@@ -9445,28 +9894,40 @@ Minnesota
 Other flyway states
 </td>
 <td style="text-align:right;">
-0.93 (0.71, 1.21)
+0.93 (0.73, 1.21)
 </td>
 <td style="text-align:right;">
-0.94 (0.74, 1.19)
+0.93 (0.73, 1.19)
 </td>
 <td style="text-align:right;">
-1.00 (0.69, 1.43)
+1.00 (0.69, 1.41)
 </td>
 <td style="text-align:right;">
-0.51
+0.50
 </td>
 <td style="text-align:right;">
-0.88 (0.65, 1.19)
+0.88 (0.66, 1.18)
 </td>
 <td style="text-align:right;">
-0.97 (0.72, 1.28)
+0.97 (0.73, 1.28)
 </td>
 <td style="text-align:right;">
-0.91 (0.61, 1.38)
+0.91 (0.60, 1.37)
 </td>
 <td style="text-align:right;">
 0.68
+</td>
+<td style="text-align:right;">
+0.82 (0.50, 1.35)
+</td>
+<td style="text-align:right;">
+0.90 (0.57, 1.42)
+</td>
+<td style="text-align:right;">
+0.90 (0.47, 1.78)
+</td>
+<td style="text-align:right;">
+0.61
 </td>
 </tr>
 <tr>
@@ -9474,28 +9935,40 @@ Other flyway states
 Pooled
 </td>
 <td style="text-align:right;">
-1.05 (0.83, 1.33)
+1.05 (0.83, 1.32)
 </td>
 <td style="text-align:right;">
-0.96 (0.77, 1.20)
+0.96 (0.78, 1.20)
 </td>
 <td style="text-align:right;">
-1.09 (0.79, 1.52)
+1.09 (0.77, 1.52)
 </td>
 <td style="text-align:right;">
 0.70
 </td>
 <td style="text-align:right;">
-1.17 (0.90, 1.52)
+1.16 (0.89, 1.52)
 </td>
 <td style="text-align:right;">
-1.09 (0.86, 1.39)
+1.10 (0.86, 1.40)
 </td>
 <td style="text-align:right;">
-1.07 (0.75, 1.54)
+1.06 (0.73, 1.54)
 </td>
 <td style="text-align:right;">
-0.65
+0.62
+</td>
+<td style="text-align:right;">
+1.22 (0.79, 1.88)
+</td>
+<td style="text-align:right;">
+1.05 (0.71, 1.57)
+</td>
+<td style="text-align:right;">
+1.16 (0.64, 2.11)
+</td>
+<td style="text-align:right;">
+0.68
 </td>
 </tr>
 </tbody>
@@ -9503,12 +9976,13 @@ Pooled
 <pre class="r"><code>ir &lt;- setDT(readRDS(paste0(objects_folder, &quot;si_interaction_robustness.RDS&quot;)))     # c_47
 ir[, Kind := norm_model(Kind)]
 CHECKS &lt;- unique(ir$Check)
+WINB &lt;- c(&quot;0-7 days&quot;, &quot;8-14 days&quot;)            # c_47 fits the two bins, not the cumulative
 PN2 &lt;- c(&quot;Minnesota&quot;, &quot;Pooled&quot;)
 CN7b &lt;- as.vector(outer(c(&quot;a&quot;, &quot;b&quot;), c(&quot;mn&quot;, &quot;pl&quot;), paste0))
 b9 &lt;- build_sections(names(KIND), setdiff(EXPO, &quot;Anseriformes&quot;), CHECKS, function(mn, ex, ck) {
   r &lt;- ir[Kind == mn &amp; Exposure == ex &amp; Check == ck]
   if (!nrow(r)) return(NULL)
-  unlist(lapply(PN2, function(pn) vapply(WIN2, function(w) {
+  unlist(lapply(PN2, function(pn) vapply(WINB, function(w) {
     x &lt;- r[Panel == pn &amp; Window == w]; if (nrow(x)) x$ratio[1] else &quot;–&quot; }, character(1))),
     use.names = FALSE)
 }, CN7b)

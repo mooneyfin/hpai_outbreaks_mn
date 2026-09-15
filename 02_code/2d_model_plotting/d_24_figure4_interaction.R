@@ -3,7 +3,7 @@
 # Anseriformes abundance three weeks earlier. This is the pre-stated interaction model (c_50):
 # strata lag basis, continuous modifier, primary prior, both parameterisations, all panels.
 #
-# Both pre-stated windows are drawn, 0-7 and 8-14 days. The hypothesis named "the two weeks
+# Both pre-stated windows are drawn, 0-7 and 8-14 days, and their cumulative 0-14. The hypothesis named "the two weeks
 # before", and showing only the window that produced the result would be choosing it after the
 # fact. Anseriformes is not a row here: it is the modifier, not an exposure being modified.
 #
@@ -42,13 +42,13 @@ dat <- rbindlist(lapply(names(GRP), function(g)
 dat <- dat[Exposure %in% EXPO_ORD]
 stopifnot(!anyNA(dat$RR), all(EXPO_ORD %in% dat$Exposure), all(PANEL_ORD %in% dat$Panel))
 dat[, `:=`(Panel = factor(Panel, levels = PANEL_ORD),
-           Window = factor(paste("Lag", Window), levels = c("Lag 0-7 days", "Lag 8-14 days")),
+           Window = factor(paste("Lag", Window), levels = c("Lag 0-7 days", "Lag 8-14 days", "Lag 0-14 days")),
            Exposure = factor(Exposure, levels = rev(EXPO_ORD)),
            group = factor(group, levels = unname(GRP)))]
 fwrite(dat, paste0(objects_folder, "figure4_interaction.csv"))
 
-one_block <- function(kind, keep_xlab) {
-  ggplot(dat[Kind == kind], aes(RR, Exposure, colour = group, shape = group)) +
+one_block <- function(kind, keep_xlab, wins) {
+  ggplot(dat[Kind == kind & Window %in% wins], aes(RR, Exposure, colour = group, shape = group)) +
     geom_vline(xintercept = 1, colour = "grey45", linewidth = 0.3) +
     geom_errorbar(aes(xmin = low, xmax = high), width = 0, linewidth = 0.55,
                   orientation = "y", position = position_dodge(width = 0.6, reverse = TRUE)) +
@@ -73,7 +73,18 @@ one_block <- function(kind, keep_xlab) {
           axis.title = element_text(size = 11),
           panel.border = element_rect(fill = NA, colour = "grey20", linewidth = 0.4))
 }
-fig <- one_block("Absolute conditions", FALSE) / one_block("90-day shock", TRUE)
-ggsave_spark(file.path(figures_main_folder, "figure4_interaction.png"), fig, width = 12, height = 13)
-cat("wrote figure4_interaction.png\n")
+# Three versions, so the choice of what to show can be made by looking rather than arguing:
+#   v1  the 8-14 day window alone (the window the result lives in)
+#   v2  both pre-stated bins, 0-7 and 8-14
+#   v3  both bins plus their cumulative 0-14 (the reference figure4_interaction.png)
+VERSIONS <- list(
+  `figure4_interaction_v1_8-14only`   = list(wins = "Lag 8-14 days", h = 8.5),
+  `figure4_interaction_v2_two_windows` = list(wins = c("Lag 0-7 days", "Lag 8-14 days"), h = 13),
+  `figure4_interaction`               = list(wins = c("Lag 0-7 days", "Lag 8-14 days", "Lag 0-14 days"), h = 18))
+for (nm in names(VERSIONS)) {
+  v <- VERSIONS[[nm]]
+  fig <- one_block("Absolute conditions", FALSE, v$wins) / one_block("90-day shock", TRUE, v$wins)
+  ggsave_spark(file.path(figures_main_folder, paste0(nm, ".png")), fig, width = 12, height = v$h)
+  cat("wrote", nm, "\n")
+}
 print(dcast(dat[Exposure == "Temperature"], Kind + Panel + Window ~ group, value.var = "RR"))

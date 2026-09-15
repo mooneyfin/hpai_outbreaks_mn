@@ -36,7 +36,10 @@ source(paste0(functions.folder, 'inla_dlnm_helpers.R'))
 
 PREC    <- INLA_PREC_PRIMARY          # same prior as the primary model
 MAXLAG  <- 14
-WINDOW  <- list(`0-7 days` = 0:7, `8-14 days` = 8:14)
+# the two pre-stated bins, plus their sum. With a strata basis the bins are independent
+# coefficients, so 0-14 is just w_a + w_b read off the same posterior - the interval comes from
+# the joint draws, which is why it is computed here rather than multiplied by hand
+WINDOW  <- list(`0-7 days` = 0:7, `8-14 days` = 8:14, `0-14 days` = 0:14)
 BIRDLAG <- 21:28
 ARGLAG  <- list(fun = "strata", breaks = 8)
 # exposures come from INLA_PRIMARY_* in inla_dlnm_helpers.R - never redefined locally
