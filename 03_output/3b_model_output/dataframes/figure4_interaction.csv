@@ -1,181 +1,181 @@
 Kind,Panel,Exposure,Window,n,group,RR,low,high
-Absolute conditions,Minnesota,Temperature,Lag 0-7 days,85,"High waterfowl (+1 SD, lag 15-28 d)",1.23,0.78,1.94
-Absolute conditions,Minnesota,Temperature,Lag 8-14 days,85,"High waterfowl (+1 SD, lag 15-28 d)",1.14,0.64,1.99
-Absolute conditions,Minnesota,Temperature,Lag 0-14 days,85,"High waterfowl (+1 SD, lag 15-28 d)",1.41,0.61,3.28
-Absolute conditions,Minnesota,Precipitation,Lag 0-7 days,85,"High waterfowl (+1 SD, lag 15-28 d)",0.84,0.55,1.27
-Absolute conditions,Minnesota,Precipitation,Lag 8-14 days,85,"High waterfowl (+1 SD, lag 15-28 d)",0.6,0.38,0.93
-Absolute conditions,Minnesota,Precipitation,Lag 0-14 days,85,"High waterfowl (+1 SD, lag 15-28 d)",0.5,0.23,1.06
-Absolute conditions,Minnesota,Soil moisture,Lag 0-7 days,85,"High waterfowl (+1 SD, lag 15-28 d)",0.93,0.58,1.51
-Absolute conditions,Minnesota,Soil moisture,Lag 8-14 days,85,"High waterfowl (+1 SD, lag 15-28 d)",0.91,0.56,1.47
-Absolute conditions,Minnesota,Soil moisture,Lag 0-14 days,85,"High waterfowl (+1 SD, lag 15-28 d)",0.85,0.38,1.89
-Absolute conditions,Minnesota,Wind speed,Lag 0-7 days,85,"High waterfowl (+1 SD, lag 15-28 d)",0.92,0.68,1.24
-Absolute conditions,Minnesota,Wind speed,Lag 8-14 days,85,"High waterfowl (+1 SD, lag 15-28 d)",1.02,0.72,1.44
-Absolute conditions,Minnesota,Wind speed,Lag 0-14 days,85,"High waterfowl (+1 SD, lag 15-28 d)",0.95,0.53,1.71
-Absolute conditions,Minnesota,Runoff,Lag 0-7 days,85,"High waterfowl (+1 SD, lag 15-28 d)",1.08,0.69,1.66
-Absolute conditions,Minnesota,Runoff,Lag 8-14 days,85,"High waterfowl (+1 SD, lag 15-28 d)",1.27,0.77,2.11
-Absolute conditions,Minnesota,Runoff,Lag 0-14 days,85,"High waterfowl (+1 SD, lag 15-28 d)",1.38,0.57,3.22
-Absolute conditions,Other northern Mississippi Flyway states,Temperature,Lag 0-7 days,90,"High waterfowl (+1 SD, lag 15-28 d)",0.9,0.62,1.28
-Absolute conditions,Other northern Mississippi Flyway states,Temperature,Lag 8-14 days,90,"High waterfowl (+1 SD, lag 15-28 d)",1.01,0.68,1.55
-Absolute conditions,Other northern Mississippi Flyway states,Temperature,Lag 0-14 days,90,"High waterfowl (+1 SD, lag 15-28 d)",0.91,0.5,1.67
-Absolute conditions,Other northern Mississippi Flyway states,Precipitation,Lag 0-7 days,90,"High waterfowl (+1 SD, lag 15-28 d)",1.02,0.66,1.59
-Absolute conditions,Other northern Mississippi Flyway states,Precipitation,Lag 8-14 days,90,"High waterfowl (+1 SD, lag 15-28 d)",0.93,0.59,1.44
-Absolute conditions,Other northern Mississippi Flyway states,Precipitation,Lag 0-14 days,90,"High waterfowl (+1 SD, lag 15-28 d)",0.94,0.43,2.02
-Absolute conditions,Other northern Mississippi Flyway states,Soil moisture,Lag 0-7 days,90,"High waterfowl (+1 SD, lag 15-28 d)",1.22,0.82,1.87
-Absolute conditions,Other northern Mississippi Flyway states,Soil moisture,Lag 8-14 days,90,"High waterfowl (+1 SD, lag 15-28 d)",1.42,0.9,2.25
-Absolute conditions,Other northern Mississippi Flyway states,Soil moisture,Lag 0-14 days,90,"High waterfowl (+1 SD, lag 15-28 d)",1.77,0.85,3.59
-Absolute conditions,Other northern Mississippi Flyway states,Wind speed,Lag 0-7 days,90,"High waterfowl (+1 SD, lag 15-28 d)",1.13,0.87,1.47
-Absolute conditions,Other northern Mississippi Flyway states,Wind speed,Lag 8-14 days,90,"High waterfowl (+1 SD, lag 15-28 d)",1.19,0.88,1.62
-Absolute conditions,Other northern Mississippi Flyway states,Wind speed,Lag 0-14 days,90,"High waterfowl (+1 SD, lag 15-28 d)",1.34,0.82,2.22
-Absolute conditions,Other northern Mississippi Flyway states,Runoff,Lag 0-7 days,90,"High waterfowl (+1 SD, lag 15-28 d)",0.98,0.56,1.74
-Absolute conditions,Other northern Mississippi Flyway states,Runoff,Lag 8-14 days,90,"High waterfowl (+1 SD, lag 15-28 d)",1.01,0.51,2.06
-Absolute conditions,Other northern Mississippi Flyway states,Runoff,Lag 0-14 days,90,"High waterfowl (+1 SD, lag 15-28 d)",1,0.32,3.26
-Absolute conditions,All northern Mississippi Flyway states,Temperature,Lag 0-7 days,175,"High waterfowl (+1 SD, lag 15-28 d)",0.96,0.7,1.31
-Absolute conditions,All northern Mississippi Flyway states,Temperature,Lag 8-14 days,175,"High waterfowl (+1 SD, lag 15-28 d)",1.12,0.78,1.61
-Absolute conditions,All northern Mississippi Flyway states,Temperature,Lag 0-14 days,175,"High waterfowl (+1 SD, lag 15-28 d)",1.08,0.65,1.8
-Absolute conditions,All northern Mississippi Flyway states,Precipitation,Lag 0-7 days,175,"High waterfowl (+1 SD, lag 15-28 d)",0.98,0.7,1.37
-Absolute conditions,All northern Mississippi Flyway states,Precipitation,Lag 8-14 days,175,"High waterfowl (+1 SD, lag 15-28 d)",0.73,0.53,1.01
-Absolute conditions,All northern Mississippi Flyway states,Precipitation,Lag 0-14 days,175,"High waterfowl (+1 SD, lag 15-28 d)",0.71,0.41,1.24
-Absolute conditions,All northern Mississippi Flyway states,Soil moisture,Lag 0-7 days,175,"High waterfowl (+1 SD, lag 15-28 d)",1.08,0.76,1.52
-Absolute conditions,All northern Mississippi Flyway states,Soil moisture,Lag 8-14 days,175,"High waterfowl (+1 SD, lag 15-28 d)",1.19,0.81,1.72
-Absolute conditions,All northern Mississippi Flyway states,Soil moisture,Lag 0-14 days,175,"High waterfowl (+1 SD, lag 15-28 d)",1.29,0.72,2.27
-Absolute conditions,All northern Mississippi Flyway states,Wind speed,Lag 0-7 days,175,"High waterfowl (+1 SD, lag 15-28 d)",1.06,0.85,1.34
-Absolute conditions,All northern Mississippi Flyway states,Wind speed,Lag 8-14 days,175,"High waterfowl (+1 SD, lag 15-28 d)",1.15,0.9,1.47
-Absolute conditions,All northern Mississippi Flyway states,Wind speed,Lag 0-14 days,175,"High waterfowl (+1 SD, lag 15-28 d)",1.22,0.82,1.85
-Absolute conditions,All northern Mississippi Flyway states,Runoff,Lag 0-7 days,175,"High waterfowl (+1 SD, lag 15-28 d)",1.1,0.75,1.6
-Absolute conditions,All northern Mississippi Flyway states,Runoff,Lag 8-14 days,175,"High waterfowl (+1 SD, lag 15-28 d)",1.27,0.82,1.97
-Absolute conditions,All northern Mississippi Flyway states,Runoff,Lag 0-14 days,175,"High waterfowl (+1 SD, lag 15-28 d)",1.4,0.68,2.85
-90-day shock,Minnesota,Temperature,Lag 0-7 days,85,"High waterfowl (+1 SD, lag 15-28 d)",1.02,0.62,1.7
-90-day shock,Minnesota,Temperature,Lag 8-14 days,85,"High waterfowl (+1 SD, lag 15-28 d)",1.26,0.76,2.07
-90-day shock,Minnesota,Temperature,Lag 0-14 days,85,"High waterfowl (+1 SD, lag 15-28 d)",1.29,0.55,2.88
-90-day shock,Minnesota,Precipitation,Lag 0-7 days,85,"High waterfowl (+1 SD, lag 15-28 d)",0.79,0.62,1.02
-90-day shock,Minnesota,Precipitation,Lag 8-14 days,85,"High waterfowl (+1 SD, lag 15-28 d)",0.6,0.44,0.81
-90-day shock,Minnesota,Precipitation,Lag 0-14 days,85,"High waterfowl (+1 SD, lag 15-28 d)",0.48,0.29,0.77
-90-day shock,Minnesota,Soil moisture,Lag 0-7 days,85,"High waterfowl (+1 SD, lag 15-28 d)",0.82,0.62,1.11
-90-day shock,Minnesota,Soil moisture,Lag 8-14 days,85,"High waterfowl (+1 SD, lag 15-28 d)",0.83,0.61,1.1
-90-day shock,Minnesota,Soil moisture,Lag 0-14 days,85,"High waterfowl (+1 SD, lag 15-28 d)",0.68,0.43,1.06
-90-day shock,Minnesota,Wind speed,Lag 0-7 days,85,"High waterfowl (+1 SD, lag 15-28 d)",1,0.8,1.25
-90-day shock,Minnesota,Wind speed,Lag 8-14 days,85,"High waterfowl (+1 SD, lag 15-28 d)",1.08,0.83,1.41
-90-day shock,Minnesota,Wind speed,Lag 0-14 days,85,"High waterfowl (+1 SD, lag 15-28 d)",1.08,0.69,1.69
-90-day shock,Minnesota,Runoff,Lag 0-7 days,85,"High waterfowl (+1 SD, lag 15-28 d)",1.16,0.86,1.59
-90-day shock,Minnesota,Runoff,Lag 8-14 days,85,"High waterfowl (+1 SD, lag 15-28 d)",1.46,1.03,2.07
-90-day shock,Minnesota,Runoff,Lag 0-14 days,85,"High waterfowl (+1 SD, lag 15-28 d)",1.7,0.94,3.07
-90-day shock,Other northern Mississippi Flyway states,Temperature,Lag 0-7 days,90,"High waterfowl (+1 SD, lag 15-28 d)",1.31,0.79,2.18
-90-day shock,Other northern Mississippi Flyway states,Temperature,Lag 8-14 days,90,"High waterfowl (+1 SD, lag 15-28 d)",1.53,0.87,2.73
-90-day shock,Other northern Mississippi Flyway states,Temperature,Lag 0-14 days,90,"High waterfowl (+1 SD, lag 15-28 d)",1.99,0.8,5.04
-90-day shock,Other northern Mississippi Flyway states,Precipitation,Lag 0-7 days,90,"High waterfowl (+1 SD, lag 15-28 d)",0.96,0.71,1.3
-90-day shock,Other northern Mississippi Flyway states,Precipitation,Lag 8-14 days,90,"High waterfowl (+1 SD, lag 15-28 d)",1,0.69,1.46
-90-day shock,Other northern Mississippi Flyway states,Precipitation,Lag 0-14 days,90,"High waterfowl (+1 SD, lag 15-28 d)",0.96,0.54,1.72
-90-day shock,Other northern Mississippi Flyway states,Soil moisture,Lag 0-7 days,90,"High waterfowl (+1 SD, lag 15-28 d)",0.93,0.73,1.2
-90-day shock,Other northern Mississippi Flyway states,Soil moisture,Lag 8-14 days,90,"High waterfowl (+1 SD, lag 15-28 d)",0.87,0.66,1.19
-90-day shock,Other northern Mississippi Flyway states,Soil moisture,Lag 0-14 days,90,"High waterfowl (+1 SD, lag 15-28 d)",0.82,0.53,1.28
-90-day shock,Other northern Mississippi Flyway states,Wind speed,Lag 0-7 days,90,"High waterfowl (+1 SD, lag 15-28 d)",1.01,0.8,1.27
-90-day shock,Other northern Mississippi Flyway states,Wind speed,Lag 8-14 days,90,"High waterfowl (+1 SD, lag 15-28 d)",0.96,0.69,1.33
-90-day shock,Other northern Mississippi Flyway states,Wind speed,Lag 0-14 days,90,"High waterfowl (+1 SD, lag 15-28 d)",0.97,0.6,1.55
-90-day shock,Other northern Mississippi Flyway states,Runoff,Lag 0-7 days,90,"High waterfowl (+1 SD, lag 15-28 d)",0.96,0.74,1.24
-90-day shock,Other northern Mississippi Flyway states,Runoff,Lag 8-14 days,90,"High waterfowl (+1 SD, lag 15-28 d)",0.91,0.67,1.24
-90-day shock,Other northern Mississippi Flyway states,Runoff,Lag 0-14 days,90,"High waterfowl (+1 SD, lag 15-28 d)",0.87,0.53,1.45
-90-day shock,All northern Mississippi Flyway states,Temperature,Lag 0-7 days,175,"High waterfowl (+1 SD, lag 15-28 d)",1.34,0.92,1.89
-90-day shock,All northern Mississippi Flyway states,Temperature,Lag 8-14 days,175,"High waterfowl (+1 SD, lag 15-28 d)",1.78,1.21,2.6
-90-day shock,All northern Mississippi Flyway states,Temperature,Lag 0-14 days,175,"High waterfowl (+1 SD, lag 15-28 d)",2.37,1.29,4.18
-90-day shock,All northern Mississippi Flyway states,Precipitation,Lag 0-7 days,175,"High waterfowl (+1 SD, lag 15-28 d)",0.91,0.74,1.12
-90-day shock,All northern Mississippi Flyway states,Precipitation,Lag 8-14 days,175,"High waterfowl (+1 SD, lag 15-28 d)",0.75,0.59,0.96
-90-day shock,All northern Mississippi Flyway states,Precipitation,Lag 0-14 days,175,"High waterfowl (+1 SD, lag 15-28 d)",0.68,0.47,0.99
-90-day shock,All northern Mississippi Flyway states,Soil moisture,Lag 0-7 days,175,"High waterfowl (+1 SD, lag 15-28 d)",0.95,0.77,1.17
-90-day shock,All northern Mississippi Flyway states,Soil moisture,Lag 8-14 days,175,"High waterfowl (+1 SD, lag 15-28 d)",0.89,0.71,1.1
-90-day shock,All northern Mississippi Flyway states,Soil moisture,Lag 0-14 days,175,"High waterfowl (+1 SD, lag 15-28 d)",0.84,0.61,1.17
-90-day shock,All northern Mississippi Flyway states,Wind speed,Lag 0-7 days,175,"High waterfowl (+1 SD, lag 15-28 d)",1.01,0.85,1.19
-90-day shock,All northern Mississippi Flyway states,Wind speed,Lag 8-14 days,175,"High waterfowl (+1 SD, lag 15-28 d)",1.08,0.87,1.33
-90-day shock,All northern Mississippi Flyway states,Wind speed,Lag 0-14 days,175,"High waterfowl (+1 SD, lag 15-28 d)",1.09,0.78,1.49
-90-day shock,All northern Mississippi Flyway states,Runoff,Lag 0-7 days,175,"High waterfowl (+1 SD, lag 15-28 d)",1.08,0.86,1.37
-90-day shock,All northern Mississippi Flyway states,Runoff,Lag 8-14 days,175,"High waterfowl (+1 SD, lag 15-28 d)",1.19,0.92,1.56
-90-day shock,All northern Mississippi Flyway states,Runoff,Lag 0-14 days,175,"High waterfowl (+1 SD, lag 15-28 d)",1.3,0.84,2.01
-Absolute conditions,Minnesota,Temperature,Lag 0-7 days,85,"Low waterfowl (-1 SD, lag 15-28 d)",1.09,0.7,1.67
-Absolute conditions,Minnesota,Temperature,Lag 8-14 days,85,"Low waterfowl (-1 SD, lag 15-28 d)",0.78,0.48,1.3
-Absolute conditions,Minnesota,Temperature,Lag 0-14 days,85,"Low waterfowl (-1 SD, lag 15-28 d)",0.85,0.42,1.74
-Absolute conditions,Minnesota,Precipitation,Lag 0-7 days,85,"Low waterfowl (-1 SD, lag 15-28 d)",1.07,0.66,1.78
-Absolute conditions,Minnesota,Precipitation,Lag 8-14 days,85,"Low waterfowl (-1 SD, lag 15-28 d)",1.05,0.62,1.85
-Absolute conditions,Minnesota,Precipitation,Lag 0-14 days,85,"Low waterfowl (-1 SD, lag 15-28 d)",1.13,0.46,2.88
-Absolute conditions,Minnesota,Soil moisture,Lag 0-7 days,85,"Low waterfowl (-1 SD, lag 15-28 d)",1.02,0.6,1.74
-Absolute conditions,Minnesota,Soil moisture,Lag 8-14 days,85,"Low waterfowl (-1 SD, lag 15-28 d)",1.15,0.64,2.09
-Absolute conditions,Minnesota,Soil moisture,Lag 0-14 days,85,"Low waterfowl (-1 SD, lag 15-28 d)",1.17,0.46,2.99
-Absolute conditions,Minnesota,Wind speed,Lag 0-7 days,85,"Low waterfowl (-1 SD, lag 15-28 d)",0.98,0.72,1.34
-Absolute conditions,Minnesota,Wind speed,Lag 8-14 days,85,"Low waterfowl (-1 SD, lag 15-28 d)",1.08,0.75,1.55
-Absolute conditions,Minnesota,Wind speed,Lag 0-14 days,85,"Low waterfowl (-1 SD, lag 15-28 d)",1.06,0.58,1.92
-Absolute conditions,Minnesota,Runoff,Lag 0-7 days,85,"Low waterfowl (-1 SD, lag 15-28 d)",0.9,0.57,1.42
-Absolute conditions,Minnesota,Runoff,Lag 8-14 days,85,"Low waterfowl (-1 SD, lag 15-28 d)",0.85,0.5,1.44
-Absolute conditions,Minnesota,Runoff,Lag 0-14 days,85,"Low waterfowl (-1 SD, lag 15-28 d)",0.76,0.31,1.88
-Absolute conditions,Other northern Mississippi Flyway states,Temperature,Lag 0-7 days,90,"Low waterfowl (-1 SD, lag 15-28 d)",1.23,0.9,1.72
-Absolute conditions,Other northern Mississippi Flyway states,Temperature,Lag 8-14 days,90,"Low waterfowl (-1 SD, lag 15-28 d)",0.84,0.58,1.19
-Absolute conditions,Other northern Mississippi Flyway states,Temperature,Lag 0-14 days,90,"Low waterfowl (-1 SD, lag 15-28 d)",1.03,0.65,1.66
-Absolute conditions,Other northern Mississippi Flyway states,Precipitation,Lag 0-7 days,90,"Low waterfowl (-1 SD, lag 15-28 d)",0.77,0.49,1.24
-Absolute conditions,Other northern Mississippi Flyway states,Precipitation,Lag 8-14 days,90,"Low waterfowl (-1 SD, lag 15-28 d)",0.78,0.48,1.26
-Absolute conditions,Other northern Mississippi Flyway states,Precipitation,Lag 0-14 days,90,"Low waterfowl (-1 SD, lag 15-28 d)",0.61,0.27,1.33
-Absolute conditions,Other northern Mississippi Flyway states,Soil moisture,Lag 0-7 days,90,"Low waterfowl (-1 SD, lag 15-28 d)",0.9,0.57,1.41
-Absolute conditions,Other northern Mississippi Flyway states,Soil moisture,Lag 8-14 days,90,"Low waterfowl (-1 SD, lag 15-28 d)",0.89,0.55,1.52
-Absolute conditions,Other northern Mississippi Flyway states,Soil moisture,Lag 0-14 days,90,"Low waterfowl (-1 SD, lag 15-28 d)",0.81,0.37,1.75
-Absolute conditions,Other northern Mississippi Flyway states,Wind speed,Lag 0-7 days,90,"Low waterfowl (-1 SD, lag 15-28 d)",0.95,0.7,1.26
-Absolute conditions,Other northern Mississippi Flyway states,Wind speed,Lag 8-14 days,90,"Low waterfowl (-1 SD, lag 15-28 d)",0.85,0.61,1.18
-Absolute conditions,Other northern Mississippi Flyway states,Wind speed,Lag 0-14 days,90,"Low waterfowl (-1 SD, lag 15-28 d)",0.8,0.46,1.38
-Absolute conditions,Other northern Mississippi Flyway states,Runoff,Lag 0-7 days,90,"Low waterfowl (-1 SD, lag 15-28 d)",0.92,0.51,1.65
-Absolute conditions,Other northern Mississippi Flyway states,Runoff,Lag 8-14 days,90,"Low waterfowl (-1 SD, lag 15-28 d)",0.86,0.42,1.77
-Absolute conditions,Other northern Mississippi Flyway states,Runoff,Lag 0-14 days,90,"Low waterfowl (-1 SD, lag 15-28 d)",0.8,0.24,2.69
-Absolute conditions,All northern Mississippi Flyway states,Temperature,Lag 0-7 days,175,"Low waterfowl (-1 SD, lag 15-28 d)",1.37,1.01,1.85
-Absolute conditions,All northern Mississippi Flyway states,Temperature,Lag 8-14 days,175,"Low waterfowl (-1 SD, lag 15-28 d)",0.73,0.53,1
-Absolute conditions,All northern Mississippi Flyway states,Temperature,Lag 0-14 days,175,"Low waterfowl (-1 SD, lag 15-28 d)",0.99,0.65,1.49
-Absolute conditions,All northern Mississippi Flyway states,Precipitation,Lag 0-7 days,175,"Low waterfowl (-1 SD, lag 15-28 d)",0.85,0.57,1.25
-Absolute conditions,All northern Mississippi Flyway states,Precipitation,Lag 8-14 days,175,"Low waterfowl (-1 SD, lag 15-28 d)",0.81,0.54,1.18
-Absolute conditions,All northern Mississippi Flyway states,Precipitation,Lag 0-14 days,175,"Low waterfowl (-1 SD, lag 15-28 d)",0.68,0.35,1.28
-Absolute conditions,All northern Mississippi Flyway states,Soil moisture,Lag 0-7 days,175,"Low waterfowl (-1 SD, lag 15-28 d)",0.93,0.62,1.38
-Absolute conditions,All northern Mississippi Flyway states,Soil moisture,Lag 8-14 days,175,"Low waterfowl (-1 SD, lag 15-28 d)",1,0.65,1.52
-Absolute conditions,All northern Mississippi Flyway states,Soil moisture,Lag 0-14 days,175,"Low waterfowl (-1 SD, lag 15-28 d)",0.92,0.48,1.74
-Absolute conditions,All northern Mississippi Flyway states,Wind speed,Lag 0-7 days,175,"Low waterfowl (-1 SD, lag 15-28 d)",0.95,0.75,1.21
-Absolute conditions,All northern Mississippi Flyway states,Wind speed,Lag 8-14 days,175,"Low waterfowl (-1 SD, lag 15-28 d)",0.96,0.73,1.26
-Absolute conditions,All northern Mississippi Flyway states,Wind speed,Lag 0-14 days,175,"Low waterfowl (-1 SD, lag 15-28 d)",0.92,0.58,1.43
-Absolute conditions,All northern Mississippi Flyway states,Runoff,Lag 0-7 days,175,"Low waterfowl (-1 SD, lag 15-28 d)",0.87,0.57,1.35
-Absolute conditions,All northern Mississippi Flyway states,Runoff,Lag 8-14 days,175,"Low waterfowl (-1 SD, lag 15-28 d)",0.81,0.49,1.31
-Absolute conditions,All northern Mississippi Flyway states,Runoff,Lag 0-14 days,175,"Low waterfowl (-1 SD, lag 15-28 d)",0.7,0.31,1.65
-90-day shock,Minnesota,Temperature,Lag 0-7 days,85,"Low waterfowl (-1 SD, lag 15-28 d)",1.39,0.84,2.35
-90-day shock,Minnesota,Temperature,Lag 8-14 days,85,"Low waterfowl (-1 SD, lag 15-28 d)",1.13,0.67,1.91
-90-day shock,Minnesota,Temperature,Lag 0-14 days,85,"Low waterfowl (-1 SD, lag 15-28 d)",1.58,0.67,3.61
-90-day shock,Minnesota,Precipitation,Lag 0-7 days,85,"Low waterfowl (-1 SD, lag 15-28 d)",1.11,0.83,1.5
-90-day shock,Minnesota,Precipitation,Lag 8-14 days,85,"Low waterfowl (-1 SD, lag 15-28 d)",1.2,0.88,1.64
-90-day shock,Minnesota,Precipitation,Lag 0-14 days,85,"Low waterfowl (-1 SD, lag 15-28 d)",1.32,0.82,2.23
-90-day shock,Minnesota,Soil moisture,Lag 0-7 days,85,"Low waterfowl (-1 SD, lag 15-28 d)",0.99,0.73,1.34
-90-day shock,Minnesota,Soil moisture,Lag 8-14 days,85,"Low waterfowl (-1 SD, lag 15-28 d)",1.03,0.77,1.38
-90-day shock,Minnesota,Soil moisture,Lag 0-14 days,85,"Low waterfowl (-1 SD, lag 15-28 d)",1.03,0.65,1.64
-90-day shock,Minnesota,Wind speed,Lag 0-7 days,85,"Low waterfowl (-1 SD, lag 15-28 d)",1.01,0.81,1.25
-90-day shock,Minnesota,Wind speed,Lag 8-14 days,85,"Low waterfowl (-1 SD, lag 15-28 d)",1.16,0.9,1.51
-90-day shock,Minnesota,Wind speed,Lag 0-14 days,85,"Low waterfowl (-1 SD, lag 15-28 d)",1.16,0.78,1.77
-90-day shock,Minnesota,Runoff,Lag 0-7 days,85,"Low waterfowl (-1 SD, lag 15-28 d)",0.92,0.69,1.22
-90-day shock,Minnesota,Runoff,Lag 8-14 days,85,"Low waterfowl (-1 SD, lag 15-28 d)",0.99,0.7,1.39
-90-day shock,Minnesota,Runoff,Lag 0-14 days,85,"Low waterfowl (-1 SD, lag 15-28 d)",0.91,0.51,1.59
-90-day shock,Other northern Mississippi Flyway states,Temperature,Lag 0-7 days,90,"Low waterfowl (-1 SD, lag 15-28 d)",0.69,0.42,1.15
-90-day shock,Other northern Mississippi Flyway states,Temperature,Lag 8-14 days,90,"Low waterfowl (-1 SD, lag 15-28 d)",0.39,0.21,0.7
-90-day shock,Other northern Mississippi Flyway states,Temperature,Lag 0-14 days,90,"Low waterfowl (-1 SD, lag 15-28 d)",0.27,0.11,0.64
-90-day shock,Other northern Mississippi Flyway states,Precipitation,Lag 0-7 days,90,"Low waterfowl (-1 SD, lag 15-28 d)",0.85,0.58,1.26
-90-day shock,Other northern Mississippi Flyway states,Precipitation,Lag 8-14 days,90,"Low waterfowl (-1 SD, lag 15-28 d)",0.92,0.58,1.46
-90-day shock,Other northern Mississippi Flyway states,Precipitation,Lag 0-14 days,90,"Low waterfowl (-1 SD, lag 15-28 d)",0.79,0.37,1.68
-90-day shock,Other northern Mississippi Flyway states,Soil moisture,Lag 0-7 days,90,"Low waterfowl (-1 SD, lag 15-28 d)",0.74,0.57,0.95
-90-day shock,Other northern Mississippi Flyway states,Soil moisture,Lag 8-14 days,90,"Low waterfowl (-1 SD, lag 15-28 d)",0.73,0.53,1
-90-day shock,Other northern Mississippi Flyway states,Soil moisture,Lag 0-14 days,90,"Low waterfowl (-1 SD, lag 15-28 d)",0.54,0.34,0.86
-90-day shock,Other northern Mississippi Flyway states,Wind speed,Lag 0-7 days,90,"Low waterfowl (-1 SD, lag 15-28 d)",1.08,0.82,1.43
-90-day shock,Other northern Mississippi Flyway states,Wind speed,Lag 8-14 days,90,"Low waterfowl (-1 SD, lag 15-28 d)",1.27,0.95,1.71
-90-day shock,Other northern Mississippi Flyway states,Wind speed,Lag 0-14 days,90,"Low waterfowl (-1 SD, lag 15-28 d)",1.38,0.84,2.22
-90-day shock,Other northern Mississippi Flyway states,Runoff,Lag 0-7 days,90,"Low waterfowl (-1 SD, lag 15-28 d)",0.92,0.71,1.18
-90-day shock,Other northern Mississippi Flyway states,Runoff,Lag 8-14 days,90,"Low waterfowl (-1 SD, lag 15-28 d)",0.95,0.71,1.26
-90-day shock,Other northern Mississippi Flyway states,Runoff,Lag 0-14 days,90,"Low waterfowl (-1 SD, lag 15-28 d)",0.87,0.55,1.37
-90-day shock,All northern Mississippi Flyway states,Temperature,Lag 0-7 days,175,"Low waterfowl (-1 SD, lag 15-28 d)",0.98,0.66,1.43
-90-day shock,All northern Mississippi Flyway states,Temperature,Lag 8-14 days,175,"Low waterfowl (-1 SD, lag 15-28 d)",0.58,0.39,0.89
-90-day shock,All northern Mississippi Flyway states,Temperature,Lag 0-14 days,175,"Low waterfowl (-1 SD, lag 15-28 d)",0.57,0.31,1.05
-90-day shock,All northern Mississippi Flyway states,Precipitation,Lag 0-7 days,175,"Low waterfowl (-1 SD, lag 15-28 d)",0.94,0.71,1.23
-90-day shock,All northern Mississippi Flyway states,Precipitation,Lag 8-14 days,175,"Low waterfowl (-1 SD, lag 15-28 d)",1.05,0.79,1.38
-90-day shock,All northern Mississippi Flyway states,Precipitation,Lag 0-14 days,175,"Low waterfowl (-1 SD, lag 15-28 d)",0.98,0.62,1.53
-90-day shock,All northern Mississippi Flyway states,Soil moisture,Lag 0-7 days,175,"Low waterfowl (-1 SD, lag 15-28 d)",0.78,0.63,0.98
-90-day shock,All northern Mississippi Flyway states,Soil moisture,Lag 8-14 days,175,"Low waterfowl (-1 SD, lag 15-28 d)",0.85,0.67,1.08
-90-day shock,All northern Mississippi Flyway states,Soil moisture,Lag 0-14 days,175,"Low waterfowl (-1 SD, lag 15-28 d)",0.67,0.47,0.94
-90-day shock,All northern Mississippi Flyway states,Wind speed,Lag 0-7 days,175,"Low waterfowl (-1 SD, lag 15-28 d)",1.06,0.89,1.27
-90-day shock,All northern Mississippi Flyway states,Wind speed,Lag 8-14 days,175,"Low waterfowl (-1 SD, lag 15-28 d)",1.25,1.02,1.53
-90-day shock,All northern Mississippi Flyway states,Wind speed,Lag 0-14 days,175,"Low waterfowl (-1 SD, lag 15-28 d)",1.33,0.96,1.83
-90-day shock,All northern Mississippi Flyway states,Runoff,Lag 0-7 days,175,"Low waterfowl (-1 SD, lag 15-28 d)",0.9,0.73,1.13
-90-day shock,All northern Mississippi Flyway states,Runoff,Lag 8-14 days,175,"Low waterfowl (-1 SD, lag 15-28 d)",1.03,0.81,1.31
-90-day shock,All northern Mississippi Flyway states,Runoff,Lag 0-14 days,175,"Low waterfowl (-1 SD, lag 15-28 d)",0.93,0.64,1.37
+Absolute conditions,Minnesota,Temperature,Lag 0-7 days,85,"High waterfowl (+1 SD, lag 15-28 d)",1.26,0.66,2.34
+Absolute conditions,Minnesota,Temperature,Lag 8-14 days,85,"High waterfowl (+1 SD, lag 15-28 d)",1.14,0.52,2.51
+Absolute conditions,Minnesota,Temperature,Lag 0-14 days,85,"High waterfowl (+1 SD, lag 15-28 d)",1.44,0.52,3.92
+Absolute conditions,Minnesota,Precipitation,Lag 0-7 days,85,"High waterfowl (+1 SD, lag 15-28 d)",0.9,0.47,1.67
+Absolute conditions,Minnesota,Precipitation,Lag 8-14 days,85,"High waterfowl (+1 SD, lag 15-28 d)",0.55,0.31,0.98
+Absolute conditions,Minnesota,Precipitation,Lag 0-14 days,85,"High waterfowl (+1 SD, lag 15-28 d)",0.49,0.18,1.33
+Absolute conditions,Minnesota,Soil moisture,Lag 0-7 days,85,"High waterfowl (+1 SD, lag 15-28 d)",0.91,0.43,1.87
+Absolute conditions,Minnesota,Soil moisture,Lag 8-14 days,85,"High waterfowl (+1 SD, lag 15-28 d)",0.83,0.4,1.71
+Absolute conditions,Minnesota,Soil moisture,Lag 0-14 days,85,"High waterfowl (+1 SD, lag 15-28 d)",0.75,0.24,2.31
+Absolute conditions,Minnesota,Wind speed,Lag 0-7 days,85,"High waterfowl (+1 SD, lag 15-28 d)",0.77,0.47,1.23
+Absolute conditions,Minnesota,Wind speed,Lag 8-14 days,85,"High waterfowl (+1 SD, lag 15-28 d)",1.06,0.63,1.74
+Absolute conditions,Minnesota,Wind speed,Lag 0-14 days,85,"High waterfowl (+1 SD, lag 15-28 d)",0.81,0.33,1.95
+Absolute conditions,Minnesota,Runoff,Lag 0-7 days,85,"High waterfowl (+1 SD, lag 15-28 d)",1.08,0.51,2.32
+Absolute conditions,Minnesota,Runoff,Lag 8-14 days,85,"High waterfowl (+1 SD, lag 15-28 d)",1.63,0.73,3.74
+Absolute conditions,Minnesota,Runoff,Lag 0-14 days,85,"High waterfowl (+1 SD, lag 15-28 d)",1.76,0.44,7.27
+Absolute conditions,Other northern Mississippi Flyway states,Temperature,Lag 0-7 days,90,"High waterfowl (+1 SD, lag 15-28 d)",0.8,0.5,1.3
+Absolute conditions,Other northern Mississippi Flyway states,Temperature,Lag 8-14 days,90,"High waterfowl (+1 SD, lag 15-28 d)",1.13,0.67,1.89
+Absolute conditions,Other northern Mississippi Flyway states,Temperature,Lag 0-14 days,90,"High waterfowl (+1 SD, lag 15-28 d)",0.9,0.45,1.79
+Absolute conditions,Other northern Mississippi Flyway states,Precipitation,Lag 0-7 days,90,"High waterfowl (+1 SD, lag 15-28 d)",1.07,0.58,1.98
+Absolute conditions,Other northern Mississippi Flyway states,Precipitation,Lag 8-14 days,90,"High waterfowl (+1 SD, lag 15-28 d)",0.8,0.43,1.46
+Absolute conditions,Other northern Mississippi Flyway states,Precipitation,Lag 0-14 days,90,"High waterfowl (+1 SD, lag 15-28 d)",0.85,0.3,2.45
+Absolute conditions,Other northern Mississippi Flyway states,Soil moisture,Lag 0-7 days,90,"High waterfowl (+1 SD, lag 15-28 d)",1.14,0.61,2.15
+Absolute conditions,Other northern Mississippi Flyway states,Soil moisture,Lag 8-14 days,90,"High waterfowl (+1 SD, lag 15-28 d)",1.69,0.89,3.12
+Absolute conditions,Other northern Mississippi Flyway states,Soil moisture,Lag 0-14 days,90,"High waterfowl (+1 SD, lag 15-28 d)",1.94,0.75,4.78
+Absolute conditions,Other northern Mississippi Flyway states,Wind speed,Lag 0-7 days,90,"High waterfowl (+1 SD, lag 15-28 d)",1.09,0.73,1.62
+Absolute conditions,Other northern Mississippi Flyway states,Wind speed,Lag 8-14 days,90,"High waterfowl (+1 SD, lag 15-28 d)",1.22,0.81,1.88
+Absolute conditions,Other northern Mississippi Flyway states,Wind speed,Lag 0-14 days,90,"High waterfowl (+1 SD, lag 15-28 d)",1.33,0.67,2.6
+Absolute conditions,Other northern Mississippi Flyway states,Runoff,Lag 0-7 days,90,"High waterfowl (+1 SD, lag 15-28 d)",0.91,0.33,2.42
+Absolute conditions,Other northern Mississippi Flyway states,Runoff,Lag 8-14 days,90,"High waterfowl (+1 SD, lag 15-28 d)",0.97,0.28,3.06
+Absolute conditions,Other northern Mississippi Flyway states,Runoff,Lag 0-14 days,90,"High waterfowl (+1 SD, lag 15-28 d)",0.87,0.12,5.76
+Absolute conditions,All northern Mississippi Flyway states,Temperature,Lag 0-7 days,175,"High waterfowl (+1 SD, lag 15-28 d)",0.86,0.58,1.31
+Absolute conditions,All northern Mississippi Flyway states,Temperature,Lag 8-14 days,175,"High waterfowl (+1 SD, lag 15-28 d)",1.19,0.78,1.83
+Absolute conditions,All northern Mississippi Flyway states,Temperature,Lag 0-14 days,175,"High waterfowl (+1 SD, lag 15-28 d)",1.03,0.58,1.79
+Absolute conditions,All northern Mississippi Flyway states,Precipitation,Lag 0-7 days,175,"High waterfowl (+1 SD, lag 15-28 d)",1.1,0.7,1.74
+Absolute conditions,All northern Mississippi Flyway states,Precipitation,Lag 8-14 days,175,"High waterfowl (+1 SD, lag 15-28 d)",0.67,0.45,0.99
+Absolute conditions,All northern Mississippi Flyway states,Precipitation,Lag 0-14 days,175,"High waterfowl (+1 SD, lag 15-28 d)",0.73,0.37,1.46
+Absolute conditions,All northern Mississippi Flyway states,Soil moisture,Lag 0-7 days,175,"High waterfowl (+1 SD, lag 15-28 d)",1.03,0.63,1.68
+Absolute conditions,All northern Mississippi Flyway states,Soil moisture,Lag 8-14 days,175,"High waterfowl (+1 SD, lag 15-28 d)",1.28,0.78,2.11
+Absolute conditions,All northern Mississippi Flyway states,Soil moisture,Lag 0-14 days,175,"High waterfowl (+1 SD, lag 15-28 d)",1.32,0.64,2.71
+Absolute conditions,All northern Mississippi Flyway states,Wind speed,Lag 0-7 days,175,"High waterfowl (+1 SD, lag 15-28 d)",0.95,0.7,1.28
+Absolute conditions,All northern Mississippi Flyway states,Wind speed,Lag 8-14 days,175,"High waterfowl (+1 SD, lag 15-28 d)",1.22,0.9,1.68
+Absolute conditions,All northern Mississippi Flyway states,Wind speed,Lag 0-14 days,175,"High waterfowl (+1 SD, lag 15-28 d)",1.16,0.7,1.95
+Absolute conditions,All northern Mississippi Flyway states,Runoff,Lag 0-7 days,175,"High waterfowl (+1 SD, lag 15-28 d)",1.04,0.55,1.99
+Absolute conditions,All northern Mississippi Flyway states,Runoff,Lag 8-14 days,175,"High waterfowl (+1 SD, lag 15-28 d)",1.4,0.72,2.76
+Absolute conditions,All northern Mississippi Flyway states,Runoff,Lag 0-14 days,175,"High waterfowl (+1 SD, lag 15-28 d)",1.46,0.49,4.36
+90-day shock,Minnesota,Temperature,Lag 0-7 days,85,"High waterfowl (+1 SD, lag 15-28 d)",0.8,0.37,1.74
+90-day shock,Minnesota,Temperature,Lag 8-14 days,85,"High waterfowl (+1 SD, lag 15-28 d)",1.19,0.6,2.34
+90-day shock,Minnesota,Temperature,Lag 0-14 days,85,"High waterfowl (+1 SD, lag 15-28 d)",0.95,0.31,3.01
+90-day shock,Minnesota,Precipitation,Lag 0-7 days,85,"High waterfowl (+1 SD, lag 15-28 d)",0.77,0.52,1.12
+90-day shock,Minnesota,Precipitation,Lag 8-14 days,85,"High waterfowl (+1 SD, lag 15-28 d)",0.43,0.28,0.66
+90-day shock,Minnesota,Precipitation,Lag 0-14 days,85,"High waterfowl (+1 SD, lag 15-28 d)",0.33,0.17,0.64
+90-day shock,Minnesota,Soil moisture,Lag 0-7 days,85,"High waterfowl (+1 SD, lag 15-28 d)",0.75,0.47,1.18
+90-day shock,Minnesota,Soil moisture,Lag 8-14 days,85,"High waterfowl (+1 SD, lag 15-28 d)",0.69,0.45,1.05
+90-day shock,Minnesota,Soil moisture,Lag 0-14 days,85,"High waterfowl (+1 SD, lag 15-28 d)",0.52,0.28,0.96
+90-day shock,Minnesota,Wind speed,Lag 0-7 days,85,"High waterfowl (+1 SD, lag 15-28 d)",0.95,0.68,1.33
+90-day shock,Minnesota,Wind speed,Lag 8-14 days,85,"High waterfowl (+1 SD, lag 15-28 d)",1.11,0.77,1.6
+90-day shock,Minnesota,Wind speed,Lag 0-14 days,85,"High waterfowl (+1 SD, lag 15-28 d)",1.06,0.57,1.97
+90-day shock,Minnesota,Runoff,Lag 0-7 days,85,"High waterfowl (+1 SD, lag 15-28 d)",1.38,0.84,2.31
+90-day shock,Minnesota,Runoff,Lag 8-14 days,85,"High waterfowl (+1 SD, lag 15-28 d)",2.37,1.37,4.13
+90-day shock,Minnesota,Runoff,Lag 0-14 days,85,"High waterfowl (+1 SD, lag 15-28 d)",3.27,1.35,8.34
+90-day shock,Other northern Mississippi Flyway states,Temperature,Lag 0-7 days,90,"High waterfowl (+1 SD, lag 15-28 d)",1.38,0.7,2.73
+90-day shock,Other northern Mississippi Flyway states,Temperature,Lag 8-14 days,90,"High waterfowl (+1 SD, lag 15-28 d)",1.54,0.73,3.2
+90-day shock,Other northern Mississippi Flyway states,Temperature,Lag 0-14 days,90,"High waterfowl (+1 SD, lag 15-28 d)",2.09,0.66,6.73
+90-day shock,Other northern Mississippi Flyway states,Precipitation,Lag 0-7 days,90,"High waterfowl (+1 SD, lag 15-28 d)",0.91,0.59,1.41
+90-day shock,Other northern Mississippi Flyway states,Precipitation,Lag 8-14 days,90,"High waterfowl (+1 SD, lag 15-28 d)",1.06,0.65,1.76
+90-day shock,Other northern Mississippi Flyway states,Precipitation,Lag 0-14 days,90,"High waterfowl (+1 SD, lag 15-28 d)",0.97,0.45,2.11
+90-day shock,Other northern Mississippi Flyway states,Soil moisture,Lag 0-7 days,90,"High waterfowl (+1 SD, lag 15-28 d)",0.94,0.64,1.4
+90-day shock,Other northern Mississippi Flyway states,Soil moisture,Lag 8-14 days,90,"High waterfowl (+1 SD, lag 15-28 d)",0.81,0.52,1.26
+90-day shock,Other northern Mississippi Flyway states,Soil moisture,Lag 0-14 days,90,"High waterfowl (+1 SD, lag 15-28 d)",0.77,0.42,1.42
+90-day shock,Other northern Mississippi Flyway states,Wind speed,Lag 0-7 days,90,"High waterfowl (+1 SD, lag 15-28 d)",0.99,0.73,1.35
+90-day shock,Other northern Mississippi Flyway states,Wind speed,Lag 8-14 days,90,"High waterfowl (+1 SD, lag 15-28 d)",0.92,0.6,1.43
+90-day shock,Other northern Mississippi Flyway states,Wind speed,Lag 0-14 days,90,"High waterfowl (+1 SD, lag 15-28 d)",0.91,0.49,1.71
+90-day shock,Other northern Mississippi Flyway states,Runoff,Lag 0-7 days,90,"High waterfowl (+1 SD, lag 15-28 d)",0.92,0.61,1.35
+90-day shock,Other northern Mississippi Flyway states,Runoff,Lag 8-14 days,90,"High waterfowl (+1 SD, lag 15-28 d)",0.84,0.54,1.29
+90-day shock,Other northern Mississippi Flyway states,Runoff,Lag 0-14 days,90,"High waterfowl (+1 SD, lag 15-28 d)",0.77,0.37,1.53
+90-day shock,All northern Mississippi Flyway states,Temperature,Lag 0-7 days,175,"High waterfowl (+1 SD, lag 15-28 d)",1.34,0.85,2.12
+90-day shock,All northern Mississippi Flyway states,Temperature,Lag 8-14 days,175,"High waterfowl (+1 SD, lag 15-28 d)",1.93,1.23,3.1
+90-day shock,All northern Mississippi Flyway states,Temperature,Lag 0-14 days,175,"High waterfowl (+1 SD, lag 15-28 d)",2.59,1.35,5.04
+90-day shock,All northern Mississippi Flyway states,Precipitation,Lag 0-7 days,175,"High waterfowl (+1 SD, lag 15-28 d)",0.93,0.7,1.23
+90-day shock,All northern Mississippi Flyway states,Precipitation,Lag 8-14 days,175,"High waterfowl (+1 SD, lag 15-28 d)",0.66,0.47,0.89
+90-day shock,All northern Mississippi Flyway states,Precipitation,Lag 0-14 days,175,"High waterfowl (+1 SD, lag 15-28 d)",0.61,0.39,0.96
+90-day shock,All northern Mississippi Flyway states,Soil moisture,Lag 0-7 days,175,"High waterfowl (+1 SD, lag 15-28 d)",0.97,0.72,1.31
+90-day shock,All northern Mississippi Flyway states,Soil moisture,Lag 8-14 days,175,"High waterfowl (+1 SD, lag 15-28 d)",0.83,0.61,1.11
+90-day shock,All northern Mississippi Flyway states,Soil moisture,Lag 0-14 days,175,"High waterfowl (+1 SD, lag 15-28 d)",0.8,0.53,1.19
+90-day shock,All northern Mississippi Flyway states,Wind speed,Lag 0-7 days,175,"High waterfowl (+1 SD, lag 15-28 d)",0.96,0.78,1.2
+90-day shock,All northern Mississippi Flyway states,Wind speed,Lag 8-14 days,175,"High waterfowl (+1 SD, lag 15-28 d)",1.11,0.87,1.43
+90-day shock,All northern Mississippi Flyway states,Wind speed,Lag 0-14 days,175,"High waterfowl (+1 SD, lag 15-28 d)",1.07,0.73,1.59
+90-day shock,All northern Mississippi Flyway states,Runoff,Lag 0-7 days,175,"High waterfowl (+1 SD, lag 15-28 d)",1.08,0.78,1.51
+90-day shock,All northern Mississippi Flyway states,Runoff,Lag 8-14 days,175,"High waterfowl (+1 SD, lag 15-28 d)",1.34,0.95,1.91
+90-day shock,All northern Mississippi Flyway states,Runoff,Lag 0-14 days,175,"High waterfowl (+1 SD, lag 15-28 d)",1.46,0.84,2.56
+Absolute conditions,Minnesota,Temperature,Lag 0-7 days,85,"Low waterfowl (-1 SD, lag 15-28 d)",1.36,0.74,2.59
+Absolute conditions,Minnesota,Temperature,Lag 8-14 days,85,"Low waterfowl (-1 SD, lag 15-28 d)",0.59,0.29,1.18
+Absolute conditions,Minnesota,Temperature,Lag 0-14 days,85,"Low waterfowl (-1 SD, lag 15-28 d)",0.8,0.33,1.99
+Absolute conditions,Minnesota,Precipitation,Lag 0-7 days,85,"Low waterfowl (-1 SD, lag 15-28 d)",1.14,0.54,2.35
+Absolute conditions,Minnesota,Precipitation,Lag 8-14 days,85,"Low waterfowl (-1 SD, lag 15-28 d)",1.11,0.55,2.39
+Absolute conditions,Minnesota,Precipitation,Lag 0-14 days,85,"Low waterfowl (-1 SD, lag 15-28 d)",1.26,0.39,4.21
+Absolute conditions,Minnesota,Soil moisture,Lag 0-7 days,85,"Low waterfowl (-1 SD, lag 15-28 d)",0.88,0.39,2.07
+Absolute conditions,Minnesota,Soil moisture,Lag 8-14 days,85,"Low waterfowl (-1 SD, lag 15-28 d)",1.3,0.57,3.05
+Absolute conditions,Minnesota,Soil moisture,Lag 0-14 days,85,"Low waterfowl (-1 SD, lag 15-28 d)",1.15,0.33,4.08
+Absolute conditions,Minnesota,Wind speed,Lag 0-7 days,85,"Low waterfowl (-1 SD, lag 15-28 d)",0.91,0.55,1.52
+Absolute conditions,Minnesota,Wind speed,Lag 8-14 days,85,"Low waterfowl (-1 SD, lag 15-28 d)",1.17,0.65,2.08
+Absolute conditions,Minnesota,Wind speed,Lag 0-14 days,85,"Low waterfowl (-1 SD, lag 15-28 d)",1.06,0.41,2.71
+Absolute conditions,Minnesota,Runoff,Lag 0-7 days,85,"Low waterfowl (-1 SD, lag 15-28 d)",0.79,0.36,1.79
+Absolute conditions,Minnesota,Runoff,Lag 8-14 days,85,"Low waterfowl (-1 SD, lag 15-28 d)",0.71,0.28,1.75
+Absolute conditions,Minnesota,Runoff,Lag 0-14 days,85,"Low waterfowl (-1 SD, lag 15-28 d)",0.55,0.12,2.61
+Absolute conditions,Other northern Mississippi Flyway states,Temperature,Lag 0-7 days,90,"Low waterfowl (-1 SD, lag 15-28 d)",1.65,1.01,2.73
+Absolute conditions,Other northern Mississippi Flyway states,Temperature,Lag 8-14 days,90,"Low waterfowl (-1 SD, lag 15-28 d)",0.62,0.38,1.03
+Absolute conditions,Other northern Mississippi Flyway states,Temperature,Lag 0-14 days,90,"Low waterfowl (-1 SD, lag 15-28 d)",1.04,0.59,1.8
+Absolute conditions,Other northern Mississippi Flyway states,Precipitation,Lag 0-7 days,90,"Low waterfowl (-1 SD, lag 15-28 d)",0.68,0.36,1.29
+Absolute conditions,Other northern Mississippi Flyway states,Precipitation,Lag 8-14 days,90,"Low waterfowl (-1 SD, lag 15-28 d)",0.8,0.41,1.55
+Absolute conditions,Other northern Mississippi Flyway states,Precipitation,Lag 0-14 days,90,"Low waterfowl (-1 SD, lag 15-28 d)",0.54,0.18,1.6
+Absolute conditions,Other northern Mississippi Flyway states,Soil moisture,Lag 0-7 days,90,"Low waterfowl (-1 SD, lag 15-28 d)",0.87,0.44,1.69
+Absolute conditions,Other northern Mississippi Flyway states,Soil moisture,Lag 8-14 days,90,"Low waterfowl (-1 SD, lag 15-28 d)",0.86,0.42,1.72
+Absolute conditions,Other northern Mississippi Flyway states,Soil moisture,Lag 0-14 days,90,"Low waterfowl (-1 SD, lag 15-28 d)",0.75,0.25,2.09
+Absolute conditions,Other northern Mississippi Flyway states,Wind speed,Lag 0-7 days,90,"Low waterfowl (-1 SD, lag 15-28 d)",0.99,0.63,1.55
+Absolute conditions,Other northern Mississippi Flyway states,Wind speed,Lag 8-14 days,90,"Low waterfowl (-1 SD, lag 15-28 d)",0.76,0.47,1.21
+Absolute conditions,Other northern Mississippi Flyway states,Wind speed,Lag 0-14 days,90,"Low waterfowl (-1 SD, lag 15-28 d)",0.75,0.35,1.63
+Absolute conditions,Other northern Mississippi Flyway states,Runoff,Lag 0-7 days,90,"Low waterfowl (-1 SD, lag 15-28 d)",0.96,0.35,2.6
+Absolute conditions,Other northern Mississippi Flyway states,Runoff,Lag 8-14 days,90,"Low waterfowl (-1 SD, lag 15-28 d)",0.93,0.27,3.14
+Absolute conditions,Other northern Mississippi Flyway states,Runoff,Lag 0-14 days,90,"Low waterfowl (-1 SD, lag 15-28 d)",0.89,0.11,6.92
+Absolute conditions,All northern Mississippi Flyway states,Temperature,Lag 0-7 days,175,"Low waterfowl (-1 SD, lag 15-28 d)",1.92,1.25,2.9
+Absolute conditions,All northern Mississippi Flyway states,Temperature,Lag 8-14 days,175,"Low waterfowl (-1 SD, lag 15-28 d)",0.53,0.35,0.82
+Absolute conditions,All northern Mississippi Flyway states,Temperature,Lag 0-14 days,175,"Low waterfowl (-1 SD, lag 15-28 d)",1.02,0.65,1.59
+Absolute conditions,All northern Mississippi Flyway states,Precipitation,Lag 0-7 days,175,"Low waterfowl (-1 SD, lag 15-28 d)",0.84,0.49,1.41
+Absolute conditions,All northern Mississippi Flyway states,Precipitation,Lag 8-14 days,175,"Low waterfowl (-1 SD, lag 15-28 d)",0.85,0.52,1.39
+Absolute conditions,All northern Mississippi Flyway states,Precipitation,Lag 0-14 days,175,"Low waterfowl (-1 SD, lag 15-28 d)",0.71,0.32,1.55
+Absolute conditions,All northern Mississippi Flyway states,Soil moisture,Lag 0-7 days,175,"Low waterfowl (-1 SD, lag 15-28 d)",0.89,0.5,1.58
+Absolute conditions,All northern Mississippi Flyway states,Soil moisture,Lag 8-14 days,175,"Low waterfowl (-1 SD, lag 15-28 d)",1.06,0.6,1.86
+Absolute conditions,All northern Mississippi Flyway states,Soil moisture,Lag 0-14 days,175,"Low waterfowl (-1 SD, lag 15-28 d)",0.95,0.43,2.12
+Absolute conditions,All northern Mississippi Flyway states,Wind speed,Lag 0-7 days,175,"Low waterfowl (-1 SD, lag 15-28 d)",0.91,0.65,1.26
+Absolute conditions,All northern Mississippi Flyway states,Wind speed,Lag 8-14 days,175,"Low waterfowl (-1 SD, lag 15-28 d)",0.92,0.65,1.31
+Absolute conditions,All northern Mississippi Flyway states,Wind speed,Lag 0-14 days,175,"Low waterfowl (-1 SD, lag 15-28 d)",0.84,0.48,1.44
+Absolute conditions,All northern Mississippi Flyway states,Runoff,Lag 0-7 days,175,"Low waterfowl (-1 SD, lag 15-28 d)",0.82,0.39,1.66
+Absolute conditions,All northern Mississippi Flyway states,Runoff,Lag 8-14 days,175,"Low waterfowl (-1 SD, lag 15-28 d)",0.76,0.34,1.64
+Absolute conditions,All northern Mississippi Flyway states,Runoff,Lag 0-14 days,175,"Low waterfowl (-1 SD, lag 15-28 d)",0.64,0.16,2.22
+90-day shock,Minnesota,Temperature,Lag 0-7 days,85,"Low waterfowl (-1 SD, lag 15-28 d)",2.01,0.92,4.54
+90-day shock,Minnesota,Temperature,Lag 8-14 days,85,"Low waterfowl (-1 SD, lag 15-28 d)",1.05,0.52,2.18
+90-day shock,Minnesota,Temperature,Lag 0-14 days,85,"Low waterfowl (-1 SD, lag 15-28 d)",2.13,0.69,6.8
+90-day shock,Minnesota,Precipitation,Lag 0-7 days,85,"Low waterfowl (-1 SD, lag 15-28 d)",1.16,0.75,1.8
+90-day shock,Minnesota,Precipitation,Lag 8-14 days,85,"Low waterfowl (-1 SD, lag 15-28 d)",1.39,0.92,2.1
+90-day shock,Minnesota,Precipitation,Lag 0-14 days,85,"Low waterfowl (-1 SD, lag 15-28 d)",1.62,0.84,3.07
+90-day shock,Minnesota,Soil moisture,Lag 0-7 days,85,"Low waterfowl (-1 SD, lag 15-28 d)",1.02,0.65,1.62
+90-day shock,Minnesota,Soil moisture,Lag 8-14 days,85,"Low waterfowl (-1 SD, lag 15-28 d)",1.1,0.72,1.67
+90-day shock,Minnesota,Soil moisture,Lag 0-14 days,85,"Low waterfowl (-1 SD, lag 15-28 d)",1.13,0.64,2.04
+90-day shock,Minnesota,Wind speed,Lag 0-7 days,85,"Low waterfowl (-1 SD, lag 15-28 d)",0.92,0.65,1.29
+90-day shock,Minnesota,Wind speed,Lag 8-14 days,85,"Low waterfowl (-1 SD, lag 15-28 d)",1.25,0.87,1.83
+90-day shock,Minnesota,Wind speed,Lag 0-14 days,85,"Low waterfowl (-1 SD, lag 15-28 d)",1.15,0.65,2.06
+90-day shock,Minnesota,Runoff,Lag 0-7 days,85,"Low waterfowl (-1 SD, lag 15-28 d)",0.79,0.51,1.24
+90-day shock,Minnesota,Runoff,Lag 8-14 days,85,"Low waterfowl (-1 SD, lag 15-28 d)",0.98,0.57,1.65
+90-day shock,Minnesota,Runoff,Lag 0-14 days,85,"Low waterfowl (-1 SD, lag 15-28 d)",0.77,0.34,1.7
+90-day shock,Other northern Mississippi Flyway states,Temperature,Lag 0-7 days,90,"Low waterfowl (-1 SD, lag 15-28 d)",0.81,0.4,1.63
+90-day shock,Other northern Mississippi Flyway states,Temperature,Lag 8-14 days,90,"Low waterfowl (-1 SD, lag 15-28 d)",0.26,0.11,0.61
+90-day shock,Other northern Mississippi Flyway states,Temperature,Lag 0-14 days,90,"Low waterfowl (-1 SD, lag 15-28 d)",0.21,0.07,0.72
+90-day shock,Other northern Mississippi Flyway states,Precipitation,Lag 0-7 days,90,"Low waterfowl (-1 SD, lag 15-28 d)",0.86,0.47,1.57
+90-day shock,Other northern Mississippi Flyway states,Precipitation,Lag 8-14 days,90,"Low waterfowl (-1 SD, lag 15-28 d)",1.06,0.55,2.04
+90-day shock,Other northern Mississippi Flyway states,Precipitation,Lag 0-14 days,90,"Low waterfowl (-1 SD, lag 15-28 d)",0.92,0.31,2.69
+90-day shock,Other northern Mississippi Flyway states,Soil moisture,Lag 0-7 days,90,"Low waterfowl (-1 SD, lag 15-28 d)",0.62,0.41,0.93
+90-day shock,Other northern Mississippi Flyway states,Soil moisture,Lag 8-14 days,90,"Low waterfowl (-1 SD, lag 15-28 d)",0.67,0.41,1.06
+90-day shock,Other northern Mississippi Flyway states,Soil moisture,Lag 0-14 days,90,"Low waterfowl (-1 SD, lag 15-28 d)",0.41,0.21,0.8
+90-day shock,Other northern Mississippi Flyway states,Wind speed,Lag 0-7 days,90,"Low waterfowl (-1 SD, lag 15-28 d)",1.12,0.77,1.65
+90-day shock,Other northern Mississippi Flyway states,Wind speed,Lag 8-14 days,90,"Low waterfowl (-1 SD, lag 15-28 d)",1.4,0.97,2.08
+90-day shock,Other northern Mississippi Flyway states,Wind speed,Lag 0-14 days,90,"Low waterfowl (-1 SD, lag 15-28 d)",1.59,0.86,2.96
+90-day shock,Other northern Mississippi Flyway states,Runoff,Lag 0-7 days,90,"Low waterfowl (-1 SD, lag 15-28 d)",0.81,0.54,1.17
+90-day shock,Other northern Mississippi Flyway states,Runoff,Lag 8-14 days,90,"Low waterfowl (-1 SD, lag 15-28 d)",0.88,0.58,1.36
+90-day shock,Other northern Mississippi Flyway states,Runoff,Lag 0-14 days,90,"Low waterfowl (-1 SD, lag 15-28 d)",0.71,0.36,1.38
+90-day shock,All northern Mississippi Flyway states,Temperature,Lag 0-7 days,175,"Low waterfowl (-1 SD, lag 15-28 d)",1.17,0.72,1.9
+90-day shock,All northern Mississippi Flyway states,Temperature,Lag 8-14 days,175,"Low waterfowl (-1 SD, lag 15-28 d)",0.47,0.28,0.79
+90-day shock,All northern Mississippi Flyway states,Temperature,Lag 0-14 days,175,"Low waterfowl (-1 SD, lag 15-28 d)",0.55,0.27,1.13
+90-day shock,All northern Mississippi Flyway states,Precipitation,Lag 0-7 days,175,"Low waterfowl (-1 SD, lag 15-28 d)",0.95,0.66,1.37
+90-day shock,All northern Mississippi Flyway states,Precipitation,Lag 8-14 days,175,"Low waterfowl (-1 SD, lag 15-28 d)",1.13,0.82,1.6
+90-day shock,All northern Mississippi Flyway states,Precipitation,Lag 0-14 days,175,"Low waterfowl (-1 SD, lag 15-28 d)",1.08,0.63,1.84
+90-day shock,All northern Mississippi Flyway states,Soil moisture,Lag 0-7 days,175,"Low waterfowl (-1 SD, lag 15-28 d)",0.71,0.51,0.98
+90-day shock,All northern Mississippi Flyway states,Soil moisture,Lag 8-14 days,175,"Low waterfowl (-1 SD, lag 15-28 d)",0.89,0.65,1.22
+90-day shock,All northern Mississippi Flyway states,Soil moisture,Lag 0-14 days,175,"Low waterfowl (-1 SD, lag 15-28 d)",0.64,0.42,0.95
+90-day shock,All northern Mississippi Flyway states,Wind speed,Lag 0-7 days,175,"Low waterfowl (-1 SD, lag 15-28 d)",1.04,0.82,1.34
+90-day shock,All northern Mississippi Flyway states,Wind speed,Lag 8-14 days,175,"Low waterfowl (-1 SD, lag 15-28 d)",1.31,1.03,1.68
+90-day shock,All northern Mississippi Flyway states,Wind speed,Lag 0-14 days,175,"Low waterfowl (-1 SD, lag 15-28 d)",1.36,0.93,1.99
+90-day shock,All northern Mississippi Flyway states,Runoff,Lag 0-7 days,175,"Low waterfowl (-1 SD, lag 15-28 d)",0.79,0.58,1.07
+90-day shock,All northern Mississippi Flyway states,Runoff,Lag 8-14 days,175,"Low waterfowl (-1 SD, lag 15-28 d)",1.08,0.78,1.47
+90-day shock,All northern Mississippi Flyway states,Runoff,Lag 0-14 days,175,"Low waterfowl (-1 SD, lag 15-28 d)",0.85,0.53,1.37

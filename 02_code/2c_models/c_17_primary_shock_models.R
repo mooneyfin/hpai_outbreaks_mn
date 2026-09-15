@@ -17,7 +17,7 @@ suppressMessages({library(INLA); library(Matrix)})
 INLA::inla.setOption(num.threads = 1)
 source(paste0(functions.folder, 'inla_dlnm_helpers.R'))
 
-PREC   <- 4                                  # N(0, 0.5^2)
+PREC   <- INLA_PREC_PRIMARY                  # N(0, 0.5^2), defined once in inla_dlnm_helpers.R
 NS2    <- list(fun = "ns", df = 2)
 LIN    <- list(fun = "lin")
 MAXLAG <- 28

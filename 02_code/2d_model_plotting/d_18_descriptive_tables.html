@@ -1877,15 +1877,15 @@ t1 &lt;- rbindlist(list(
 
 T1HDR  &lt;- c(1, 6, 9, 11)                   # rows that head a block and carry its total
 T1BODY &lt;- setdiff(seq_len(nrow(t1)), T1HDR)
-T1TITLE &lt;- &quot;Table 1. Case-crossover sample by state&quot;
+T1TITLE &lt;- &quot;Table S2. Case-crossover sample by state&quot;
 T1NOTE  &lt;- paste(&quot;Cells are 10 km grid squares. Referent cell-days are the other days in the same&quot;,
                  &quot;calendar month within the same cell, excluding the 7 days after detection.&quot;)
-to_word(t1, &quot;Table1_case_crossover_sample&quot;, indent_rows = T1BODY, bold_rows = T1HDR,
+to_word(t1, &quot;TableS2_sample_by_state&quot;, indent_rows = T1BODY, bold_rows = T1HDR,
         rule_after = c(5, 8, 10), title = T1TITLE, note = T1NOTE)
 show_tbl(t1, indent_rows = T1BODY, bold_rows = T1HDR, title = T1TITLE, note = T1NOTE)</code></pre>
 <table class="table table-condensed" style="font-size: 13px; font-family: Arial, Helvetica, sans-serif; width: auto !important; margin-left: auto; margin-right: auto;border-bottom: 0;">
 <caption style="font-size: initial !important;">
-Table 1. Case-crossover sample by state
+Table S2. Case-crossover sample by state
 </caption>
 <thead>
 <tr>
@@ -2214,8 +2214,9 @@ the 7 days after detection.
 </tfoot>
 </table>
 </div>
-<div id="table-2.-minnesota-by-meteorological-season" class="section level2">
-<h2>Table 2. Minnesota, by meteorological season</h2>
+<div id="table-1.-minnesota-by-meteorological-season-sample-conditions-shocks-deviations" class="section level2">
+<h2>Table 1. Minnesota, by meteorological season (sample, conditions,
+shocks, deviations)</h2>
 <pre class="r"><code>SEASONS &lt;- c(&quot;Winter&quot;, &quot;Spring&quot;, &quot;Summer&quot;, &quot;Fall&quot;)
 COLS    &lt;- c(SEASONS, &quot;Year-round&quot;)
 # ERA5 gives Kelvin and metres. Levels need converting; DIFFERENCES do not for temperature
@@ -2223,20 +2224,23 @@ COLS    &lt;- c(SEASONS, &quot;Year-round&quot;)
 # because a_07 log1p-transforms it before differencing.
 nat &lt;- function(x, v) {
   if (v == &quot;temperature&quot;)        x - 273.15
-  else if (v == &quot;precipitation&quot;) x * 1000
+  else if (v %in% c(&quot;precipitation&quot;, &quot;runoff&quot;)) x * 1000
   else if (v == &quot;soil_moisture&quot;) x * 100      # m3/m3 -&gt; % volumetric, so no 3-decimal cells
   else                           x
 }
+# the 90-day shock: a difference in natural units, except precipitation and runoff, which a_07
+# log1p-transforms before differencing, so their shock is a log ratio -&gt; reported as % change
 natd &lt;- function(x, v) {
-  if (v == &quot;precipitation&quot;)      (exp(x) - 1) * 100
+  if (v %in% c(&quot;precipitation&quot;, &quot;runoff&quot;)) (exp(x) - 1) * 100
   else if (v == &quot;soil_moisture&quot;) x * 100
   else                           x
 }
 
 MET &lt;- c(temperature = &quot;Temperature (°C)&quot;, precipitation = &quot;Precipitation (mm)&quot;,
-         soil_moisture = &quot;Soil moisture (% vol)&quot;, wind_speed = &quot;Wind speed (m/s)&quot;)
-DEPU &lt;- c(temperature = &quot;°C&quot;, precipitation = &quot;% vs baseline&quot;,
-          soil_moisture = &quot;% volumetric&quot;, wind_speed = &quot;m/s&quot;)
+         soil_moisture = &quot;Soil moisture (% vol)&quot;, wind_speed = &quot;Wind speed (m/s)&quot;,
+         runoff = &quot;Runoff (mm)&quot;)
+SHOCKU &lt;- c(temperature = &quot;°C&quot;, precipitation = &quot;% vs 90-day baseline&quot;,
+            soil_moisture = &quot;% vol&quot;, wind_speed = &quot;m/s&quot;, runoff = &quot;% vs 90-day baseline&quot;)
 BIRD &lt;- c(anseriformes = &quot;Anseriformes&quot;, predators = &quot;Predators&quot;)
 
 season_table &lt;- function(case_cells) {
@@ -2285,19 +2289,24 @@ season_table &lt;- function(case_cells) {
     setNames(vapply(COLS, function(s) f(if (s == &quot;Year-round&quot;) d else d[season == s]),
                     character(1)), COLS)))
 
+  # the analysis panel for these cells; a stratum takes the season of its case day, so referent
+  # counts by season are counts of referents matched to that season&#39;s cases
+  ccm &lt;- cc[zone_id %in% case_cells]
+  ccm[, sseason := season[outbreak_binary == 1][1], by = stratum_id]
+  sub_cc &lt;- function(s) if (s == &quot;Year-round&quot;) ccm else ccm[sseason == s]
+  srow &lt;- function(lab, f) as.list(c(Variable = lab, setNames(vapply(COLS, function(s) f(sub_cc(s)), character(1)), COLS)))
   rows &lt;- list(
-    as.list(c(Variable = &quot;Case cells&quot;,
-              setNames(vapply(COLS, function(s) as.character(
-                uniqueN((if (s == &quot;Year-round&quot;) ev else ev[season == s])$zone_id)),
-                character(1)), COLS))),
-    as.list(c(Variable = &quot;Spillover events&quot;,
-              setNames(vapply(COLS, function(s) as.character(
-                nrow(if (s == &quot;Year-round&quot;) ev else ev[season == s])), character(1)), COLS))))
+    srow(&quot;Spillover events&quot;,   function(x) as.character(sum(x$outbreak_binary))),
+    srow(&quot;Case cells&quot;,         function(x) as.character(uniqueN(x[outbreak_binary == 1]$zone_id))),
+    srow(&quot;Referent cell-days&quot;, function(x) formatC(sum(x$outbreak_binary == 0), big.mark = &quot;,&quot;, format = &quot;d&quot;)),
+    srow(&quot;Referents per case&quot;, function(x) sprintf(&quot;%.0f&quot;, sum(x$outbreak_binary == 0) / max(1, sum(x$outbreak_binary)))))
   for (v in names(MET)) {
-    dp  &lt;- 1
-    dpd &lt;- if (v == &quot;precipitation&quot;) 0 else 1
+    dp  &lt;- if (v == &quot;runoff&quot;) 2 else 1          # daily runoff is hundredths of a millimetre
+    dps &lt;- if (v %in% c(&quot;precipitation&quot;, &quot;runoff&quot;)) 0 else 1
     rows &lt;- c(rows, list(
       mkrow(paste0(MET[[v]], &quot;, median (IQR)&quot;), function(ds) ms(nat(ds[[v]], v), dp)),
+      mkrow(sprintf(&quot;90-day shock (%s), median (IQR)&quot;, SHOCKU[[v]]),
+            function(ds) ms(natd(ds[[paste0(v, &quot;_shock&quot;)]], v), dps)),
       mkrow(&quot;vs 25-yr normal, median (95% CrI)&quot;,
             function(ds) mci(nat(ds[[v]], v) - nat(ds[[paste0(v, &quot;_mean&quot;)]], v), ds$date, dp))))
   }
@@ -2307,19 +2316,21 @@ season_table &lt;- function(case_cells) {
 }
 
 t2 &lt;- season_table(unique(cases[state == &quot;Minnesota&quot;]$zone_id))
-IND  &lt;- c(4, 6, 8, 10)                     # the 25-year row sits under its exposure
-BOLD &lt;- c(3, 5, 7, 9, 11, 12)
-RULE &lt;- c(2, 4, 6, 8, 10)
-to_word(t2, &quot;Table2_minnesota_by_season&quot;, indent_rows = IND, bold_rows = BOLD,
-        rule_after = RULE, sig = TRUE,
-        title = &quot;Table 2. Conditions in Minnesota spillover cells, by meteorological season&quot;,
-        note = &quot;Summarised over all cell-days in the 73 Minnesota cells with at least one spillover. Deviations are from the 1997-2021 weekly normal for that cell, reported as the median across cells with a 95% credible interval from an INLA AR(1) model over day. CrI = credible interval; IQR = interquartile range.&quot;)
-show_tbl(t2, indent_rows = IND, bold_rows = BOLD, sig = TRUE,
-         title = &quot;Table 2. Conditions in Minnesota spillover cells, by meteorological season&quot;,
-         note = &quot;Summarised over all cell-days in the 73 Minnesota cells with at least one spillover. Deviations are from the 1997-2021 weekly normal for that cell, reported as the median across cells with a 95% credible interval from an INLA AR(1) model over day. CrI = credible interval; IQR = interquartile range.&quot;)</code></pre>
+lab2 &lt;- t2$Variable
+IND  &lt;- which(grepl(&quot;^90-day shock|^vs 25-yr|^Case cells|^Referent&quot;, lab2))   # sit under their heading
+BOLD &lt;- setdiff(seq_along(lab2), IND)
+RULE &lt;- which(grepl(&quot;^vs 25-yr&quot;, lab2))
+T2TITLE &lt;- &quot;Table 1. Minnesota spillover sample and conditions, by meteorological season&quot;
+T2NOTE  &lt;- paste(&quot;Case-crossover sample: 85 spillover events in 73 cells; a stratum takes the season of its case day.&quot;,
+                 &quot;Conditions are summarised over all cell-days in those 73 cells. The 90-day shock is the mean of the last 7 days minus the mean of the preceding 90;&quot;,
+                 &quot;for precipitation and runoff it is a log ratio, shown as percent change. Deviations are from the 1997-2021 weekly normal for that cell,&quot;,
+                 &quot;reported as the median across cells with a 95% credible interval from an INLA AR(1) model over day. CrI = credible interval; IQR = interquartile range.&quot;)
+to_word(t2, &quot;Table1_minnesota_by_season&quot;, indent_rows = IND, bold_rows = BOLD, rule_after = RULE, sig = TRUE,
+        title = T2TITLE, note = T2NOTE, font_size = 8, max_width = 9.4)
+show_tbl(t2, indent_rows = IND, bold_rows = BOLD, sig = TRUE, title = T2TITLE, note = T2NOTE)</code></pre>
 <table class="table table-condensed" style="font-size: 13px; font-family: Arial, Helvetica, sans-serif; width: auto !important; margin-left: auto; margin-right: auto;border-bottom: 0;">
 <caption style="font-size: initial !important;">
-Table 2. Conditions in Minnesota spillover cells, by meteorological
+Table 1. Minnesota spillover sample and conditions, by meteorological
 season
 </caption>
 <thead>
@@ -2346,7 +2357,27 @@ Year-round
 </thead>
 <tbody>
 <tr>
-<td style="text-align:left;">
+<td style="text-align:left;font-weight: bold;">
+Spillover events
+</td>
+<td style="text-align:right;font-weight: bold;">
+3
+</td>
+<td style="text-align:right;font-weight: bold;">
+60
+</td>
+<td style="text-align:right;font-weight: bold;">
+1
+</td>
+<td style="text-align:right;font-weight: bold;">
+21
+</td>
+<td style="text-align:right;font-weight: bold;">
+85
+</td>
+</tr>
+<tr>
+<td style="text-align:left;padding-left: 2em;" indentlevel="1">
 Case cells
 </td>
 <td style="text-align:right;">
@@ -2366,23 +2397,43 @@ Case cells
 </td>
 </tr>
 <tr>
-<td style="text-align:left;">
-Spillover events
+<td style="text-align:left;padding-left: 2em;" indentlevel="1">
+Referent cell-days
 </td>
 <td style="text-align:right;">
-3
+69
 </td>
 <td style="text-align:right;">
-60
+1,388
 </td>
 <td style="text-align:right;">
-1
+29
 </td>
 <td style="text-align:right;">
-21
+482
 </td>
 <td style="text-align:right;">
-85
+1,968
+</td>
+</tr>
+<tr>
+<td style="text-align:left;padding-left: 2em;" indentlevel="1">
+Referents per case
+</td>
+<td style="text-align:right;">
+23
+</td>
+<td style="text-align:right;">
+23
+</td>
+<td style="text-align:right;">
+29
+</td>
+<td style="text-align:right;">
+23
+</td>
+<td style="text-align:right;">
+23
 </td>
 </tr>
 <tr>
@@ -2403,6 +2454,26 @@ Temperature (°C), median (IQR)
 </td>
 <td style="text-align:right;font-weight: bold;">
 8.5 (-2.5, 19.3)
+</td>
+</tr>
+<tr>
+<td style="text-align:left;padding-left: 2em;" indentlevel="1">
+90-day shock (°C), median (IQR)
+</td>
+<td style="text-align:right;">
+-10.4 (-13.7, -6.9)
+</td>
+<td style="text-align:right;">
+9.9 (7.5, 11.6)
+</td>
+<td style="text-align:right;">
+7.5 (1.3, 9.9)
+</td>
+<td style="text-align:right;">
+-9.0 (-12.7, -5.6)
+</td>
+<td style="text-align:right;">
+-2.8 (-10.6, 8.0)
 </td>
 </tr>
 <tr>
@@ -2447,6 +2518,26 @@ Precipitation (mm), median (IQR)
 </tr>
 <tr>
 <td style="text-align:left;padding-left: 2em;" indentlevel="1">
+90-day shock (% vs 90-day baseline), median (IQR)
+</td>
+<td style="text-align:right;">
+-3 (-18, 20)
+</td>
+<td style="text-align:right;">
+18 (-9, 54)
+</td>
+<td style="text-align:right;">
+-10 (-28, 14)
+</td>
+<td style="text-align:right;">
+-18 (-34, 6)
+</td>
+<td style="text-align:right;">
+-6 (-24, 23)
+</td>
+</tr>
+<tr>
+<td style="text-align:left;padding-left: 2em;" indentlevel="1">
 vs 25-yr normal, median (95% CrI)
 </td>
 <td style="text-align:right;">
@@ -2487,10 +2578,30 @@ Soil moisture (% vol), median (IQR)
 </tr>
 <tr>
 <td style="text-align:left;padding-left: 2em;" indentlevel="1">
+90-day shock (% vol), median (IQR)
+</td>
+<td style="text-align:right;">
+0.7 (-0.8, 2.6)
+</td>
+<td style="text-align:right;">
+0.7 (-0.9, 2.5)
+</td>
+<td style="text-align:right;">
+-5.2 (-7.9, -1.6)
+</td>
+<td style="text-align:right;">
+0.8 (-1.6, 3.3)
+</td>
+<td style="text-align:right;">
+0.0 (-2.1, 2.3)
+</td>
+</tr>
+<tr>
+<td style="text-align:left;padding-left: 2em;" indentlevel="1">
 vs 25-yr normal, median (95% CrI)
 </td>
 <td style="text-align:right;">
-0.5 (-1.3, 2.2)
+0.5 (-1.2, 2.2)
 </td>
 <td style="text-align:right;">
 <strong>1.8 (0.1, 3.7)</strong>
@@ -2527,6 +2638,26 @@ Wind speed (m/s), median (IQR)
 </tr>
 <tr>
 <td style="text-align:left;padding-left: 2em;" indentlevel="1">
+90-day shock (m/s), median (IQR)
+</td>
+<td style="text-align:right;">
+0.0 (-0.4, 0.4)
+</td>
+<td style="text-align:right;">
+0.3 (-0.3, 0.9)
+</td>
+<td style="text-align:right;">
+-0.4 (-0.8, 0.0)
+</td>
+<td style="text-align:right;">
+0.2 (-0.1, 0.6)
+</td>
+<td style="text-align:right;">
+0.0 (-0.4, 0.5)
+</td>
+</tr>
+<tr>
+<td style="text-align:left;padding-left: 2em;" indentlevel="1">
 vs 25-yr normal, median (95% CrI)
 </td>
 <td style="text-align:right;">
@@ -2543,6 +2674,66 @@ vs 25-yr normal, median (95% CrI)
 </td>
 <td style="text-align:right;">
 0.2 (0.0, 0.3)
+</td>
+</tr>
+<tr>
+<td style="text-align:left;font-weight: bold;">
+Runoff (mm), median (IQR)
+</td>
+<td style="text-align:right;font-weight: bold;">
+0.00 (0.00, 0.00)
+</td>
+<td style="text-align:right;font-weight: bold;">
+0.01 (0.00, 0.08)
+</td>
+<td style="text-align:right;font-weight: bold;">
+0.00 (0.00, 0.01)
+</td>
+<td style="text-align:right;font-weight: bold;">
+0.00 (0.00, 0.00)
+</td>
+<td style="text-align:right;font-weight: bold;">
+0.00 (0.00, 0.01)
+</td>
+</tr>
+<tr>
+<td style="text-align:left;padding-left: 2em;" indentlevel="1">
+90-day shock (% vs 90-day baseline), median (IQR)
+</td>
+<td style="text-align:right;">
+-2 (-3, -1)
+</td>
+<td style="text-align:right;">
+1 (-2, 12)
+</td>
+<td style="text-align:right;">
+-8 (-12, -3)
+</td>
+<td style="text-align:right;">
+-2 (-5, -1)
+</td>
+<td style="text-align:right;">
+-2 (-6, -0)
+</td>
+</tr>
+<tr>
+<td style="text-align:left;padding-left: 2em;" indentlevel="1">
+vs 25-yr normal, median (95% CrI)
+</td>
+<td style="text-align:right;">
+0.01 (-0.04, 0.06)
+</td>
+<td style="text-align:right;">
+0.11 (-0.14, 0.35)
+</td>
+<td style="text-align:right;">
+-0.18 (-0.36, -0.00)
+</td>
+<td style="text-align:right;">
+<strong>-0.05 (-0.10, -0.01)</strong>
+</td>
+<td style="text-align:right;">
+-0.04 (-0.11, 0.03)
 </td>
 </tr>
 <tr>
@@ -2589,11 +2780,14 @@ Predators, median (IQR)
 <tfoot>
 <tr>
 <td style="padding: 0; " colspan="100%">
-<sup></sup> Summarised over all cell-days in the 73 Minnesota cells with
-at least one spillover. Deviations are from the 1997-2021 weekly normal
-for that cell, reported as the median across cells with a 95% credible
-interval from an INLA AR(1) model over day. CrI = credible interval; IQR
-= interquartile range.
+<sup></sup> Case-crossover sample: 85 spillover events in 73 cells; a
+stratum takes the season of its case day. Conditions are summarised over
+all cell-days in those 73 cells. The 90-day shock is the mean of the
+last 7 days minus the mean of the preceding 90; for precipitation and
+runoff it is a log ratio, shown as percent change. Deviations are from
+the 1997-2021 weekly normal for that cell, reported as the median across
+cells with a 95% credible interval from an INLA AR(1) model over day.
+CrI = credible interval; IQR = interquartile range.
 </td>
 </tr>
 </tfoot>

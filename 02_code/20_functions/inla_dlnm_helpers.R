@@ -71,7 +71,7 @@ temp_threshold_z <- function(df, thr_C = INLA_TEMP_THRESHOLD_C) {
 # precipitation was tried as threshold and spline and every variant widened its interval
 # without changing direction, and it bottoms out at -0.78 so low cuts are degenerate.
 INLA_ARGLAG_PRIMARY <- list(fun = "ns", df = 2)
-INLA_PREC_PRIMARY   <- 16
+INLA_PREC_PRIMARY   <- 4     # N(0, 0.5^2): what c_17 fits; 16 here was stale and silently tightened every script that read it
 INLA_ARGVAR_BY_VAR  <- list()   # empty => assemble_cc_dlnm derives the temperature threshold
 
 #2. VIF among exposures (lag-0, z-scaled). Result: one VIF per predictor.

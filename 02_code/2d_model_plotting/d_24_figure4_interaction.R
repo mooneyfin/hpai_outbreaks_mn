@@ -58,8 +58,8 @@ one_block <- function(kind, keep_xlab, wins) {
     scale_colour_manual(values = COL) + scale_shape_manual(values = SHP) +
     # log axis so a halving and a doubling are the same distance; coord_cartesian clips
     # rather than deleting any estimate whose interval runs past the edge
-    scale_x_continuous(trans = "log", breaks = c(0.25, 0.5, 1, 2, 3), labels = lab_num) +
-    coord_cartesian(xlim = c(0.18, 3.6)) +   # 0.36 (0.20, 0.67) sits at the left edge
+    scale_x_continuous(trans = "log", breaks = c(0.25, 0.5, 1, 2, 4, 8), labels = lab_num) +
+    coord_cartesian(xlim = c(0.15, 9)) +   # runoff 0-14 d reaches 8.3 at the corrected prior
     labs(x = if (keep_xlab) "Rate ratio per +0.5 SD increase in exposure" else NULL,
          y = NULL, colour = MODELS[[kind]], shape = MODELS[[kind]]) +
     guides(colour = guide_legend(title.position = "left"), shape = guide_legend(title.position = "left")) +
