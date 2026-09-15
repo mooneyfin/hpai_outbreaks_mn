@@ -1,6 +1,13 @@
 // ============================================================
 // ERA5-Land daily extraction — Mississippi Flyway upper states
-// MN + IA + WI + SD + MI + OH + IL + IN, Nov 15 2021 – Dec 31 2022
+// MN + IA + WI + SD + MI + OH + IL + IN, Aug 1 2021 – Dec 31 2022
+//
+// WARM-UP RE-PULL (Sep 2026): the study period still starts Nov 15 2021, but the
+// 90-day rolling anomaly in a_07 needs 90 days of history BEFORE the first study
+// day, so it was only complete from Feb 13 2022 and cost 8 cases. The seven
+// windows from 2021-08a to 2021-11pre close that gap. Everything from 2021-11a
+// onwards already exists in Drive — in the Tasks panel run ONLY the new
+// era5_*_2021-08*, -09*, -10* and -11pre exports.
 // Output: per-state bi-weekly CSVs + fishnet GeoJSON to Drive/hpai_multistate_era5
 //
 // Incremental re-pull (Jun 2026): Ohio, Illinois + Indiana added to the original
@@ -33,8 +40,18 @@ var GRID_M       = 10000;
 var DRIVE_FOLDER = 'hpai_multistate_era5';
 var EPSG         = 'EPSG:5070';   // NAD83 CONUS Albers (equal-area)
 
-// Bi-weekly export windows. First row clipped to study start (Nov 15).
+// Bi-weekly export windows. The 2021-08a..2021-11pre rows are warm-up only: they
+// never carry a case, they exist so the 90-day baseline is complete on the first
+// study day. '2021-11a' below starts Nov 15 because that is the study start; the
+// new '2021-11pre' covers the first half of that month.
 var windows = [
+  ['2021-08-01', '2021-08-15', '2021-08a'],
+  ['2021-08-15', '2021-09-01', '2021-08b'],
+  ['2021-09-01', '2021-09-15', '2021-09a'],
+  ['2021-09-15', '2021-10-01', '2021-09b'],
+  ['2021-10-01', '2021-10-15', '2021-10a'],
+  ['2021-10-15', '2021-11-01', '2021-10b'],
+  ['2021-11-01', '2021-11-15', '2021-11pre'],
   ['2021-11-15', '2021-12-01', '2021-11a'],
   ['2021-12-01', '2021-12-15', '2021-12a'],
   ['2021-12-15', '2022-01-01', '2021-12b'],

@@ -1,0 +1,25 @@
+# Conda environment for the Python side of this repo (the NLCD land-cover extraction, the case
+# zone map, and the figure-style comparison). The R side is handled by renv, not by this.
+#
+#   conda env create -f environment.yml
+#   conda activate hpai_outbreaks_mn
+#
+# matplotlib_map_utils is pip-only, everything else comes from conda-forge so the GDAL/PROJ
+# stack underneath geopandas and rasterio stays consistent.
+name: hpai_outbreaks_mn
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - pandas
+  - numpy
+  - matplotlib
+  - geopandas
+  - shapely
+  - rasterio
+  - contextily
+  - pyogrio
+  - jupyter
+  - pip
+  - pip:
+      - matplotlib-map-utils

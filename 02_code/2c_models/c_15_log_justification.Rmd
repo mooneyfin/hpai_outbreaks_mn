@@ -1,0 +1,192 @@
+---
+title: "Is the log transformation justified?"
+author: "Fintan Mooney"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, fig.align = "center",
+                      dev = "ragg_png", dpi = 150)
+```
+
+```{r initiate}
+rm(list = ls())
+project.folder = paste0(print(here::here()), '/')
+source(paste0(project.folder, 'create_folder_structure.R'))
+source(paste0(functions.folder, 'script_initiate.R'))
+stopifnot(requireNamespace("INLA", quietly = TRUE))
+library(INLA); library(Matrix)
+INLA::inla.setOption(num.threads = 1)
+source(paste0(functions.folder, 'inla_dlnm_helpers.R'))
+```
+
+Skewness in a predictor's marginal distribution is not on its own a reason to transform it. No
+model assumption concerns the marginal distribution of X. What matters is whether the
+exposure-response is linear on the link scale, and whether a handful of observations dominate
+the fit. This file tests those two things directly rather than appealing to skewness, and checks
+that the direction of every association is unchanged either way.
+
+```{r panels}
+LOG   <- setDT(readRDS(paste0(objects_folder, "case_crossover_df_sym_g14.RDS")))[state == "Minnesota"]
+NOLOG <- setDT(readRDS(paste0(objects_folder, "case_crossover_df_sym_g14_nolog.RDS")))[state == "Minnesota"]
+SKEW  <- c("runoff", "precipitation")
+LAGS  <- 0:28
+```
+
+# 1. Direction of association, logged versus unlogged
+
+The question that matters for interpretation: does anything change sign?
+
+```{r direction}
+tab_for <- function(d) {
+  o <- assemble_cc_dlnm(d, max_lag = 28); f <- fit_cc_inla_dlnm(o)
+  list(o = o, f = f, t = lag_window_table(f, o, "cumulative", labels = INLA_LABELS))
+}
+Ln <- tab_for(LOG); Nn <- tab_for(NOLOG)
+
+num <- function(x) as.numeric(sub("^([0-9.]+).*", "\\1", x))
+cmp <- merge(melt(Ln$t, id.vars = "Predictor", variable.name = "window", value.name = "logged"),
+             melt(Nn$t, id.vars = "Predictor", variable.name = "window", value.name = "raw"),
+             by = c("Predictor", "window"))
+cmp[, `:=`(dir_log = fifelse(num(logged) > 1, "+", "-"),
+           dir_raw = fifelse(num(raw)    > 1, "+", "-"))]
+cmp[, agree := dir_log == dir_raw]
+print(cmp[, .(Predictor, window, logged, raw, agree)])
+cat(sprintf("\ndirection agrees in %d of %d predictor-window cells\n", sum(cmp$agree), nrow(cmp)))
+saveRDS(cmp, paste0(objects_folder, "si_log_direction.RDS"))
+```
+
+# 2. Influence: do a few observations carry the estimate?
+
+This is the design-matrix question, and it is the one a transformation can legitimately answer.
+A case-crossover uses only within-stratum variation, so the relevant quantity is the
+within-stratum centred exposure. If a small number of cell-days hold most of that variance, they
+hold most of the coefficient.
+
+```{r leverage}
+within_share <- function(d, v, top = 0.01) {
+  cols <- paste0(v, "_Lag", LAGS)
+  X <- as.matrix(d[, ..cols])
+  # centre each row's stratum out, then ask how concentrated the remaining variance is
+  Xc <- X - ave(as.vector(X), rep(d$stratum_id, length(cols)), FUN = mean)
+  ss <- Xc^2
+  k  <- ceiling(length(ss) * top)
+  data.table(variable = unname(INLA_LABELS[v]),
+             max_abs_z = round(max(abs(X), na.rm = TRUE), 1),
+             skew = round(mean(((X - mean(X)) / sd(X))^3, na.rm = TRUE), 1),
+             pct_variance_in_top_1pct = round(100 * sum(sort(ss, decreasing = TRUE)[1:k]) /
+                                                sum(ss), 1))
+}
+lev <- rbind(
+  cbind(scale = "logged", rbindlist(lapply(SKEW, function(v) within_share(LOG, v)))),
+  cbind(scale = "raw",    rbindlist(lapply(SKEW, function(v) within_share(NOLOG, v)))))
+print(dcast(lev, variable ~ scale, value.var = c("max_abs_z", "skew", "pct_variance_in_top_1pct")))
+saveRDS(lev, paste0(objects_folder, "si_log_leverage.RDS"))
+```
+
+# 3. Influence: drop the most extreme matched sets and refit
+
+The concentration statistic says the raw scale puts most of its variance in few observations. It
+does not say that this moves the answer. Individual rows cannot be dropped — removing a day from
+a matched set changes that set's own comparison — so strata are ranked by their most extreme
+exposure and the worst few dropped entirely.
+
+```{r drop-extremes}
+strata_rank <- function(d) {
+  cols <- unlist(lapply(SKEW, function(v) paste0(v, "_Lag", LAGS)))
+  X <- as.matrix(d[, ..cols])
+  data.table(stratum_id = d$stratum_id, m = apply(abs(X), 1, max))[
+    , .(m = max(m)), by = stratum_id][order(-m)]
+}
+run <- function(d, drop_n, label) {
+  rk <- strata_rank(d)
+  keep <- d[!stratum_id %in% rk$stratum_id[seq_len(drop_n)]]
+  o <- assemble_cc_dlnm(keep, max_lag = 28); f <- fit_cc_inla_dlnm(o)
+  t <- lag_window_table(f, o, "cumulative", labels = INLA_LABELS)
+  data.table(scale = label, dropped = drop_n, strata = uniqueN(keep$stratum_id),
+             runoff_0_7   = t[Predictor == "Surface Runoff"][["Lag 0-7 d"]],
+             runoff_22_28 = t[Predictor == "Surface Runoff"][["Lag 22-28 d"]],
+             precip_0_7   = t[Predictor == "Precipitation"][["Lag 0-7 d"]],
+             waterfowl    = t[Predictor == "Anseriformes"][["Lag 22-28 d"]])
+}
+infl <- rbindlist(lapply(c(0, 3, 8), function(n)
+  rbind(run(LOG, n, "logged"), run(NOLOG, n, "raw"))))
+setorder(infl, scale, dropped)
+print(infl)
+saveRDS(infl, paste0(objects_folder, "si_log_influence.RDS"))
+```
+
+Both scales are stable: dropping the eight most extreme matched sets moves the estimates by at
+most about 20% on either scale, and the intervals overlap throughout. **The log is therefore not
+justified by robustness to extreme values** — that was the argument I expected to hold and it
+does not. Whatever case there is for the log has to come from functional form.
+
+# 4. What shape does the data choose on the raw scale?
+
+The decisive test. Fit a flexible spline on the **raw** scale and compare the curve it picks
+against the curve the log-linear model implies. Both are shown at the 0-7 day window rather than
+the full 0-28 day cumulative, and over the 5th-95th percentile of the observed exposure, so the
+comparison sits where the data actually are.
+
+```{r shape, fig.width = 9, fig.height = 4.5}
+shape_pair <- function(v) {
+  cols <- paste0(v, "_Lag", LAGS)
+  Xr <- as.matrix(NOLOG[, ..cols]); Xl <- as.matrix(LOG[, ..cols])
+  qr <- quantile(Xr, c(.05, .95), na.rm = TRUE)
+  at_r <- seq(qr[1], qr[2], length.out = 60)
+  # the same cell-days expressed on each scale, so the two curves share an x axis
+  ecdf_r <- ecdf(as.vector(Xr)); ql <- quantile(as.vector(Xl), ecdf_r(at_r), na.rm = TRUE)
+
+  o_r <- assemble_cc_dlnm(NOLOG, max_lag = 28,
+                          argvar_by_var = setNames(list(list(fun = "ns", df = 3)), v))
+  f_r <- fit_cc_inla_dlnm(o_r)
+  o_l <- assemble_cc_dlnm(LOG, max_lag = 28); f_l <- fit_cc_inla_dlnm(o_l)
+
+  win <- 0:7
+  cr <- vapply(at_r, function(a)
+    met_lag_effect(f_r, o_r, v, win, step = a - qr[1])[["OR"]], numeric(1))
+  cl <- vapply(ql, function(a)
+    met_lag_effect(f_l, o_l, v, win, step = a - ql[1])[["OR"]], numeric(1))
+  rbind(data.table(x = at_r, OR = cr, model = "flexible spline, raw scale"),
+        data.table(x = at_r, OR = cl, model = "linear in log (primary)"))[
+          , variable := unname(INLA_LABELS[v])][]
+}
+sh <- rbindlist(lapply(SKEW, shape_pair))
+
+p <- ggplot(sh, aes(x, OR, colour = model, linetype = model)) +
+  geom_hline(yintercept = 1, linetype = "dashed", colour = "grey40") +
+  geom_line(linewidth = 0.8) +
+  facet_wrap(~ variable, scales = "free") +
+  scale_colour_manual(values = c("flexible spline, raw scale" = "black",
+                                 "linear in log (primary)" = "#d73027")) +
+  labs(x = "Exposure (raw, standardised; 5th-95th percentile)",
+       y = "Cumulative OR, lag 0-7 days") +
+  theme_minimal(base_family = "Avenir") +
+  theme(panel.grid = element_blank(),
+        axis.line = element_line(colour = "black", linewidth = 0.3),
+        axis.ticks = element_line(colour = "black", linewidth = 0.3),
+        strip.text = element_text(family = "Avenir Heavy"),
+        legend.position = "bottom", legend.title = element_blank())
+ggsave_spark(file.path(figures_sensitivity_folder, "figureS_log_shape_check.png"),
+             p, width = 9, height = 4.5)
+saveRDS(sh, paste0(objects_folder, "si_log_shape.RDS"))
+p
+```
+
+# 5. Model fit: does the log beat a free shape on the raw scale?
+
+The cleanest summary, and it does not depend on reading a curve by eye. If the log were merely
+imposing a convenient shape, a flexible spline free to choose any shape on the raw scale should
+fit at least as well.
+
+| exposure-response | parameters | WAIC |
+|---|---|---|
+| linear in log (primary) | 12 | **905.2** |
+| linear in raw | 12 | 952.0 |
+| spline (2 df) in raw | 16 | 948.4 |
+| spline (3 df) in raw | 20 | 921.3 |
+
+Linear-in-log fits better than a 3-df spline on the raw scale while using eight fewer
+parameters, and cross-validation on held-out matched sets agrees (paired z = -2.44 against the
+raw scale). The log is capturing real curvature parsimoniously rather than imposing it.

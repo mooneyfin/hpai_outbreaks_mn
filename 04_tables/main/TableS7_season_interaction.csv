@@ -1,0 +1,121 @@
+parameterisation,panel,exposure,window,spring,outside,ratio,p_interaction
+Absolute conditions,Minnesota,Temperature,0-7 days,"1.23 (0.79, 1.90)","1.06 (0.67, 1.67)","1.16 (0.62, 2.17)",0.651
+Absolute conditions,Minnesota,Temperature,8-14 days,"1.11 (0.87, 1.41)","0.94 (0.74, 1.21)","1.17 (0.83, 1.66)",0.368
+Absolute conditions,Minnesota,Temperature,15-21 days,"1.03 (0.77, 1.39)","0.85 (0.63, 1.15)","1.21 (0.79, 1.85)",0.38
+Absolute conditions,Minnesota,Temperature,22-28 days,"0.96 (0.60, 1.53)","0.77 (0.47, 1.25)","1.25 (0.63, 2.45)",0.525
+Absolute conditions,Minnesota,Precipitation,0-7 days,"0.85 (0.55, 1.32)","0.79 (0.47, 1.32)","1.08 (0.55, 2.12)",0.832
+Absolute conditions,Minnesota,Precipitation,8-14 days,"0.85 (0.64, 1.14)","0.91 (0.63, 1.30)","0.94 (0.60, 1.49)",0.802
+Absolute conditions,Minnesota,Precipitation,15-21 days,"0.84 (0.64, 1.11)","1.00 (0.69, 1.45)","0.84 (0.53, 1.33)",0.461
+Absolute conditions,Minnesota,Precipitation,22-28 days,"0.83 (0.58, 1.18)","1.11 (0.69, 1.78)","0.75 (0.42, 1.35)",0.338
+Absolute conditions,Minnesota,Soil moisture,0-7 days,"0.92 (0.53, 1.61)","1.00 (0.53, 1.85)","0.92 (0.40, 2.13)",0.853
+Absolute conditions,Minnesota,Soil moisture,8-14 days,"0.84 (0.60, 1.20)","0.99 (0.65, 1.51)","0.85 (0.49, 1.47)",0.569
+Absolute conditions,Minnesota,Soil moisture,15-21 days,"0.77 (0.56, 1.07)","0.98 (0.63, 1.54)","0.79 (0.45, 1.37)",0.395
+Absolute conditions,Minnesota,Soil moisture,22-28 days,"0.71 (0.46, 1.09)","0.98 (0.54, 1.78)","0.72 (0.34, 1.51)",0.389
+Absolute conditions,Minnesota,Wind speed,0-7 days,"1.05 (0.79, 1.41)","0.83 (0.60, 1.15)","1.26 (0.82, 1.96)",0.291
+Absolute conditions,Minnesota,Wind speed,8-14 days,"1.07 (0.88, 1.30)","0.90 (0.73, 1.10)","1.19 (0.90, 1.58)",0.22
+Absolute conditions,Minnesota,Wind speed,15-21 days,"1.10 (0.90, 1.34)","0.95 (0.77, 1.16)","1.16 (0.87, 1.55)",0.307
+Absolute conditions,Minnesota,Wind speed,22-28 days,"1.13 (0.87, 1.46)","1.00 (0.75, 1.32)","1.13 (0.77, 1.66)",0.53
+Absolute conditions,Minnesota,Runoff,0-7 days,"0.97 (0.67, 1.41)","1.02 (0.67, 1.54)","0.95 (0.54, 1.67)",0.862
+Absolute conditions,Minnesota,Runoff,8-14 days,"0.99 (0.79, 1.26)","1.01 (0.77, 1.32)","0.98 (0.69, 1.40)",0.926
+Absolute conditions,Minnesota,Runoff,15-21 days,"1.02 (0.81, 1.27)","1.01 (0.77, 1.33)","1.01 (0.71, 1.44)",0.966
+Absolute conditions,Minnesota,Runoff,22-28 days,"1.04 (0.77, 1.40)","1.00 (0.69, 1.46)","1.03 (0.64, 1.66)",0.894
+Absolute conditions,Minnesota,Anseriformes,0-7 days,"0.87 (0.56, 1.38)","1.05 (0.50, 2.19)","0.84 (0.35, 1.99)",0.684
+Absolute conditions,Minnesota,Anseriformes,8-14 days,"1.26 (1.04, 1.53)","1.20 (0.83, 1.74)","1.05 (0.69, 1.59)",0.827
+Absolute conditions,Minnesota,Anseriformes,15-21 days,"1.75 (1.31, 2.34)","1.38 (0.91, 2.10)","1.27 (0.76, 2.11)",0.364
+Absolute conditions,Minnesota,Anseriformes,22-28 days,"2.42 (1.42, 4.14)","1.58 (0.78, 3.22)","1.53 (0.63, 3.74)",0.347
+Absolute conditions,Pooled,Temperature,0-7 days,"0.95 (0.70, 1.28)","0.97 (0.70, 1.33)","0.98 (0.63, 1.51)",0.927
+Absolute conditions,Pooled,Temperature,8-14 days,"0.94 (0.79, 1.12)","0.94 (0.79, 1.12)","1.00 (0.78, 1.28)",0.993
+Absolute conditions,Pooled,Temperature,15-21 days,"0.93 (0.74, 1.17)","0.92 (0.74, 1.14)","1.01 (0.74, 1.39)",0.928
+Absolute conditions,Pooled,Temperature,22-28 days,"0.92 (0.64, 1.33)","0.89 (0.63, 1.26)","1.03 (0.62, 1.70)",0.907
+Absolute conditions,Pooled,Precipitation,0-7 days,"0.92 (0.66, 1.30)","0.74 (0.48, 1.14)","1.25 (0.72, 2.17)",0.424
+Absolute conditions,Pooled,Precipitation,8-14 days,"0.91 (0.73, 1.14)","0.94 (0.69, 1.28)","0.97 (0.67, 1.42)",0.89
+Absolute conditions,Pooled,Precipitation,15-21 days,"0.90 (0.72, 1.11)","1.13 (0.82, 1.56)","0.79 (0.54, 1.16)",0.233
+Absolute conditions,Pooled,Precipitation,22-28 days,"0.88 (0.66, 1.17)","1.37 (0.91, 2.05)","0.64 (0.39, 1.05)",0.079
+Absolute conditions,Pooled,Soil moisture,0-7 days,"0.95 (0.62, 1.46)","1.23 (0.78, 1.96)","0.77 (0.41, 1.45)",0.418
+Absolute conditions,Pooled,Soil moisture,8-14 days,"0.91 (0.69, 1.19)","1.08 (0.81, 1.46)","0.84 (0.56, 1.25)",0.381
+Absolute conditions,Pooled,Soil moisture,15-21 days,"0.86 (0.66, 1.13)","0.99 (0.72, 1.35)","0.88 (0.58, 1.32)",0.528
+Absolute conditions,Pooled,Soil moisture,22-28 days,"0.82 (0.57, 1.19)","0.90 (0.58, 1.38)","0.92 (0.52, 1.62)",0.763
+Absolute conditions,Pooled,Wind speed,0-7 days,"1.22 (0.95, 1.56)","0.83 (0.63, 1.11)","1.46 (1.00, 2.12)",0.051
+Absolute conditions,Pooled,Wind speed,8-14 days,"1.16 (0.98, 1.38)","0.90 (0.75, 1.08)","1.29 (1.00, 1.66)",0.047
+Absolute conditions,Pooled,Wind speed,15-21 days,"1.14 (0.95, 1.36)","0.95 (0.79, 1.14)","1.20 (0.93, 1.55)",0.164
+Absolute conditions,Pooled,Wind speed,22-28 days,"1.11 (0.89, 1.40)","1.00 (0.77, 1.28)","1.12 (0.80, 1.57)",0.516
+Absolute conditions,Pooled,Runoff,0-7 days,"0.94 (0.66, 1.34)","1.09 (0.73, 1.63)","0.86 (0.51, 1.46)",0.582
+Absolute conditions,Pooled,Runoff,8-14 days,"1.01 (0.81, 1.25)","1.04 (0.80, 1.34)","0.97 (0.69, 1.36)",0.852
+Absolute conditions,Pooled,Runoff,15-21 days,"1.06 (0.87, 1.30)","1.00 (0.77, 1.31)","1.06 (0.76, 1.48)",0.727
+Absolute conditions,Pooled,Runoff,22-28 days,"1.12 (0.86, 1.46)","0.96 (0.67, 1.38)","1.16 (0.74, 1.82)",0.509
+Absolute conditions,Pooled,Anseriformes,0-7 days,"1.02 (0.79, 1.30)","1.09 (0.76, 1.57)","0.93 (0.60, 1.44)",0.748
+Absolute conditions,Pooled,Anseriformes,8-14 days,"1.16 (1.02, 1.32)","1.03 (0.85, 1.26)","1.12 (0.89, 1.42)",0.332
+Absolute conditions,Pooled,Anseriformes,15-21 days,"1.32 (1.14, 1.51)","0.99 (0.77, 1.27)","1.33 (1.00, 1.77)",0.051
+Absolute conditions,Pooled,Anseriformes,22-28 days,"1.49 (1.19, 1.87)","0.95 (0.63, 1.42)","1.57 (0.99, 2.49)",0.056
+90-day rolling anomaly,Minnesota,Temperature,0-7 days,"1.41 (0.93, 2.14)","1.08 (0.51, 2.29)","1.30 (0.55, 3.07)",0.547
+90-day rolling anomaly,Minnesota,Temperature,8-14 days,"1.26 (0.98, 1.62)","1.06 (0.66, 1.69)","1.19 (0.70, 2.03)",0.518
+90-day rolling anomaly,Minnesota,Temperature,15-21 days,"1.18 (0.93, 1.50)","1.04 (0.65, 1.67)","1.13 (0.67, 1.92)",0.643
+90-day rolling anomaly,Minnesota,Temperature,22-28 days,"1.10 (0.80, 1.53)","1.03 (0.54, 1.95)","1.08 (0.52, 2.22)",0.84
+90-day rolling anomaly,Minnesota,Precipitation,0-7 days,"0.88 (0.68, 1.14)","1.01 (0.73, 1.39)","0.87 (0.58, 1.31)",0.511
+90-day rolling anomaly,Minnesota,Precipitation,8-14 days,"0.92 (0.79, 1.07)","0.97 (0.78, 1.22)","0.94 (0.72, 1.23)",0.656
+90-day rolling anomaly,Minnesota,Precipitation,15-21 days,"0.94 (0.82, 1.08)","0.94 (0.75, 1.19)","0.99 (0.76, 1.30)",0.959
+90-day rolling anomaly,Minnesota,Precipitation,22-28 days,"0.96 (0.80, 1.15)","0.91 (0.68, 1.22)","1.05 (0.74, 1.48)",0.788
+90-day rolling anomaly,Minnesota,Soil moisture,0-7 days,"0.95 (0.70, 1.28)","0.82 (0.63, 1.06)","1.15 (0.78, 1.71)",0.477
+90-day rolling anomaly,Minnesota,Soil moisture,8-14 days,"0.95 (0.79, 1.13)","0.87 (0.73, 1.03)","1.09 (0.85, 1.40)",0.483
+90-day rolling anomaly,Minnesota,Soil moisture,15-21 days,"0.94 (0.80, 1.11)","0.89 (0.74, 1.08)","1.06 (0.82, 1.35)",0.67
+90-day rolling anomaly,Minnesota,Soil moisture,22-28 days,"0.94 (0.75, 1.17)","0.92 (0.71, 1.19)","1.02 (0.73, 1.43)",0.911
+90-day rolling anomaly,Minnesota,Wind speed,0-7 days,"1.10 (0.90, 1.36)","0.89 (0.68, 1.17)","1.24 (0.88, 1.75)",0.218
+90-day rolling anomaly,Minnesota,Wind speed,8-14 days,"1.07 (0.94, 1.22)","0.94 (0.79, 1.11)","1.14 (0.92, 1.42)",0.23
+90-day rolling anomaly,Minnesota,Wind speed,15-21 days,"1.05 (0.92, 1.21)","0.97 (0.82, 1.15)","1.08 (0.87, 1.35)",0.473
+90-day rolling anomaly,Minnesota,Wind speed,22-28 days,"1.04 (0.86, 1.25)","1.01 (0.80, 1.27)","1.03 (0.76, 1.38)",0.857
+90-day rolling anomaly,Minnesota,Runoff,0-7 days,"0.98 (0.74, 1.29)","1.03 (0.74, 1.45)","0.94 (0.61, 1.46)",0.797
+90-day rolling anomaly,Minnesota,Runoff,8-14 days,"1.00 (0.83, 1.20)","0.99 (0.80, 1.23)","1.01 (0.76, 1.34)",0.951
+90-day rolling anomaly,Minnesota,Runoff,15-21 days,"1.02 (0.84, 1.23)","0.96 (0.77, 1.19)","1.07 (0.80, 1.42)",0.664
+90-day rolling anomaly,Minnesota,Runoff,22-28 days,"1.04 (0.80, 1.35)","0.92 (0.70, 1.22)","1.13 (0.77, 1.65)",0.542
+90-day rolling anomaly,Minnesota,Anseriformes,0-7 days,"0.83 (0.51, 1.33)","0.80 (0.35, 1.82)","1.03 (0.40, 2.68)",0.945
+90-day rolling anomaly,Minnesota,Anseriformes,8-14 days,"1.20 (0.99, 1.45)","1.18 (0.79, 1.76)","1.02 (0.65, 1.58)",0.945
+90-day rolling anomaly,Minnesota,Anseriformes,15-21 days,"1.66 (1.26, 2.18)","1.65 (1.04, 2.62)","1.00 (0.59, 1.71)",0.993
+90-day rolling anomaly,Minnesota,Anseriformes,22-28 days,"2.29 (1.36, 3.88)","2.32 (1.04, 5.16)","0.99 (0.38, 2.58)",0.983
+90-day rolling anomaly,Pooled,Temperature,0-7 days,"1.30 (0.94, 1.81)","1.07 (0.51, 2.24)","1.22 (0.54, 2.74)",0.632
+90-day rolling anomaly,Pooled,Temperature,8-14 days,"1.23 (1.01, 1.50)","1.11 (0.70, 1.74)","1.11 (0.68, 1.83)",0.668
+90-day rolling anomaly,Pooled,Temperature,15-21 days,"1.21 (1.00, 1.47)","1.15 (0.74, 1.80)","1.05 (0.65, 1.70)",0.848
+90-day rolling anomaly,Pooled,Temperature,22-28 days,"1.19 (0.90, 1.56)","1.20 (0.65, 2.22)","0.99 (0.51, 1.93)",0.968
+90-day rolling anomaly,Pooled,Precipitation,0-7 days,"0.88 (0.72, 1.07)","1.04 (0.77, 1.39)","0.85 (0.59, 1.21)",0.369
+90-day rolling anomaly,Pooled,Precipitation,8-14 days,"0.92 (0.81, 1.04)","1.04 (0.84, 1.28)","0.88 (0.69, 1.12)",0.31
+90-day rolling anomaly,Pooled,Precipitation,15-21 days,"0.94 (0.84, 1.05)","1.04 (0.84, 1.29)","0.90 (0.71, 1.14)",0.378
+90-day rolling anomaly,Pooled,Precipitation,22-28 days,"0.96 (0.83, 1.10)","1.05 (0.80, 1.37)","0.91 (0.67, 1.24)",0.556
+90-day rolling anomaly,Pooled,Soil moisture,0-7 days,"0.91 (0.72, 1.14)","0.78 (0.63, 0.95)","1.17 (0.86, 1.59)",0.326
+90-day rolling anomaly,Pooled,Soil moisture,8-14 days,"0.95 (0.83, 1.09)","0.84 (0.74, 0.96)","1.13 (0.93, 1.37)",0.218
+90-day rolling anomaly,Pooled,Soil moisture,15-21 days,"0.98 (0.86, 1.12)","0.88 (0.77, 1.01)","1.11 (0.92, 1.35)",0.269
+90-day rolling anomaly,Pooled,Soil moisture,22-28 days,"1.02 (0.85, 1.22)","0.93 (0.77, 1.11)","1.10 (0.85, 1.42)",0.479
+90-day rolling anomaly,Pooled,Wind speed,0-7 days,"1.23 (1.04, 1.45)","0.91 (0.72, 1.14)","1.36 (1.02, 1.80)",0.033
+90-day rolling anomaly,Pooled,Wind speed,8-14 days,"1.10 (0.98, 1.23)","0.94 (0.82, 1.08)","1.17 (0.98, 1.39)",0.083
+90-day rolling anomaly,Pooled,Wind speed,15-21 days,"1.02 (0.91, 1.14)","0.97 (0.84, 1.11)","1.05 (0.88, 1.25)",0.569
+90-day rolling anomaly,Pooled,Wind speed,22-28 days,"0.94 (0.82, 1.08)","0.99 (0.82, 1.21)","0.95 (0.75, 1.21)",0.663
+90-day rolling anomaly,Pooled,Runoff,0-7 days,"0.95 (0.77, 1.17)","1.11 (0.86, 1.43)","0.85 (0.61, 1.19)",0.35
+90-day rolling anomaly,Pooled,Runoff,8-14 days,"1.01 (0.88, 1.16)","1.01 (0.86, 1.19)","1.00 (0.81, 1.23)",0.968
+90-day rolling anomaly,Pooled,Runoff,15-21 days,"1.06 (0.92, 1.22)","0.94 (0.80, 1.10)","1.13 (0.91, 1.40)",0.271
+90-day rolling anomaly,Pooled,Runoff,22-28 days,"1.11 (0.92, 1.34)","0.87 (0.70, 1.09)","1.28 (0.96, 1.70)",0.097
+90-day rolling anomaly,Pooled,Anseriformes,0-7 days,"1.05 (0.80, 1.36)","1.01 (0.68, 1.49)","1.04 (0.65, 1.67)",0.871
+90-day rolling anomaly,Pooled,Anseriformes,8-14 days,"1.16 (1.02, 1.32)","1.08 (0.87, 1.35)","1.08 (0.84, 1.39)",0.563
+90-day rolling anomaly,Pooled,Anseriformes,15-21 days,"1.29 (1.13, 1.48)","1.15 (0.88, 1.52)","1.12 (0.82, 1.52)",0.472
+90-day rolling anomaly,Pooled,Anseriformes,22-28 days,"1.44 (1.13, 1.82)","1.23 (0.79, 1.92)","1.16 (0.70, 1.92)",0.555
+25-year climatological anomaly,Minnesota,Temperature,0-7 days,"1.19 (0.94, 1.50)","1.24 (0.92, 1.66)","0.96 (0.66, 1.39)",0.827
+25-year climatological anomaly,Minnesota,Temperature,8-14 days,"1.09 (0.94, 1.27)","1.13 (0.92, 1.38)","0.97 (0.75, 1.25)",0.815
+25-year climatological anomaly,Minnesota,Temperature,15-21 days,"1.03 (0.87, 1.22)","1.06 (0.86, 1.30)","0.98 (0.75, 1.27)",0.855
+25-year climatological anomaly,Minnesota,Temperature,22-28 days,"0.97 (0.76, 1.24)","0.99 (0.77, 1.27)","0.98 (0.69, 1.39)",0.914
+25-year climatological anomaly,Minnesota,Precipitation,0-7 days,"1.01 (0.75, 1.38)","1.19 (0.86, 1.63)","0.85 (0.55, 1.33)",0.481
+25-year climatological anomaly,Minnesota,Precipitation,8-14 days,"0.98 (0.80, 1.20)","1.03 (0.84, 1.26)","0.95 (0.71, 1.27)",0.725
+25-year climatological anomaly,Minnesota,Precipitation,15-21 days,"0.95 (0.77, 1.16)","0.92 (0.75, 1.13)","1.03 (0.77, 1.37)",0.84
+25-year climatological anomaly,Minnesota,Precipitation,22-28 days,"0.92 (0.71, 1.19)","0.82 (0.62, 1.08)","1.12 (0.76, 1.63)",0.568
+25-year climatological anomaly,Minnesota,Soil moisture,0-7 days,"1.10 (0.70, 1.74)","0.83 (0.46, 1.51)","1.33 (0.62, 2.83)",0.46
+25-year climatological anomaly,Minnesota,Soil moisture,8-14 days,"0.99 (0.75, 1.32)","0.91 (0.61, 1.36)","1.09 (0.67, 1.79)",0.721
+25-year climatological anomaly,Minnesota,Soil moisture,15-21 days,"0.91 (0.71, 1.18)","0.97 (0.62, 1.51)","0.94 (0.56, 1.57)",0.821
+25-year climatological anomaly,Minnesota,Soil moisture,22-28 days,"0.84 (0.60, 1.17)","1.03 (0.56, 1.90)","0.81 (0.41, 1.62)",0.555
+25-year climatological anomaly,Minnesota,Wind speed,0-7 days,"1.24 (0.96, 1.59)","1.00 (0.63, 1.58)","1.24 (0.74, 2.10)",0.417
+25-year climatological anomaly,Minnesota,Wind speed,8-14 days,"1.14 (0.97, 1.35)","0.96 (0.71, 1.30)","1.19 (0.84, 1.67)",0.325
+25-year climatological anomaly,Minnesota,Wind speed,15-21 days,"1.09 (0.92, 1.30)","0.93 (0.68, 1.28)","1.17 (0.82, 1.67)",0.399
+25-year climatological anomaly,Minnesota,Wind speed,22-28 days,"1.04 (0.82, 1.32)","0.91 (0.59, 1.38)","1.15 (0.71, 1.87)",0.58
+25-year climatological anomaly,Minnesota,Runoff,0-7 days,"0.85 (0.54, 1.35)","1.06 (0.60, 1.87)","0.80 (0.39, 1.67)",0.561
+25-year climatological anomaly,Minnesota,Runoff,8-14 days,"0.92 (0.69, 1.23)","1.02 (0.70, 1.48)","0.90 (0.56, 1.45)",0.662
+25-year climatological anomaly,Minnesota,Runoff,15-21 days,"0.97 (0.74, 1.26)","0.99 (0.68, 1.44)","0.97 (0.61, 1.55)",0.91
+25-year climatological anomaly,Minnesota,Runoff,22-28 days,"1.02 (0.72, 1.44)","0.96 (0.59, 1.57)","1.05 (0.58, 1.92)",0.865
+25-year climatological anomaly,Minnesota,Anseriformes,0-7 days,"0.90 (0.59, 1.37)","0.89 (0.35, 2.26)","1.01 (0.36, 2.82)",0.981
+25-year climatological anomaly,Minnesota,Anseriformes,8-14 days,"1.22 (1.01, 1.47)","1.24 (0.77, 1.99)","0.98 (0.59, 1.63)",0.942
+25-year climatological anomaly,Minnesota,Anseriformes,15-21 days,"1.59 (1.20, 2.11)","1.67 (1.00, 2.79)","0.95 (0.53, 1.71)",0.876
+25-year climatological anomaly,Minnesota,Anseriformes,22-28 days,"2.09 (1.25, 3.47)","2.25 (0.95, 5.31)","0.93 (0.34, 2.52)",0.884

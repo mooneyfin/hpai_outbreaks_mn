@@ -199,3 +199,150 @@ saveRDS(wk, paste0(objects_folder, "case_crossover_df_sym_weekly.RDS"))
 mnw <- wk[state == "Minnesota"]
 cat(sprintf("weekly  MN cases %3d, referents %5d, cells %3d -> case_crossover_df_sym_weekly.RDS\n",
             sum(mnw$outbreak_binary == 1), sum(mnw$outbreak_binary == 0), uniqueN(mnw$zone_id)))
+
+
+# 5a. Time-stratified panel, calendar-month strata, ALL days as referents.
+#     The usual time-stratified recipe also matches day-of-week, which exists to control weekly
+#     human activity cycles in air-pollution studies. That is not a mechanism here, and matching
+#     on it costs most of the referents (3-4 per case instead of ~29) and with them the
+#     within-stratum lag variation the bird term needs. Dropping it keeps the property that
+#     matters - strata are a fixed calendar partition, so referent windows never overlap between
+#     cases and the conditional likelihood stays unbiased (Janes, Sheppard & Lumley 2005).
+build_timestrat <- function(panel, max_lag = LAG_STORE, flag_ids = cross_farm_ids,
+                            match_dow = FALSE, block_months = 1L, washout = 0L,
+                            washout_type = c("symmetric", "post")) {
+  washout_type <- match.arg(washout_type)
+  p <- copy(panel)
+  p[, tkey := as.Date(date)]
+  p[, is_outbreak_raw := as.integer(outbreak_binary == 1)]
+
+  fl <- p[outbreak_binary == 1 & tkey >= case_window_start & tkey <= case_window_end
+        ][, nf := vapply(outbreak_id, count_flagged_ids, integer(1), flagged_ids = flag_ids)
+        ][nf > 0, .(zone_id, tkey, nf)]
+  p <- merge(p, fl, by = c("zone_id", "tkey"), all.x = TRUE)
+  p[, nf := fcoalesce(nf, 0L)]
+  p[, outbreak_binary := as.integer(outbreak_count - nf > 0)]
+  p[, nf := NULL]
+
+  # the fixed calendar partition. block_months = 2 pairs calendar months (Jan-Feb, Mar-Apr,
+  # ...), which keeps the partition fixed while giving a wider referent pool - useful once a
+  # washout removes the days nearest the case.
+  p[, blk := paste0(zone_id, "_", format(tkey, "%Y"), "_",
+                    ceiling(as.integer(format(tkey, "%m")) / block_months),
+                    if (match_dow) paste0("_", format(tkey, "%u")) else "")]
+
+  cases <- p[outbreak_binary == 1 & tkey >= case_window_start & tkey <= case_window_end,
+             .(zone_id, ct = tkey, blk)]
+  cases[, stratum_id := paste0("z", zone_id, "_", format(ct, "%Y%m%d"))]
+
+  src <- p[zone_id %in% unique(cases$zone_id)]
+  setorder(src, zone_id, tkey)
+  for (v in lag_vars) {
+    nm <- paste0(v, "_Lag", 0:max_lag)
+    src[, (nm) := shift(.SD[[1]], n = 0:max_lag, type = "lag"), by = zone_id, .SDcols = v]
+  }
+
+  # every day in the case's own block becomes a referent
+  sets <- merge(cases[, .(stratum_id, zone_id, ct, blk)],
+                src[, .(zone_id, tkey, blk)], by = c("zone_id", "blk"),
+                allow.cartesian = TRUE)
+  sets[, is_case := as.integer(tkey == ct)]
+  matched <- merge(sets[, .(stratum_id, zone_id, tkey, is_case)], src,
+                   by = c("zone_id", "tkey"), all.x = FALSE)
+    # washout: referents within `washout` days of the case share most of their 0-28 d exposure
+  # history with it, and after detection the flock is depopulated so those days are not valid
+  # person-time either. Applied symmetrically to keep the referents balanced in time.
+  if (washout > 0L) {
+    matched <- merge(matched, cases[, .(stratum_id, ct)], by = "stratum_id", all.x = TRUE)
+    dd <- as.integer(matched$tkey - matched$ct)
+    matched <- matched[is_case == 1L |
+                       if (washout_type == "symmetric") abs(dd) > washout else !(dd > 0 & dd <= washout)]
+    matched[, ct := NULL]
+  }
+  matched <- matched[is_case == 1L | is_outbreak_raw == 0L]
+  keep <- matched[, .(nc = sum(is_case == 1L), nk = sum(is_case == 0L)),
+                  by = stratum_id][nc >= 1 & nk >= 1, stratum_id]
+  matched <- matched[stratum_id %in% keep]
+  matched[, `:=`(outbreak_binary = is_case,
+                 case_control    = fifelse(is_case == 1L, "case", "control"))]
+  setnames(matched, "tkey", "date")
+  transform_lag_cols(matched, max_lag)
+}
+
+for (dw in c(FALSE, TRUE)) {
+  d <- build_timestrat(daily, match_dow = dw)
+  f <- sprintf("case_crossover_df_timestrat_%s.RDS", if (dw) "month_dow" else "month")
+  saveRDS(d, paste0(objects_folder, f))
+  mn <- d[state == "Minnesota"]
+  cat(sprintf("time-stratified %-10s MN cases %3d, referents %5d (%.1f per case), cells %3d -> %s\n",
+              if (dw) "month+DOW" else "month", sum(mn$outbreak_binary == 1),
+              sum(mn$outbreak_binary == 0),
+              sum(mn$outbreak_binary == 0) / sum(mn$outbreak_binary == 1),
+              uniqueN(mn$zone_id), f))
+}
+
+
+# 5b. Two-month strata with a symmetric washout, built for the whole flyway panel so Minnesota
+#     and the pooled analysis share one construction.
+for (cfg in list(list(bm = 1L, wo = 14L, tag = "month_wo14"),
+                 list(bm = 2L, wo = 14L, tag = "bimonth_wo14"),
+                 list(bm = 2L, wo = 21L, tag = "bimonth_wo21"))) {
+  d <- build_timestrat(daily, block_months = cfg$bm, washout = cfg$wo)
+  f <- sprintf("case_crossover_df_timestrat_%s.RDS", cfg$tag)
+  saveRDS(d, paste0(objects_folder, f))
+  mn <- d[state == "Minnesota"]
+  cat(sprintf("%-14s ALL: cases %3d refs %6d (%.1f/case) | MN: cases %3d refs %5d (%.1f/case)\n",
+              cfg$tag, sum(d$outbreak_binary==1), sum(d$outbreak_binary==0),
+              sum(d$outbreak_binary==0)/sum(d$outbreak_binary==1),
+              sum(mn$outbreak_binary==1), sum(mn$outbreak_binary==0),
+              sum(mn$outbreak_binary==0)/sum(mn$outbreak_binary==1)))
+  print(d[outbreak_binary==1, .(cases=.N), by=state][order(-cases)])
+}
+
+
+# 5c. Two variants that separate the two competing explanations for the flattened lag profile:
+#     is it exposure-history overlap between case and referent, or simply that a 28-day lag
+#     window has no room inside a 30-day stratum?
+for (cfg in list(list(bm = 2L, wo = 0L,  ty = "symmetric", tag = "bimonth_nowo"),
+                 list(bm = 2L, wo = 14L, ty = "post",      tag = "bimonth_post14"))) {
+  d <- build_timestrat(daily, block_months = cfg$bm, washout = cfg$wo, washout_type = cfg$ty)
+  saveRDS(d, paste0(objects_folder, sprintf("case_crossover_df_timestrat_%s.RDS", cfg$tag)))
+  mn <- d[state == "Minnesota"]
+  cat(sprintf("%-16s ALL cases %3d | MN cases %3d refs %5d (%.1f/case)\n", cfg$tag,
+              sum(d$outbreak_binary == 1), sum(mn$outbreak_binary == 1),
+              sum(mn$outbreak_binary == 0),
+              sum(mn$outbreak_binary == 0) / sum(mn$outbreak_binary == 1)))
+}
+
+
+# 5c-bis. Post-only washouts at one-month strata. The risk-set argument only justifies
+#     dropping days AFTER the case, since the flock is depopulated and can no longer produce
+#     the outcome; days before the case are valid person-time and there's no validity reason
+#     to bin them. these panels let us check what the symmetric version actually buys.
+for (cfg in list(list(bm = 1L, wo = 7L,   tag = "month_post7"),
+                 list(bm = 1L, wo = 14L,  tag = "month_post14"),
+                 list(bm = 1L, wo = 400L, tag = "month_postall"),
+                 list(bm = 2L, wo = 400L, tag = "bimonth_postall"))) {
+  d <- build_timestrat(daily, block_months = cfg$bm, washout = cfg$wo, washout_type = "post")
+  saveRDS(d, paste0(objects_folder, sprintf("case_crossover_df_timestrat_%s.RDS", cfg$tag)))
+  mn <- d[state == "Minnesota"]
+  cat(sprintf("%-14s ALL cases %3d | MN cases %3d refs %5d (%.1f/case)\n", cfg$tag,
+              sum(d$outbreak_binary == 1), sum(mn$outbreak_binary == 1),
+              sum(mn$outbreak_binary == 0),
+              sum(mn$outbreak_binary == 0) / sum(mn$outbreak_binary == 1)))
+}
+
+
+# 5d. Shorter washouts. 7 days clears depopulation while keeping far more referents than 14,
+#     so it tests whether the de-attenuation needs a wide separation or just a few days.
+for (cfg in list(list(bm = 1L, wo = 7L,  tag = "month_wo7"),
+                 list(bm = 2L, wo = 7L,  tag = "bimonth_wo7"),
+                 list(bm = 2L, wo = 10L, tag = "bimonth_wo10"))) {
+  d <- build_timestrat(daily, block_months = cfg$bm, washout = cfg$wo)
+  saveRDS(d, paste0(objects_folder, sprintf("case_crossover_df_timestrat_%s.RDS", cfg$tag)))
+  mn <- d[state == "Minnesota"]
+  cat(sprintf("%-14s ALL cases %3d | MN cases %3d refs %5d (%.1f/case)\n", cfg$tag,
+              sum(d$outbreak_binary == 1), sum(mn$outbreak_binary == 1),
+              sum(mn$outbreak_binary == 0),
+              sum(mn$outbreak_binary == 0) / sum(mn$outbreak_binary == 1)))
+}

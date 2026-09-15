@@ -41,9 +41,14 @@ weekly bird table this script consumes).
 # 0c.Study region. These codes index the spillover/ERA5 inputs and the fishnet alike.
 study_states_abbr <- c("IA", "IL", "IN", "MI", "MN", "OH", "WI")
 
-# Study window matches the MN pipeline: Nov 2021 spin-up through end of the 2022
-# case year. Cases are defined within calendar 2022.
-study_start <- as.Date("2021-11-15")
+# Study window: 2021 warm-up through the end of the 2022 case year. Cases are still defined
+# within calendar 2022; the earlier start only buys exposure history.
+# 2021-08-01, not 2021-11-15. The scaffold below is what defines the panel, so anything outside
+# this window is dropped on the join no matter what ERA5 covers. The 90-day rolling baseline needs
+# 90 days of history and the DLNM another 28 on top, so a case on 2022-02-08 needs met data back to
+# 2021-10-13, and its February referents back to 2021-10-06. Starting at 2021-11-15 silently cost
+# 8 cases (167 of 175) and 8 cells (153 of 161). The 2021 warm-up export covers 2021-08-01 on.
+study_start <- as.Date("2021-08-01")
 study_end   <- as.Date("2022-12-31")
 date_seq    <- seq(study_start, study_end, by = "day")
 ```

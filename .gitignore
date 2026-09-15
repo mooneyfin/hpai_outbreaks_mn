@@ -108,3 +108,23 @@ Supporting Information*.docx
 
 # revision working documents - local only, not for the public repo
 07_drafts/revision/
+
+# project-local python env for the geopandas map (d_02)
+.venv/
+
+# derived model objects and large binaries stay on disk, out of git
+03_output/**/*.rds
+03_output/**/*.RDS
+03_output/**/*.gpkg
+03_output/3a_eda_output/*.shp
+03_output/3a_eda_output/*.shx
+03_output/3a_eda_output/*.sbn
+03_output/3a_eda_output/*.sbx
+03_output/3a_eda_output/*.dbf
+03_output/3a_eda_output/*.prj
+03_output/3a_eda_output/*.cpg
+01_data/1a_exposure_data/meteorological_data/hpai_multistate_era5/*.zip
+01_data/1c_supportive_datasets/land_cover_data/
+
+# working notes, never pushed
+07_drafts/REVISION_BUILD_PLAN.md

@@ -1,22 +1,26 @@
-// ERA5-Land weekly climatology + 2022 panel for MINNESOTA, on the 8-state grid.
+// ERA5-Land weekly climatology + 2022 panel for ALL 8 STATES on the shared grid.
 // only edit section 0, everything below runs off it.
 //
-//   (A) mn8_climatology_<label>.csv   per zone_id x week_idx, mean + sd of each var
-//   (B) mn8_weekly_era5land_2022.csv  the 2022 weekly values, same columns
+//   (A) flyway8_climatology_1997_2021_wNN-NN.csv  per zone_id x week_idx, mean + sd
+//   (B) flyway8_weekly_era5land_2022.csv          the 2022 weekly values, same columns
+//
+// WAS MINNESOTA-ONLY. The limit was never a code filter: FISHNET_ASSET pointed at an
+// uploaded asset that contained only the 2306 Minnesota cells. Point it at the full
+// 13,920-cell fishnet and the whole script widens. MAP_CENTRE_STATE only centres the map.
 //
 // that's the denominator and the numerator of z = (x - mean) / sd in b_00. the
 // daily study-period panel already exists from a_00_era5_land_gee_multistate.js,
 // we don't re-export it here.
 //
 // THE GRID
-// zone_id has to match the 8-state panel or nothing joins. section 1 rebuilds it
-// exactly the way a_00_era5_land_gee_multistate.js does: cover the FULL 8-state
-// aoi, take zone_id from system:index, filter to Minnesota only after that.
-// narrowing the aoi first gives you a different grid.
+// zone_id has to match the 8-state panel or nothing joins. zone_id came from
+// coveringGrid over the FULL 8-state aoi, so do NOT narrow the aoi and rebuild -
+// that renumbers every id and silently breaks the join to the daily panel.
 //
-// checked offline against fishnet_8state.geojson and against
-// multistate_fishnet_timeseries_daily.RDS: this recipe gives 2306 Minnesota cells
-// and that zone_id set is identical() to the daily panel's. zone_id looks like
+// flyway8_fishnet_shapefile.zip (built from fishnet_8state.geojson, in
+// 01_data/1a_exposure_data/meteorological_data/) is all 13,920 cells across the 8
+// states with the original ids intact. Per state: MI 2525, MN 2306, SD 2083,
+// WI 1785, IL 1630, IA 1424, OH 1253, IN 914. zone_id looks like
 // "-4,227", i.e. x,y in the EPSG:5070 grid, so it's an absolute grid position and
 // not a counter. which is also why bolting OH/IL/IN onto the aoi never renumbered
 // the original cells.
@@ -51,24 +55,23 @@ var STATES = ['Minnesota', 'Iowa', 'Wisconsin', 'South Dakota', 'Michigan',
 var GRID_M = 10000;
 var EPSG   = 'EPSG:5070';   // NAD83 CONUS Albers, equal-area
 
-// 0b. which state's cells to export, and how many there should be. if the count
-// below doesn't hit this, stop and fix the grid before anything else.
-var TARGET_STATE = 'Minnesota';
-var EXPECT_CELLS = 2306;
+// 0b. how many cells the asset should hold, and where to centre the map. the count
+// is the check that matters: wrong number here and nothing downstream joins.
+var MAP_CENTRE_STATE = 'Minnesota';   // cosmetic only, does not filter anything
+var EXPECT_CELLS     = 13920;         // all 8 states; was 2306 for Minnesota alone
 
 // 0b2. the fishnet. building the grid in GEE means an 8-way polygon-polygon join
-// against TIGER state outlines, which are huge, and it blows the interactive
-// memory limit before you can even queue a task. so we don't build it here at
-// all: mn8_fishnet_shapefile.zip (next to fishnet_8state.geojson in the repo) is
-// the same 2306 cells, already checked identical to the daily panel's zone_ids.
-// upload it as a GEE asset once, paste the path here, done.
-var FISHNET_ASSET = 'projects/ee-feedlot/assets/mn8_fishnet';
+// against TIGER state outlines, which is huge and blows the interactive memory
+// limit before you can even queue a task. so we don't build it here at all:
+// upload flyway8_fishnet_shapefile.zip as a GEE asset once and paste the path in.
+// It carries zone_id and state, EPSG:5070, 13,920 cells.
+var FISHNET_ASSET = 'projects/ee-feedlot/assets/flyway8_fishnet';
 
-// 0c. climatology baselines. 10yr stays because b_03 and s_06 both want _z_10yr,
-// and b_00 reads both. 15yr and 20yr went earlier, nothing consumed them.
+// 0c. climatology baselines. 25yr only now. The 10yr (2012_2021) baseline was kept
+// for b_03 and s_06, both superseded, and it doubles the expensive half of the job
+// for nothing. Re-add it here if something ever wants _z_10yr again.
 var BASELINES = [
-  {label: '1997_2021', start: 1997, end: 2021},
-  {label: '2012_2021', start: 2012, end: 2021}
+  {label: '1997_2021', start: 1997, end: 2021}
 ];
 
 // 0d. years exported raw, i.e. the years you want anomalies FOR.
@@ -79,15 +82,15 @@ var PANEL_YEARS = [2022];
 // deliberate: isoweek() lands week_idx on a different calendar week every year.
 var N_WEEKS = 52;
 
-// 0f. weeks per climatology task. 52 = one file per baseline. drop to 13 if a
-// task times out, you'll get 4 files per baseline with a _wNN-NN suffix to rbind.
-var WEEKS_PER_TASK = 52;
+// 0f. weeks per climatology task. At 13,920 cells a 52-week task will time out, so
+// this is 13: four files per baseline with a _wNN-NN suffix to rbind in b_00.
+var WEEKS_PER_TASK = 13;
 
 // 0g. drive folder + filename stems. these land in
 // 01_data/1a_exposure_data/meteorological_data/ where b_00 goes looking.
 var DRIVE_FOLDER = 'EarthEngine_MN';
-var CLIM_PREFIX  = 'mn8_climatology_';
-var PANEL_PREFIX = 'mn8_weekly_era5land_';
+var CLIM_PREFIX  = 'flyway8_climatology_';
+var PANEL_PREFIX = 'flyway8_weekly_era5land_';
 
 // 0h. bands. left is the DAILY_AGGR band, right is the column name. names match
 // a_01_join_data_multistate.Rmd's raw_to_friendly map so the climatology speaks
@@ -144,15 +147,16 @@ var TEST_MAP_VAR = 'snow_cover';
 // aoi, so these ids line up with the daily panel by construction.
 var fishnet  = ee.FeatureCollection(FISHNET_ASSET);
 var statesFc = ee.FeatureCollection('TIGER/2018/States')
-  .filter(ee.Filter.eq('NAME', TARGET_STATE));
+  .filter(ee.Filter.inList('NAME', STATES));
 
-Map.addLayer(fishnet, {color: 'red'}, TARGET_STATE + ' cells');
+Map.addLayer(fishnet, {color: 'red'}, 'analysis cells (all states)');
 // centre on the state outline, not on fishnet. centerObject evaluates its
 // argument right away and there's no reason to make it chew the whole collection.
-Map.centerObject(statesFc.geometry(), 6);
+Map.centerObject(ee.FeatureCollection('TIGER/2018/States')
+  .filter(ee.Filter.eq('NAME', MAP_CENTRE_STATE)).geometry(), 5);
 
 // wrong number here and nothing downstream joins
-print('>>> ' + TARGET_STATE + ' cells (must be ' + EXPECT_CELLS + '):', fishnet.size());
+print('>>> cells across all states (must be ' + EXPECT_CELLS + '):', fishnet.size());
 print('Sample zone_ids (expect "x,y" like -1,227):',
       fishnet.limit(5).aggregate_array('zone_id'));
 

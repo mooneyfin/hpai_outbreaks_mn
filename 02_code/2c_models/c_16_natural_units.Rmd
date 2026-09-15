@@ -1,0 +1,125 @@
+---
+title: "Main results in natural units"
+author: "Fintan Mooney"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r initiate}
+rm(list = ls())
+project.folder = paste0(print(here::here()), '/')
+source(paste0(project.folder, 'create_folder_structure.R'))
+source(paste0(functions.folder, 'script_initiate.R'))
+stopifnot(requireNamespace("INLA", quietly = TRUE))
+library(INLA); library(Matrix)
+INLA::inla.setOption(num.threads = 1)
+source(paste0(functions.folder, 'inla_dlnm_helpers.R'))
+```
+
+Results are fitted per standard deviation, which is comparable across exposures but not
+interpretable. This re-expresses them in the units the exposures are measured in.
+
+The conversion is not the same for every exposure, because the model scale is not the same:
+
+* **Linear on the raw scale** (soil moisture, wind speed, snow cover): a contrast of `d` z-units
+  is `d x SD` in natural units, so the odds ratio can simply be re-scaled.
+* **Linear on the log scale** (surface runoff, precipitation, waterfowl abundance): a contrast is
+  multiplicative, not additive. There is no single "per mm" effect — the effect of one more
+  millimetre depends on how much there already is. The natural statement is **per doubling**.
+* **Temperature** is a threshold term: risk is flat below 10 degC, so the contrast is per degC
+  *above* the threshold and is undefined below it.
+
+```{r setup-panel}
+PRIM <- setDT(readRDS(paste0(objects_folder, "case_crossover_df_sym_g14.RDS")))[
+  state == "Minnesota"]
+o <- assemble_cc_dlnm(PRIM); f <- fit_cc_inla_dlnm(o)
+LAGS <- 0:28
+
+# The panel is z-scored per lag column, so recover each column's centre and spread from the raw
+# daily series on the same rows. Runoff and precipitation are log1p(mm) before scaling; the
+# weekly bird terms are log1p of abundance.
+daily <- setDT(readRDS(paste0(objects_folder, multistate_ts_daily_rds)))
+setkey(daily, zone_id, date)
+key <- PRIM[, .(zone_id, date)]
+
+raw_scale <- function(v) {
+  base <- daily[key, on = .(zone_id, date), ..v][[1]]
+  # rebuild the transform the panel used, so the SD is on the modelled scale
+  y <- switch(v,
+    runoff        = log1p(base * 1000),
+    precipitation = log1p(base * 1000),
+    anseriformes  = log1p(base),
+    base)
+  list(sd_model = sd(y, na.rm = TRUE), sd_nat = sd(base, na.rm = TRUE),
+       mean_nat = mean(base, na.rm = TRUE))
+}
+```
+
+```{r contrasts}
+# one interpretable contrast per exposure, and what it is in z-units
+SPEC <- list(
+  runoff        = list(label = "Surface runoff",  kind = "log",
+                       desc = "per doubling of runoff"),
+  precipitation = list(label = "Precipitation",   kind = "log",
+                       desc = "per doubling of precipitation"),
+  soil_moisture = list(label = "Soil moisture",   kind = "lin", step = 0.05,
+                       desc = "per +0.05 m3/m3"),
+  wind_speed    = list(label = "Wind speed",      kind = "lin", step = 1,
+                       desc = "per +1 m/s"),
+  snow_cover    = list(label = "Snow cover",      kind = "lin", step = 10,
+                       desc = "per +10 percentage points"),
+  temperature   = list(label = "Temperature",     kind = "thr", step = 10,
+                       desc = "per +10 degC above 10 degC")
+)
+
+rows <- rbindlist(lapply(names(SPEC), function(v) {
+  sp <- SPEC[[v]]; sc <- raw_scale(v)
+  dz <- switch(sp$kind,
+    log = log(2) / sc$sd_model,          # doubling on the log scale
+    lin = sp$step / sc$sd_nat,           # additive on the raw scale
+    thr = sp$step / sc$sd_nat)           # threshold term, still z-scaled temperature
+  cells <- vapply(INLA_LAG_WINDOWS, function(wd) {
+    e <- met_lag_effect(f, o, v, seq(wd[1], wd[2]), step = dz)
+    sprintf("%.2f (%.2f, %.2f)", e["OR"], e["low"], e["high"])
+  }, character(1))
+  as.data.table(c(list(Exposure = sp$label, Contrast = sp$desc),
+                  setNames(as.list(cells), names(INLA_LAG_WINDOWS))))
+}))
+
+# waterfowl sits on the weekly RW smooth, so its contrast goes through the knot sum
+sc_b <- raw_scale("anseriformes"); dz_b <- log(2) / sc_b$sd_model
+bird <- vapply(INLA_LAG_WINDOWS, function(wd) {
+  z <- weekly_lag_summary(f, o, "anseriformes", at = dz_b, window = c(wd[2], wd[2]))$cumulative
+  sprintf("%.2f (%.2f, %.2f)", z[["OR"]], z[["low"]], z[["high"]])
+}, character(1))
+rows <- rbind(rows, as.data.table(c(
+  list(Exposure = "Waterfowl abundance", Contrast = "per doubling of abundance"),
+  setNames(as.list(bird), names(INLA_LAG_WINDOWS)))))
+
+print(rows)
+saveRDS(rows, paste0(objects_folder, "table2_natural_units.RDS"))
+```
+
+```{r what-is-half-an-sd}
+# for the Methods: what +0.5 SD actually corresponds to in each exposure's own units
+half <- rbindlist(lapply(names(SPEC), function(v) {
+  sc <- raw_scale(v); sp <- SPEC[[v]]
+  data.table(Exposure = sp$label,
+             `Mean (natural units)` = signif(sc$mean_nat, 3),
+             `SD (natural units)`   = signif(sc$sd_nat, 3),
+             `+0.5 SD equals`       = if (sp$kind == "log")
+                sprintf("x%.2f (multiplicative)", exp(0.5 * sc$sd_model))
+              else sprintf("%+.3g", 0.5 * sc$sd_nat))
+}))
+sc_b <- raw_scale("anseriformes")
+half <- rbind(half, data.table(Exposure = "Waterfowl abundance",
+  `Mean (natural units)` = signif(sc_b$mean_nat, 3),
+  `SD (natural units)`   = signif(sc_b$sd_nat, 3),
+  `+0.5 SD equals`       = sprintf("x%.2f (multiplicative)", exp(0.5 * sc_b$sd_model))))
+print(half)
+saveRDS(half, paste0(objects_folder, "table2_sd_meaning.RDS"))
+```

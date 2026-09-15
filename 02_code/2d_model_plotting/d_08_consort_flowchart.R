@@ -1,34 +1,37 @@
 # d_08_consort_flowchart.R
-# Sample-size cascade for the daily case-crossover study of HPAI spillover into MN poultry.
+# Sample-size cascade for the daily case-crossover study of HPAI spillover into poultry across
+# the seven northern Mississippi Flyway states.
 #
-# Replaces d_04_consort_flowchart.R, which described the time-stratified design
-# (zone x year x month x day-of-week) on the legacy MN fishnet. Both are superseded: the
-# primary is now symmetric bidirectional referents at +/-14 to +/-28 d on the 8-state grid,
-# and the old cascade objects say 88 events / 70 zones against the current 108 -> 85 / 73.
+# Starts at the full flyway panel, screens out farm-to-farm spread, then branches into Minnesota
+# and the other six states because those are the two panels every model is fitted on. The
+# branches rejoin at the pooled analytic sample.
 #
-# Everything below is counted from the panels themselves, so it can't drift out of sync with
-# the models the way the hardcoded cascade objects did.
+# Every number is counted from the panels themselves rather than hardcoded, so it can't drift
+# away from the models the way the old cascade objects did.
 
 # 0a. Root, folders, packages
 rm(list = ls())
 project.folder = paste0(print(here::here()), '/')
 source(paste0(project.folder, 'create_folder_structure.R'))
 source(paste0(functions.folder, 'script_initiate.R'))
-source(paste0(functions.folder, 'inla_dlnm_helpers.R'))
 
-# 1a. Raw detections on the analysis grid
-panel <- setDT(readRDS(paste0(objects_folder, multistate_ts_daily_rds)))[state == "Minnesota"]
+fmt <- function(x) formatC(x, big.mark = ",", format = "d")
+
+# 1a. Full flyway panel, before anything is excluded
+panel <- setDT(readRDS(paste0(objects_folder, multistate_ts_daily_rds)))
 scr   <- readRDS(paste0(objects_folder, multistate_independence_screening_rds))
+n_states    <- uniqueN(panel$state)
+n_celldays  <- nrow(panel)
+n_gridcells <- uniqueN(panel$zone_id)
+date_from   <- format(min(panel$date), "%d %b %Y")
+date_to     <- format(max(panel$date), "%d %b %Y")
 
-n_raw_events    <- sum(panel$outbreak_count, na.rm = TRUE)
-n_raw_celldays  <- sum(panel$outbreak_count > 0, na.rm = TRUE)
-n_raw_cells     <- uniqueN(panel[outbreak_count > 0]$zone_id)
-n_multi_cellday <- sum(panel$outbreak_count > 1, na.rm = TRUE)
-date_from       <- format(min(panel$date), "%d %b %Y")
-date_to         <- format(max(panel$date), "%d %b %Y")
+n_raw_events   <- sum(panel$outbreak_count, na.rm = TRUE)
+n_raw_celldays <- sum(panel$outbreak_count > 0, na.rm = TRUE)
+n_raw_cells    <- uniqueN(panel[outbreak_count > 0]$zone_id)
 
-# 1b. Independence screen: drop events flagged as farm-to-farm spread rather than
-#     independent introductions from the environment
+# 1b. Independence screen: events flagged by sequence and epidemiological investigation as
+#     farm-to-farm spread aren't independent introductions from the environment
 count_flagged <- function(s, ids) {
   if (is.na(s)) return(0L)
   as.integer(sum(as.numeric(trimws(unlist(strsplit(s, ",")))) %in% ids))
@@ -36,87 +39,137 @@ count_flagged <- function(s, ids) {
 panel[, nf := vapply(outbreak_id, count_flagged, integer(1), ids = scr$cross_farm_ids)]
 n_flagged <- sum(panel$nf)
 panel[, oc := pmax(outbreak_count - nf, 0L)]
+n_elig_events   <- sum(panel$oc)
+n_elig_celldays <- sum(panel$oc > 0)
+n_elig_cells    <- uniqueN(panel[oc > 0]$zone_id)
 
-n_events   <- sum(panel$oc)
-n_celldays <- sum(panel$oc > 0)
-n_cells    <- uniqueN(panel[oc > 0]$zone_id)
+elig <- panel[oc > 0][, .(events = sum(oc), cells = uniqueN(zone_id)),
+                      by = .(g = fifelse(state == "Minnesota", "mn", "other"))]
+E <- function(grp, f) elig[g == grp][[f]]
 
-# 1c. Final analytic panel
-cc <- setDT(readRDS(paste0(objects_folder, "case_crossover_df_sym_g14.RDS")))[
-  state == "Minnesota"]
-n_cases   <- sum(cc$outbreak_binary == 1)
-n_refs    <- sum(cc$outbreak_binary == 0)
-n_strata  <- uniqueN(cc$stratum_id)
-n_cc_cells<- uniqueN(cc$zone_id)
-per_case  <- n_refs / n_cases
+# 1c. The two case-crossover panels. `pre` is the design before the 90-day anomaly needs a
+#     baseline; `cc` is what the primary models are actually fitted to.
+load_cc <- function(f) {
+  d <- setDT(readRDS(paste0(objects_folder, f)))
+  if (anyDuplicated(names(d))) d <- d[, which(!duplicated(names(d))), with = FALSE]
+  d[, g := fifelse(state == "Minnesota", "mn", "other")][]
+}
+pre <- load_cc("case_crossover_df_timestrat_month_post7.RDS")
+cc  <- load_cc("case_crossover_df_shock_post7.RDS")
 
-# referent window is -28..-14 and +14..+28 d, so 15 days either side
-max_refs      <- 2 * 15
-n_refs_lost   <- n_cases * max_refs - n_refs
-fmt <- function(x) formatC(x, big.mark = ",", format = "d")
+summ <- function(d) d[, .(cases = sum(outbreak_binary), refs = sum(outbreak_binary == 0),
+                          strata = uniqueN(stratum_id), cells = uniqueN(zone_id),
+                          per = sum(outbreak_binary == 0) / sum(outbreak_binary)), by = g]
+SP <- summ(pre); SC <- summ(cc)
+P <- function(grp, f) SP[g == grp][[f]]
+C <- function(grp, f) SC[g == grp][[f]]
+lost <- function(g) P(g, "cases") - C(g, "cases")
 
-# 2a. Cascade boxes, top to bottom
-boxes <- data.table(
-  # evenly spaced, boxes tall enough that the gaps between them don't dominate the figure
-  y = seq(0.93, 0.07, length.out = 6),
-  h = 0.115,
+tot_cases  <- sum(cc$outbreak_binary)
+tot_refs   <- sum(cc$outbreak_binary == 0)
+tot_strata <- uniqueN(cc$stratum_id)
+tot_cells  <- uniqueN(cc$zone_id)
+
+# 2a. Layout. Trunk boxes run down the centre; the branch splits at y = 0.50 and rejoins at the
+#     bottom. Exclusions hang off to the right of whatever they exclude from.
+TX1 <- 0.22; TX2 <- 0.78; TXM <- (TX1 + TX2) / 2           # trunk box left / right / middle
+LX1 <- 0.02; LX2 <- 0.47; LXM <- (LX1 + LX2) / 2           # left branch
+RX1 <- 0.53; RX2 <- 0.98; RXM <- (RX1 + RX2) / 2           # right branch
+HB  <- 0.093
+
+trunk <- data.table(
+  x = TXM, xmin = TX1, xmax = TX2, y = c(0.950, 0.805, 0.655, 0.070), h = HB,
   label = c(
-    sprintf("USDA APHIS confirmed HPAI poultry detections\nMinnesota, %s to %s\nn = %d events",
-            date_from, date_to, n_raw_events),
-    sprintf("Aggregated to 10 km × 1 day grid cells\n%d events → %d case cell-days in %d cells",
+    sprintf("Daily 10 km grid, %d northern Mississippi Flyway states\n%s to %s\n%s grid cells, %s cell-days",
+            n_states, date_from, date_to, fmt(n_gridcells), fmt(n_celldays)),
+    sprintf("USDA APHIS confirmed HPAI poultry detections\n%d events → %d case cell-days in %d cells",
             n_raw_events, n_raw_celldays, n_raw_cells),
-    sprintf("Independence screen\nCross-farm transmission events excluded\n− %d events",
-            n_flagged),
-    sprintf("Eligible cases\n%d events → %d case cell-days in %d cells",
-            n_events, n_celldays, n_cells),
-    sprintf("Referent selection within the same cell\nDays −28 to −14 and +14 to +28 relative to the case\nup to %d referents per case",
-            max_refs),
-    sprintf("Analytic sample\n%d case cell-days  |  %s referent cell-days\n%d strata across %d cells (%.1f referents per case)",
-            n_cases, fmt(n_refs), n_strata, n_cc_cells, per_case))
-)
+    sprintf("Eligible spillover events\n%d events → %d case cell-days in %d cells",
+            n_elig_events, n_elig_celldays, n_elig_cells),
+    sprintf("Pooled analytic sample\n%d cases  |  %s referent cell-days  |  %d strata in %d cells",
+            tot_cases, fmt(tot_refs), tot_strata, tot_cells)))
 
-# 2b. Arrows between consecutive boxes
-arrows <- data.table(
-  y    = boxes$y[-nrow(boxes)] - boxes$h[-nrow(boxes)] / 2,
-  yend = boxes$y[-1]           + boxes$h[-1] / 2
-)
+branch <- data.table(
+  x    = c(LXM, RXM, LXM, RXM),
+  xmin = c(LX1, RX1, LX1, RX1),
+  xmax = c(LX2, RX2, LX2, RX2),
+  y    = c(0.455, 0.455, 0.240, 0.240), h = HB,
+  label = c(
+    sprintf("Minnesota\n%d events → %d case cell-days in %d cells",
+            E("mn", "events"), P("mn", "cases"), P("mn", "cells")),
+    sprintf("Other northern Mississippi Flyway states\n%d events → %d case cell-days in %d cells",
+            E("other", "events"), P("other", "cases"), P("other", "cells")),
+    sprintf("Minnesota analytic sample\n%d cases  |  %s referents  |  %d strata in %d cells\n%.1f referents per case",
+            C("mn", "cases"), fmt(C("mn", "refs")), C("mn", "strata"), C("mn", "cells"), C("mn", "per")),
+    sprintf("Other flyway analytic sample\n%d cases  |  %s referents  |  %d strata in %d cells\n%.1f referents per case",
+            C("other", "cases"), fmt(C("other", "refs")), C("other", "strata"), C("other", "cells"),
+            C("other", "per"))))
 
-# 2c. Right-hand column explaining what each step does. Each note sits level with the box it
-#     explains; the last box needs none.
-sides <- data.table(
-  y = boxes$y[1:5],
-  txt = c(
-    "Detections with a confirmed outbreak date,\nmatched to the 10 km analysis grid",
-    sprintf("%d cell-days carried more than one\ndetection and collapse to a single case", n_multi_cellday),
-    "Flagged by sequence and epidemiological\ninvestigation as farm-to-farm spread,\nso not independent introductions",
-    "The primary case definition.\nCSLT-inclusive counts are reported\nas a sensitivity analysis",
-    sprintf("Symmetry cancels a linear time trend;\nthe ±14 d gap clears the depopulation\nwindow. %d referents fall outside the\nstudy period and are dropped", n_refs_lost))
-)
+# 2b. Exclusion boxes, hanging right off the trunk / branches
+excl <- data.table(
+  x = c(TXM + 0.30, LXM + 0.135, RXM + 0.135), y = c(0.733, 0.348, 0.348),
+  xmin = c(TXM + 0.06, LXM + 0.03, RXM + 0.03),
+  xmax = c(TXM + 0.54, LXM + 0.24, RXM + 0.24),
+  h = c(0.068, 0.060, 0.060),
+  label = c(
+    sprintf("Excluded: farm-to-farm transmission\nflagged by sequence and epidemiological\ninvestigation  (− %d events)", n_flagged),
+    sprintf("Excluded: no 90-day baseline\n(− %d cases)", lost("mn")),
+    sprintf("Excluded: no 90-day baseline\n(− %d cases)", lost("other"))))
+
+# 2c. Arrows. Down the trunk, out to the split, and back together at the bottom.
+SPLIT <- 0.545; JOIN <- 0.145
+seg <- rbind(
+  data.table(x = TXM, xend = TXM, y = trunk$y[1] - HB/2, yend = trunk$y[2] + HB/2),
+  data.table(x = TXM, xend = TXM, y = trunk$y[2] - HB/2, yend = trunk$y[3] + HB/2),
+  data.table(x = LXM, xend = LXM, y = SPLIT, yend = 0.455 + HB/2),
+  data.table(x = RXM, xend = RXM, y = SPLIT, yend = 0.455 + HB/2),
+  data.table(x = LXM, xend = LXM, y = 0.455 - HB/2, yend = 0.240 + HB/2),
+  data.table(x = RXM, xend = RXM, y = 0.455 - HB/2, yend = 0.240 + HB/2),
+  data.table(x = LXM, xend = LXM, y = 0.240 - HB/2, yend = JOIN),
+  data.table(x = RXM, xend = RXM, y = 0.240 - HB/2, yend = JOIN))
+# the split and the rejoin are plain connectors, no arrowheads
+plain <- rbind(
+  data.table(x = TXM, xend = TXM, y = trunk$y[3] - HB/2, yend = SPLIT),
+  data.table(x = LXM, xend = RXM, y = SPLIT, yend = SPLIT),
+  data.table(x = LXM, xend = RXM, y = JOIN,  yend = JOIN))
+join <- data.table(x = TXM, xend = TXM, y = JOIN, yend = trunk$y[4] + HB/2)
+# short stubs from the trunk / branches into each exclusion box
+stub <- data.table(x = c(TXM, LXM, RXM), xend = c(TXM + 0.06, LXM + 0.03, RXM + 0.03),
+                   y = c(0.733, 0.348, 0.348), yend = c(0.733, 0.348, 0.348))
+
+allbox <- rbind(trunk[, .(x, xmin, xmax, y, h, label)],
+                branch[, .(x, xmin, xmax, y, h, label)])
 
 # 3a. Draw it. No title or caption by design; those live in the manuscript text.
 fp <- ggplot() +
-  geom_rect(data = boxes,
-            aes(xmin = 0.03, xmax = 0.60, ymin = y - h / 2, ymax = y + h / 2),
+  geom_rect(data = allbox, aes(xmin = xmin, xmax = xmax, ymin = y - h/2, ymax = y + h/2),
             fill = "white", colour = "grey25", linewidth = 0.4) +
-  geom_text(data = boxes, aes(x = 0.315, y = y, label = label),
-            family = "Avenir", size = 3.1, lineheight = 1.12) +
-  geom_segment(data = arrows, aes(x = 0.315, xend = 0.315, y = y, yend = yend),
-               arrow = arrow(length = unit(0.18, "cm"), type = "closed"),
+  geom_rect(data = excl, aes(xmin = xmin, xmax = xmax, ymin = y - h/2, ymax = y + h/2),
+            fill = "grey96", colour = "grey55", linewidth = 0.35, linetype = "dashed") +
+  geom_segment(data = rbind(seg, join), aes(x = x, xend = xend, y = y, yend = yend),
+               arrow = arrow(length = unit(0.17, "cm"), type = "closed"),
                colour = "grey25", linewidth = 0.4) +
-  geom_segment(aes(x = 0.65, xend = 0.65, y = 0.02, yend = 0.98),
-               colour = "grey80", linewidth = 0.3, linetype = "dotted") +
-  geom_text(data = sides, aes(x = 0.68, y = y, label = txt),
-            family = "Avenir", size = 2.6, hjust = 0, colour = "grey30", lineheight = 1.12) +
+  geom_segment(data = plain, aes(x = x, xend = xend, y = y, yend = yend),
+               colour = "grey25", linewidth = 0.4) +
+  geom_segment(data = stub, aes(x = x, xend = xend, y = y, yend = yend),
+               colour = "grey55", linewidth = 0.35, linetype = "dashed") +
+  geom_text(data = allbox, aes(x = x, y = y, label = label),
+            family = "Avenir", size = 2.95, lineheight = 1.14) +
+  geom_text(data = excl, aes(x = x, y = y, label = label),
+            family = "Avenir", size = 2.5, colour = "grey25", lineheight = 1.14) +
+  annotate("text", x = TXM, y = 0.578, family = "Avenir", size = 2.55, colour = "grey30",
+           lineheight = 1.15,
+           label = "Referents: every other day in the same calendar month within the same cell,\nexcluding the 7 days after detection") +
   scale_x_continuous(limits = c(0, 1), expand = c(0, 0)) +
   scale_y_continuous(limits = c(0, 1), expand = c(0, 0)) +
   theme_spark_map()
 
-# 4a. Export. PDF too, since journals prefer vector for line art — but through cairo_pdf, as
-#     the default pdf() device can't embed Avenir and dies with "invalid font type".
-ggsave_spark(file.path(figures_main_folder, "figure_consort_flowchart.png"),
-             fp, width = 9, height = 7.5)
-ggsave(file.path(figures_main_folder, "figure_consort_flowchart.pdf"),
-       fp, width = 9, height = 7.5, bg = "white", device = grDevices::cairo_pdf)
+# 4a. Export. PDF through cairo_pdf, since the default pdf() device can't embed Avenir.
+ggsave_spark(file.path(figures_main_folder, "figure1_consort_flowchart.png"),
+             fp, width = 10.5, height = 8)
+ggsave(file.path(figures_main_folder, "figure1_consort_flowchart.pdf"),
+       fp, width = 10.5, height = 8, bg = "white", device = grDevices::cairo_pdf)
 
-cat(sprintf("cascade: %d events -> %d cell-days -> minus %d flagged -> %d cases, %s referents\n",
-            n_raw_events, n_raw_celldays, n_flagged, n_cases, fmt(n_refs)))
+cat(sprintf("%d events -> minus %d flagged -> %d eligible -> MN %d / other %d cases\n",
+            n_raw_events, n_flagged, n_elig_events, C("mn", "cases"), C("other", "cases")))
+cat("wrote figure1_consort_flowchart.png/.pdf\n")

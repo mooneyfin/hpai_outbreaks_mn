@@ -6,6 +6,21 @@
 # Requires INLA, dlnm, data.table, Matrix.
 
 #1. Exposure sets
+# THE canonical exposure set. Every model that reports a primary or sensitivity estimate takes
+# its variables from here, so the set cannot drift between scripts. It had drifted badly: c_21,
+# c_23 and c_24 carried runoff but no precipitation, while c_33, c_36, c_37 and c_47 carried
+# precipitation but no runoff, and nothing flagged it. Change the exposure set HERE and nowhere
+# else.
+INLA_PRIMARY_MET   <- c("temperature", "precipitation", "soil_moisture", "wind_speed", "runoff")
+INLA_PRIMARY_SHOCK <- paste0(INLA_PRIMARY_MET, "_shock")
+INLA_PRIMARY_LAB   <- c(temperature = "Temperature", precipitation = "Precipitation",
+                        soil_moisture = "Soil moisture", wind_speed = "Wind speed",
+                        runoff = "Runoff", anseriformes = "Anseriformes")
+# labels keyed by the shock column names too, so sub("_shock$") is never needed at a call site
+INLA_PRIMARY_LAB   <- c(INLA_PRIMARY_LAB,
+                        setNames(unname(INLA_PRIMARY_LAB[INLA_PRIMARY_MET]), INLA_PRIMARY_SHOCK))
+
+# the wider pool a_0x builds; not the modelling set
 INLA_MET_VARS    <- c("runoff", "soil_moisture", "temperature",
                       "precipitation", "wind_speed", "snow_cover")
 # Only anseriformes carries a weekly term in the primary. Predators is dropped: WAIC prefers
@@ -37,8 +52,12 @@ temp_threshold_z <- function(df, thr_C = INLA_TEMP_THRESHOLD_C) {
   ((thr_C + 273.15) - mean(df$temperature, na.rm = TRUE)) / sd(df$temperature, na.rm = TRUE)
 }
 
-# ns(df=2) lag basis and a N(0, 0.25^2) prior on the DLNM coefficients (prec 16), both
-# WAIC-selected. Everything except temperature is linear on the exposure scale:
+# ns(df=2) lag basis, WAIC-selected. The N(0, 0.25^2) prior on the DLNM coefficients
+# (prec 16) is NOT WAIC-selected, whatever this comment used to claim: WAIC actually prefers
+# tighter, monotonically, with no interior optimum (905.2 at 0.25^2 vs 902.4 at 0.125^2 on
+# the original panel, and the same ordering on every panel since). It's a deliberate
+# regularisation choice at EPV ~ 4, where vague priors return implausible ORs. Report it as
+# an assumption and show the sensitivity, because the effect sizes do move with it. Everything except temperature is linear on the exposure scale:
 # precipitation was tried as threshold and spline and every variant widened its interval
 # without changing direction, and it bottoms out at -0.78 so low cuts are degenerate.
 INLA_ARGLAG_PRIMARY <- list(fun = "ns", df = 2)
@@ -93,6 +112,7 @@ assemble_cc_dlnm <- function(df,
                              weekly_vars   = INLA_WEEKLY_VARS,   # each gets its own RW lag smooth
                              bird_knots    = INLA_BIRD_KNOTS,
                              max_lag       = 28,
+                             max_lag_by_var = list(),              # per-var lag window override
                              argvar        = list(fun = "lin"),
                              argvar_by_var = INLA_ARGVAR_BY_VAR,   # per-var exposure-response override
                              arglag        = INLA_ARGLAG_PRIMARY,
@@ -114,7 +134,11 @@ assemble_cc_dlnm <- function(df,
   for (v in met_vars) {
     av <- argvar_by_var[[v]] %||% argvar
     al <- arglag_by_var[[v]] %||% arglag
-    cb <- build_met_crossbasis(df, v, max_lag = max_lag, argvar = av, arglag = al)
+    # each exposure can carry its own lag window. a variable whose mechanism runs for days
+    # shouldn't be forced onto the same window as one that runs for weeks, and truncating a
+    # real effect doesn't just lose it, it leaks into whatever else is still in the model.
+    ml <- max_lag_by_var[[v]] %||% max_lag
+    cb <- build_met_crossbasis(df, v, max_lag = ml, argvar = av, arglag = al)
     colnames(cb) <- paste0("cb_", v, ".", colnames(cb))
     bases[[v]]   <- cb
     cb_cols[[v]] <- colnames(cb)
@@ -145,7 +169,8 @@ assemble_cc_dlnm <- function(df,
     contrast_steps = contrast_steps,
     weekly = weekly, weekly_vars = weekly_vars, bird_var = weekly_vars[1],
     bird_knots = bird_knots, bird_rw = bird_rw,
-    max_lag = max_lag, argvar = argvar, argvar_by_var = argvar_by_var,
+    max_lag = max_lag, max_lag_by_var = max_lag_by_var,
+    argvar = argvar, argvar_by_var = argvar_by_var,
     arglag = arglag, arglag_by_var = arglag_by_var
   )
 }
@@ -208,6 +233,17 @@ fit_cc_inla_dlnm <- function(obj, verbose = FALSE, fixed_prec = INLA_PREC_PRIMAR
       warning("weekly smooth is flat under grid integration too; treat the lag shape as ",
               "unidentified on this panel rather than as a null result", call. = FALSE)
   }
+
+  # separate failure mode, and grid integration does NOT fix it: the smooth can sit at a
+  # perfectly ordinary precision and still come back dead flat, which reads as a clean level
+  # estimate. fine as a level, but it is NOT a lag-specific result, so say so loudly rather
+  # than let a "lag 22-28 d" number get quoted off a flat line.
+  if (length(obj$weekly))
+    for (v in obj$weekly_vars)
+      if (!weekly_shape_identified(fit, obj, v))
+        warning(sprintf(paste0("weekly lag smooth for '%s' is flat (knot range below tol): ",
+                               "this fit identifies a LEVEL, not a lag shape. do not report ",
+                               "lag- or window-specific effects for it."), v), call. = FALSE)
   fit
 }
 
@@ -224,8 +260,8 @@ dlnm_coef_vcov <- function(fit, cb_cols) {
 #    mean. A threshold basis is flat on one side of its cut-point, so at=0.5/cen=0 would
 #    sit in the dead zone and hand back OR = 1; centre those at the threshold and step
 #    0.5 SD past it instead, which reads as "per +0.5 SD beyond the threshold".
-contrast_for <- function(obj, var, step = 0.5) {
-  step <- obj$contrast_steps[[var]] %||% step
+contrast_for <- function(obj, var, step = NULL) {
+  step <- step %||% obj$contrast_steps[[var]] %||% 0.5
   av   <- obj$argvar_by_var[[var]]
   if (is.null(av) || !identical(av$fun, "thr")) return(list(at = step, cen = 0))
   thr <- av$thr.value
@@ -317,14 +353,14 @@ cumulative_or_table <- function(fit, obj, at = NULL, cen = NULL, labels = NULL, 
 #10b. Weekly lag cut-points. Everything gets reported at these four windows, never as one
 #     0-28 d cumulative: that lumps a sign-changing lag curve into a single number and
 #     inflates the interval for no interpretive gain.
-INLA_LAG_WINDOWS <- list("Lag 0-7 d"   = c(0, 7),  "Lag 8-14 d"  = c(8, 14),
-                         "Lag 15-21 d" = c(15, 21), "Lag 22-28 d" = c(22, 28))
+INLA_LAG_WINDOWS <- list("Lag 0-7 days"   = c(0, 7),  "Lag 8-14 days"  = c(8, 14),
+                         "Lag 15-21 days" = c(15, 21), "Lag 22-28 days" = c(22, 28))
 INLA_LAG_ANCHORS <- c(0, 7, 14, 21, 28)
 
 #10c. OR for one met exposure over a set of lags. Build the contrast vector by hand rather
 #     than leaning on crosspred, so a window sum and a single lag go through the same path.
 #     crossbasis columns run var-major (v1.l1..v1.lL, v2.l1..), hence the t(outer(v, W)).
-met_lag_effect <- function(fit, obj, var, lags, step = 0.5) {
+met_lag_effect <- function(fit, obj, var, lags, step = NULL) {
   cb <- obj$bases[[var]]
   ct <- contrast_for(obj, var, step)
   ob <- function(x, args) do.call(dlnm::onebasis, c(list(x = x), args))
@@ -342,31 +378,40 @@ met_lag_effect <- function(fit, obj, var, lags, step = 0.5) {
 
 #10d. The reporting table: every exposure at the four weekly cut-points, either
 #     lag-specific (the OR at that lag) or cumulative (summed across that week's window).
+var_max_lag <- function(obj, v) obj$max_lag_by_var[[v]] %||% obj$max_lag
+
 lag_window_table <- function(fit, obj, kind = c("cumulative", "lagspecific"),
-                             labels = NULL, n_sample = 2000, step = 0.5) {
+                             labels = NULL, n_sample = 2000, step = NULL) {
   kind <- match.arg(kind)
-  cols <- if (kind == "cumulative") names(INLA_LAG_WINDOWS) else paste0("Lag ", INLA_LAG_ANCHORS, " d")
+  cols <- if (kind == "cumulative") names(INLA_LAG_WINDOWS) else paste0("Lag ", INLA_LAG_ANCHORS, " days")
 
   met <- lapply(obj$met_vars, function(v) {
+    # a window past this variable's own lag range would be pure extrapolation off the end of
+    # its basis, so blank it rather than printing a number nothing supports
+    ml <- var_max_lag(obj, v)
     cells <- if (kind == "cumulative")
       vapply(INLA_LAG_WINDOWS, function(w) {
+        if (w[2] > ml) return(NA_character_)
         e <- met_lag_effect(fit, obj, v, seq(w[1], w[2]), step)
         sprintf("%.2f (%.2f, %.2f)", e["OR"], e["low"], e["high"]) }, character(1))
     else
       vapply(INLA_LAG_ANCHORS, function(a) {
+        if (a > ml) return(NA_character_)
         e <- met_lag_effect(fit, obj, v, a, step)
         sprintf("%.2f (%.2f, %.2f)", e["OR"], e["low"], e["high"]) }, character(1))
     data.table::as.data.table(setNames(as.list(c(v, cells)), c("Predictor", cols)))
   })
 
   # weekly RW terms carry one coefficient per knot, so a window's cumulative is the sum of
-  # the knots falling inside it and the lag-specific is just that knot
+  # the knots falling inside it and the lag-specific is just that knot. these have no stored
+  # contrast step of their own, so an unset step means the shared +0.5 SD.
+  wstep <- step %||% 0.5
   wk <- lapply(obj$weekly_vars, function(v) {
-    s <- weekly_lag_summary(fit, obj, v, at = step, n_sample = n_sample)
+    s <- weekly_lag_summary(fit, obj, v, at = wstep, n_sample = n_sample)
     cells <- if (kind == "cumulative")
       vapply(INLA_LAG_WINDOWS, function(w) {
         kn <- w[2]                       # one knot per window: 7, 14, 21, 28
-        cm <- weekly_lag_summary(fit, obj, v, at = step, n_sample = n_sample,
+        cm <- weekly_lag_summary(fit, obj, v, at = wstep, n_sample = n_sample,
                                  window = c(kn, kn))$cumulative
         sprintf("%.2f (%.2f, %.2f)", cm["OR"], cm["low"], cm["high"]) }, character(1))
     else
@@ -409,7 +454,7 @@ weekly_shape_identified <- function(fit, obj, var = obj$weekly_vars[1], tol = 0.
 #10e. Pr(OR > 1) over the same four weekly windows, same layout as lag_window_table. This is
 #     what the SI tables carry instead of a p-value: it's the posterior probability the effect
 #     is in the stated direction, so 0.98 and 0.02 are both strong evidence.
-prob_window_table <- function(fit, obj, labels = NULL, n_sample = 2000, step = 0.5) {
+prob_window_table <- function(fit, obj, labels = NULL, n_sample = 2000, step = NULL) {
   cols <- names(INLA_LAG_WINDOWS)
   fmt  <- function(p) sprintf("%.2f", p)
 
@@ -421,7 +466,7 @@ prob_window_table <- function(fit, obj, labels = NULL, n_sample = 2000, step = 0
   wk <- lapply(obj$weekly_vars, function(v) {
     cells <- vapply(INLA_LAG_WINDOWS, function(w) {
       kn <- w[2]
-      fmt(weekly_lag_summary(fit, obj, v, at = step, n_sample = n_sample,
+      fmt(weekly_lag_summary(fit, obj, v, at = step %||% 0.5, n_sample = n_sample,
                              window = c(kn, kn))$cumulative[["p_gt1"]]) }, character(1))
     data.table::as.data.table(setNames(as.list(c(v, cells)), c("Predictor", cols)))
   })

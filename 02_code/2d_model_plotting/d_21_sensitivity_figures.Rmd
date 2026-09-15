@@ -1,0 +1,97 @@
+---
+title: "Supplement figures"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: hide
+    theme: flatly
+---
+
+```{r setup, message = FALSE, warning = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
+                      fig.width = 13, fig.height = 5, dpi = 150)
+project.folder <- paste0(here::here(), "/")
+source(paste0(project.folder, "create_folder_structure.R"))
+source(paste0(functions.folder, "script_initiate.R"))
+suppressMessages({library(INLA); library(Matrix); library(viridisLite)})
+INLA::inla.setOption(num.threads = 2)
+source(paste0(functions.folder, "inla_dlnm_helpers.R"))
+
+PREC <- 4; NS2 <- list(fun = "ns", df = 2); LIN <- list(fun = "lin")
+PANEL_ORD <- c("Minnesota", "Other flyway states", "Pooled")
+OK  <- setNames(viridisLite::viridis(3, begin = 0.05, end = 0.78), PANEL_ORD)
+SHP <- setNames(c(16, 17, 15), PANEL_ORD)
+lab_num <- scales::label_number(drop0trailing = TRUE)
+LABEL <- c(temperature = "Temperature", precipitation = "Precipitation",
+           soil_moisture = "Soil moisture", wind_speed = "Wind speed",
+           anseriformes = "Anseriformes")
+```
+
+## SF2. Deviation from the 25-year climatological normal
+
+Figure 3's layout for the third exposure parameterisation. Figure 3 shows absolute conditions and
+the 90-day departure; this is the same model fitted to each day's deviation from the 1997–2021
+weekly normal for that cell — the parameterisation a reader most naturally means by "anomaly".
+
+```{r sf2-clim}
+# This panel needs no 90-day warm-up, so it keeps 175 cases against the 167 in Figure 3. The
+# extra 8 are all outside Minnesota.
+D <- setDT(readRDS(paste0(objects_folder, "case_crossover_df_climanom_post7.RDS")))
+if (anyDuplicated(names(D))) D <- D[, which(!duplicated(names(D))), with = FALSE]
+CLIM <- paste0(c("temperature", "precipitation", "soil_moisture", "wind_speed"), "_clim")
+have <- CLIM[vapply(CLIM, function(v) paste0(v, "_Lag0") %in% names(D), TRUE)]
+
+panel_of <- function(pn) {
+  if (pn == "Minnesota") D[state == "Minnesota"]
+  else if (pn == "Pooled") copy(D) else D[state != "Minnesota"]
+}
+clim <- rbindlist(lapply(PANEL_ORD, function(pn) {
+  d  <- panel_of(pn)
+  mv <- c(have, "anseriformes")
+  av <- c(setNames(rep(list(NS2), length(have)), have), list(anseriformes = LIN))
+  o  <- assemble_cc_dlnm(d, met_vars = mv, weekly_vars = character(0), max_lag = 28,
+                         argvar_by_var = av, arglag = list(fun = "ns", df = 2))
+  f  <- suppressWarnings(fit_cc_inla_dlnm(o, fixed_prec = PREC))
+  rbindlist(lapply(mv, function(v) rbindlist(lapply(names(INLA_LAG_WINDOWS), function(k) {
+    w <- INLA_LAG_WINDOWS[[k]]
+    e <- met_lag_effect(f, o, v, seq(w[1], w[2]))
+    data.table(panel = pn, n = sum(d$outbreak_binary),
+               variable = unname(LABEL[sub("_clim$", "", v)]), window = k,
+               RR = e[["OR"]], low = e[["low"]], high = e[["high"]])
+  }))))
+}))
+clim[, `:=`(panel = factor(panel, levels = PANEL_ORD),
+            window = factor(window, levels = names(INLA_LAG_WINDOWS)),
+            variable = factor(variable, levels = rev(c("Temperature", "Precipitation",
+                                                       "Soil moisture", "Wind speed",
+                                                       "Anseriformes"))))]
+saveRDS(clim, paste0(objects_folder, "sf2_climatological_anomaly.RDS"))
+
+fig <- ggplot(clim, aes(RR, variable, colour = panel, shape = panel)) +
+  geom_vline(xintercept = 1, colour = "grey45", linewidth = 0.3) +
+  geom_errorbarh(aes(xmin = low, xmax = high), height = 0, linewidth = 0.55,
+                 position = position_dodge(width = 0.66, reverse = TRUE)) +
+  geom_point(size = 2.1, position = position_dodge(width = 0.66, reverse = TRUE)) +
+  facet_wrap(~ window, nrow = 1) +
+  scale_colour_manual(values = OK) + scale_shape_manual(values = SHP) +
+  scale_x_continuous(trans = "log", breaks = c(0.5, 1, 2, 3), labels = lab_num) +
+  coord_cartesian(xlim = c(0.5, 3.5)) +
+  labs(x = "Rate ratio per +0.5 standard deviation increase in exposure",
+       y = NULL, colour = NULL, shape = NULL) +
+  theme_classic(base_family = "Avenir") +
+  theme(legend.position = "top", legend.justification = "left",
+        legend.text = element_text(size = 13),
+        strip.text = element_text(family = "Avenir Heavy", size = 11),
+        axis.text = element_text(size = 10, colour = "black"),
+        axis.title = element_text(size = 12),
+        panel.border = element_rect(fill = NA, colour = "grey20", linewidth = 0.4))
+ggsave_spark(file.path(figures_main_folder, "figureS2_climatological_anomaly.png"),
+             fig, width = 13, height = 4.5)
+fig
+```
+
+```{r sf2-table}
+clim[, cell := sprintf("%.2f (%.2f, %.2f)", RR, low, high)]
+knitr::kable(dcast(clim, variable ~ panel + window, value.var = "cell"))
+```

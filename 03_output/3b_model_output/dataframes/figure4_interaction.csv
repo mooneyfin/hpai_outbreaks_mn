@@ -1,0 +1,61 @@
+Kind,Panel,Exposure,n,group,RR,low,high
+Absolute conditions,Minnesota,Temperature,85,"High waterfowl (+1 SD, lag 21-28 d)",1.18,0.68,2.08
+Absolute conditions,Minnesota,Precipitation,85,"High waterfowl (+1 SD, lag 21-28 d)",0.63,0.4,1
+Absolute conditions,Minnesota,Soil moisture,85,"High waterfowl (+1 SD, lag 21-28 d)",0.93,0.57,1.52
+Absolute conditions,Minnesota,Wind speed,85,"High waterfowl (+1 SD, lag 21-28 d)",1,0.71,1.4
+Absolute conditions,Minnesota,Runoff,85,"High waterfowl (+1 SD, lag 21-28 d)",1.24,0.72,2.12
+Absolute conditions,Other flyway states,Temperature,90,"High waterfowl (+1 SD, lag 21-28 d)",0.96,0.65,1.43
+Absolute conditions,Other flyway states,Precipitation,90,"High waterfowl (+1 SD, lag 21-28 d)",0.93,0.61,1.43
+Absolute conditions,Other flyway states,Soil moisture,90,"High waterfowl (+1 SD, lag 21-28 d)",1.4,0.87,2.21
+Absolute conditions,Other flyway states,Wind speed,90,"High waterfowl (+1 SD, lag 21-28 d)",1.17,0.86,1.59
+Absolute conditions,Other flyway states,Runoff,90,"High waterfowl (+1 SD, lag 21-28 d)",1,0.49,2.02
+Absolute conditions,Pooled,Temperature,175,"High waterfowl (+1 SD, lag 21-28 d)",1.1,0.78,1.57
+Absolute conditions,Pooled,Precipitation,175,"High waterfowl (+1 SD, lag 21-28 d)",0.76,0.55,1.05
+Absolute conditions,Pooled,Soil moisture,175,"High waterfowl (+1 SD, lag 21-28 d)",1.16,0.79,1.68
+Absolute conditions,Pooled,Wind speed,175,"High waterfowl (+1 SD, lag 21-28 d)",1.09,0.85,1.39
+Absolute conditions,Pooled,Runoff,175,"High waterfowl (+1 SD, lag 21-28 d)",1.2,0.76,1.9
+90-day shock,Minnesota,Temperature,85,"High waterfowl (+1 SD, lag 21-28 d)",1.22,0.74,2.07
+90-day shock,Minnesota,Precipitation,85,"High waterfowl (+1 SD, lag 21-28 d)",0.67,0.49,0.91
+90-day shock,Minnesota,Soil moisture,85,"High waterfowl (+1 SD, lag 21-28 d)",0.83,0.62,1.12
+90-day shock,Minnesota,Wind speed,85,"High waterfowl (+1 SD, lag 21-28 d)",1.12,0.87,1.48
+90-day shock,Minnesota,Runoff,85,"High waterfowl (+1 SD, lag 21-28 d)",1.4,0.99,2
+90-day shock,Other flyway states,Temperature,90,"High waterfowl (+1 SD, lag 21-28 d)",1.52,0.88,2.66
+90-day shock,Other flyway states,Precipitation,90,"High waterfowl (+1 SD, lag 21-28 d)",1,0.69,1.43
+90-day shock,Other flyway states,Soil moisture,90,"High waterfowl (+1 SD, lag 21-28 d)",0.88,0.66,1.2
+90-day shock,Other flyway states,Wind speed,90,"High waterfowl (+1 SD, lag 21-28 d)",0.95,0.69,1.3
+90-day shock,Other flyway states,Runoff,90,"High waterfowl (+1 SD, lag 21-28 d)",0.88,0.65,1.19
+90-day shock,Pooled,Temperature,175,"High waterfowl (+1 SD, lag 21-28 d)",1.64,1.12,2.44
+90-day shock,Pooled,Precipitation,175,"High waterfowl (+1 SD, lag 21-28 d)",0.77,0.6,0.99
+90-day shock,Pooled,Soil moisture,175,"High waterfowl (+1 SD, lag 21-28 d)",0.9,0.73,1.13
+90-day shock,Pooled,Wind speed,175,"High waterfowl (+1 SD, lag 21-28 d)",1.1,0.9,1.36
+90-day shock,Pooled,Runoff,175,"High waterfowl (+1 SD, lag 21-28 d)",1.17,0.9,1.52
+Absolute conditions,Minnesota,Temperature,85,"Low waterfowl (-1 SD, lag 21-28 d)",0.76,0.46,1.23
+Absolute conditions,Minnesota,Precipitation,85,"Low waterfowl (-1 SD, lag 21-28 d)",1.04,0.6,1.78
+Absolute conditions,Minnesota,Soil moisture,85,"Low waterfowl (-1 SD, lag 21-28 d)",1.14,0.65,2.05
+Absolute conditions,Minnesota,Wind speed,85,"Low waterfowl (-1 SD, lag 21-28 d)",1.11,0.77,1.59
+Absolute conditions,Minnesota,Runoff,85,"Low waterfowl (-1 SD, lag 21-28 d)",0.87,0.51,1.5
+Absolute conditions,Other flyway states,Temperature,90,"Low waterfowl (-1 SD, lag 21-28 d)",0.86,0.6,1.24
+Absolute conditions,Other flyway states,Precipitation,90,"Low waterfowl (-1 SD, lag 21-28 d)",0.73,0.44,1.21
+Absolute conditions,Other flyway states,Soil moisture,90,"Low waterfowl (-1 SD, lag 21-28 d)",0.97,0.59,1.58
+Absolute conditions,Other flyway states,Wind speed,90,"Low waterfowl (-1 SD, lag 21-28 d)",0.84,0.6,1.19
+Absolute conditions,Other flyway states,Runoff,90,"Low waterfowl (-1 SD, lag 21-28 d)",0.88,0.44,1.77
+Absolute conditions,Pooled,Temperature,175,"Low waterfowl (-1 SD, lag 21-28 d)",0.74,0.53,1.03
+Absolute conditions,Pooled,Precipitation,175,"Low waterfowl (-1 SD, lag 21-28 d)",0.73,0.49,1.09
+Absolute conditions,Pooled,Soil moisture,175,"Low waterfowl (-1 SD, lag 21-28 d)",1.1,0.73,1.68
+Absolute conditions,Pooled,Wind speed,175,"Low waterfowl (-1 SD, lag 21-28 d)",1.01,0.77,1.33
+Absolute conditions,Pooled,Runoff,175,"Low waterfowl (-1 SD, lag 21-28 d)",0.84,0.53,1.38
+90-day shock,Minnesota,Temperature,85,"Low waterfowl (-1 SD, lag 21-28 d)",1.18,0.68,2.01
+90-day shock,Minnesota,Precipitation,85,"Low waterfowl (-1 SD, lag 21-28 d)",1.11,0.81,1.52
+90-day shock,Minnesota,Soil moisture,85,"Low waterfowl (-1 SD, lag 21-28 d)",1.02,0.77,1.37
+90-day shock,Minnesota,Wind speed,85,"Low waterfowl (-1 SD, lag 21-28 d)",1.07,0.83,1.41
+90-day shock,Minnesota,Runoff,85,"Low waterfowl (-1 SD, lag 21-28 d)",1.03,0.74,1.47
+90-day shock,Other flyway states,Temperature,90,"Low waterfowl (-1 SD, lag 21-28 d)",0.36,0.2,0.67
+90-day shock,Other flyway states,Precipitation,90,"Low waterfowl (-1 SD, lag 21-28 d)",0.89,0.56,1.39
+90-day shock,Other flyway states,Soil moisture,90,"Low waterfowl (-1 SD, lag 21-28 d)",0.74,0.54,1
+90-day shock,Other flyway states,Wind speed,90,"Low waterfowl (-1 SD, lag 21-28 d)",1.25,0.92,1.7
+90-day shock,Other flyway states,Runoff,90,"Low waterfowl (-1 SD, lag 21-28 d)",0.97,0.72,1.28
+90-day shock,Pooled,Temperature,175,"Low waterfowl (-1 SD, lag 21-28 d)",0.66,0.45,0.98
+90-day shock,Pooled,Precipitation,175,"Low waterfowl (-1 SD, lag 21-28 d)",0.92,0.7,1.22
+90-day shock,Pooled,Soil moisture,175,"Low waterfowl (-1 SD, lag 21-28 d)",0.87,0.7,1.1
+90-day shock,Pooled,Wind speed,175,"Low waterfowl (-1 SD, lag 21-28 d)",1.19,0.97,1.47
+90-day shock,Pooled,Runoff,175,"Low waterfowl (-1 SD, lag 21-28 d)",1.09,0.86,1.39

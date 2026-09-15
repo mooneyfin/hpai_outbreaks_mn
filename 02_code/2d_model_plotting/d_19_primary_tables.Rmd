@@ -1,0 +1,99 @@
+---
+title: "S1 — Primary results in full"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+project.folder <- paste0(here::here(), "/")
+source(paste0(project.folder, "create_folder_structure.R"))
+source(paste0(functions.folder, "script_initiate.R"))
+suppressMessages({library(INLA); library(Matrix); library(flextable); library(officer); library(knitr)})
+source(paste0(functions.folder, "inla_dlnm_helpers.R"))
+md_dir <- file.path(tables_folder, "markdown"); dir.create(md_dir, showWarnings = FALSE)
+
+emit <- function(dt, name, note = NULL) {
+  writeLines(c(knitr::kable(dt, format = "markdown"), "",
+               if (!is.null(note)) paste0("*", note, "*")),
+             file.path(md_dir, paste0(name, ".md")))
+  ft <- flextable(as.data.frame(dt)) |> fontsize(size = 8, part = "all") |>
+    align(align = "center", part = "all") |> theme_booktabs() |> autofit()
+  if (!is.null(note)) ft <- add_footer_lines(ft, note)
+  read_docx() |> body_add_flextable(ft) |>
+    print(target = file.path(tables_main_folder, paste0(name, ".docx")))
+  invisible(dt)
+}
+
+CONTRAST <- paste("All estimates are rate ratios per +0.5 standard deviation increase in exposure.",
+                  "On the natural scale that is +3.98 °C, +0.021 m³/m³, +0.40 m/s, and a",
+                  "precipitation log-ratio of 0.19 (about 21% above the 90-day baseline).",
+                  "Note that a standard deviation does not mean the same thing across these",
+                  "exposures — the IQR/SD ratio runs from 0.94 for soil moisture, which is",
+                  "heavy-tailed, to 1.66 for temperature — so effects of similar numerical size",
+                  "are not directly comparable between rows.")
+```
+
+```{r build}
+fits <- readRDS(paste0(objects_folder, "primary_shock_level_fits.RDS"))
+KIND  <- c(`Absolute conditions` = "level", `90-day shock` = "shock")
+PANEL <- c(Minnesota = "Minnesota", `Other flyway states` = "Other flyway", Pooled = "Pooled")
+EXPO  <- c("Temperature", "Precipitation", "Soil moisture", "Wind speed", "Anseriformes")
+WCOL <- names(INLA_LAG_WINDOWS)
+ACOL <- paste0("Lag ", INLA_LAG_ANCHORS, " days")
+
+# rows nest Model -> Exposure -> Panel, matching the original manuscript's layout
+grab <- function(which_tab, cols) {
+  rbindlist(lapply(names(KIND), function(mn)
+    rbindlist(lapply(EXPO, function(ex)
+      rbindlist(lapply(names(PANEL), function(pn) {
+        tt <- fits[[paste(PANEL[[pn]], KIND[[mn]], sep = "|")]][[which_tab]]
+        r  <- tt[Predictor == ex]
+        if (!nrow(r)) return(NULL)
+        cbind(data.table(Model = mn, Exposure = ex, Panel = pn),
+              r[, ..cols])
+      }))))), fill = TRUE)
+}
+s1a <- grab("cumulative",  WCOL)
+s1b <- grab("lagspecific", ACOL)
+
+# cluster-robust intervals on the pooled rows. resampling CELLS, because strata inside a cell
+# share premises, land cover and local water, so the model-based interval is too narrow.
+cr_file <- paste0(objects_folder, "si_cluster_robust_current.RDS")
+if (file.exists(cr_file)) {
+  cr <- setDT(readRDS(cr_file))
+  cr[, Model := fifelse(Model == "Absolute", "Absolute conditions", Model)]
+  cw <- dcast(cr, Model + Predictor ~ window, value.var = "cluster_robust")
+  setnames(cw, "Predictor", "Exposure")
+  s1a <- merge(s1a, cw, by = c("Model", "Exposure"), all.x = TRUE, suffixes = c("", " [cluster]"))
+  for (k in WCOL) {
+    j <- paste0(k, " [cluster]")
+    if (j %in% names(s1a)) s1a[Panel != "Pooled", (j) := ""]
+  }
+  setcolorder(s1a, c("Model", "Exposure", "Panel", WCOL, paste0(WCOL, " [cluster]")))
+}
+```
+
+# S1a · Cumulative rate ratios
+
+```{r s1a}
+emit(s1a, "TableS1a_cumulative",
+     paste(CONTRAST,
+           "Cumulative within four disjoint lag windows. Columns marked [cluster] give the same",
+           "point estimate with a 95% interval from 200 bootstrap resamples of CELLS rather than",
+           "strata, shown for the pooled panel only; where they are wider, the model-based",
+           "interval overstates precision."))
+kable(s1a)
+```
+
+# S1b · Lag-specific rate ratios
+
+```{r s1b}
+emit(s1b, "TableS1b_lag_specific",
+     paste(CONTRAST,
+           "Lag-specific contributions at five anchor days. These are the per-day building blocks",
+           "of the cumulative windows above, so the two tables are deterministically linked."))
+kable(s1b)
+```
