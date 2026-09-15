@@ -75,7 +75,8 @@ NOTES <- c(
     "Ratio of the meteorological effect at high versus low prior waterfowl, under alternative specifications.",
     "Lag basis: the smooth ns(2) used in the exploratory fit, an unsmoothed strata basis with a break at day 8, and ns(3).",
     "Modifier: waterfowl dichotomised at the stratum median, at the outer tertiles, or entered continuously.",
-    "Bird window: the lag range over which waterfowl abundance is averaged to form the modifier.",
+    "Bird window: the lag range over which waterfowl abundance is averaged to form the modifier; the 0-7 day variant restricts the weather term to the first week.",
+    "Drop-one rows refit the model without the other water term. A dash marks a window the variant does not estimate.",
     "The reported model (Table S7a) uses the strata basis, the continuous modifier and the 15-28 day window."))
 
 emit <- function(dt, name, sig = TRUE, null_at = 1, pattern = NULL, ...) {
@@ -254,11 +255,18 @@ rr_show(b8$dt, font_size = 10, span = SPAN8, col_labels = S7LAB, indent_rows = b
 # two sources: c_47 (lag basis and modifier form, at the primary window) and the c_50 refits over
 # alternative bird windows. Both report the high/low ratio in the two weather bins.
 ir <- setDT(readRDS(paste0(objects_folder, "si_interaction_robustness.RDS")))[, .(Check, Panel, Kind, Exposure, Window, ratio)]
-WINF <- c(`21-28 d` = "si_interaction_primary_w21-28.RDS", `15-28 d [reported]` = "si_interaction_primary.RDS",
-          `14-28 d` = "si_interaction_primary_w14-28.RDS", `8-28 d` = "si_interaction_primary_w8-28.RDS")
+WINF <- c(`Bird window: 21-28 d` = "si_interaction_primary_w21-28.RDS",
+          `Bird window: 15-28 d [reported]` = "si_interaction_primary.RDS",
+          `Bird window: 14-28 d` = "si_interaction_primary_w14-28.RDS",
+          `Bird window: 8-28 d` = "si_interaction_primary_w8-28.RDS",
+          `Weather 0-7 d only, birds 7-28 d` = "si_interaction_primary_met0-7_bird7-28.RDS",
+          # the two water terms carry opposite signs; each is refitted without the other to show
+          # that is not the pair splitting shared variance
+          `Runoff dropped from the model` = "si_interaction_primary_norunoff.RDS",
+          `Precipitation dropped from the model` = "si_interaction_primary_noprecip.RDS")
 iw <- rbindlist(lapply(names(WINF), function(n) {
   x <- setDT(readRDS(paste0(objects_folder, WINF[[n]])))
-  x[Panel %in% c("Minnesota", "Pooled"), .(Check = paste("Bird window:", n), Panel, Kind, Exposure, Window, ratio = Ratio)]
+  x[Panel %in% c("Minnesota", "Pooled"), .(Check = n, Panel, Kind, Exposure, Window, ratio = Ratio)]
 }))
 ir <- rbind(ir, iw)[, `:=`(Kind = norm_model(Kind), Panel = norm_panel(Panel))]
 CHECKS <- unique(ir$Check)

@@ -99,8 +99,9 @@ one_panel <- function(mk, keep_xlab) {
 # Figure S2: the full grid, both parameterisations, all three panels, for the supplement.
 dat_all <- copy(dat)
 dat <- dat_all[panel == "Minnesota" & model == MODELS[["shock"]]]
-f2 <- one_panel("shock", TRUE)
-ggsave_spark(file.path(figures_main_folder, "figure2_primary_forest.png"), f2, width = 13, height = 4.6)
+# one panel, one parameterisation: nothing for a legend to distinguish, so it goes
+f2 <- one_panel("shock", TRUE) + theme(legend.position = "none")
+ggsave_spark(file.path(figures_main_folder, "figure2_primary_forest.png"), f2, width = 13, height = 4.2)
 dat <- dat_all
 fS2 <- one_panel("level", FALSE) / one_panel("shock", TRUE) + plot_layout(heights = c(1, 1))
 ggsave_spark(file.path(figures_main_folder, "figureS2_primary_forest_all_panels.png"), fS2, width = 13, height = 9)

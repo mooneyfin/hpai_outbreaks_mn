@@ -108,15 +108,23 @@ fig("figure4_interaction.png")
 
 - Post hoc interaction: the meteorological shock over lag **0–14 d** (weeks 1–2), modified by Anseriformes
   abundance over lag **15–28 d** (weeks 3–4), continuous, non-overlapping windows. Effects at +1 SD (high) and
-  −1 SD (low) of the modifier.
+  −1 SD (low) of the modifier. Lag windows across the top, as in Figure 2.
 - **Precipitation shock is protective only where waterfowl were abundant:** cumulative 0–14 d, 0.48 (0.29, 0.79)
   at high waterfowl vs 1.33 (0.80, 2.15) at low; ratio 0.37 (0.16, 0.81), P(dir) 0.99. The split sits in the
   8–14 d bin; nothing separates at 0–7 d.
 - **Runoff shock points the other way, suggestively:** 1.70 (0.97, 3.04) at high waterfowl vs 0.91 (0.52, 1.60);
   ratio 1.86 (0.81, 4.42), P(dir) 0.93.
+- **Opposite signs on two water terms are not the pair splitting shared variance.** The precipitation and runoff
+  shocks are only weakly correlated within stratum (r = 0.12 — in spring, runoff is snowmelt, not rain), and
+  each result is unchanged when the other term is dropped: precipitation 0.49 (0.30, 0.78) without runoff,
+  runoff 1.58 (0.89, 2.78) without precipitation (Table S7b).
+- The reading that fits both: after waterfowl have arrived, **rain washes and dilutes** surface virus and keeps
+  farm traffic down, while **snowmelt runoff moves** virus banked in frozen wetlands toward water near farms —
+  the same "thaw" that shows up as the temperature interaction in the other states (Figure S3).
+- **The effect needs the second week.** Restricting the weather term to lag 0–7 d (with birds 7–28 d) returns
+  nothing — precipitation 0.99 (0.76, 1.27) — so the fortnight matters, not the first week alone.
 - Soil moisture 0.68 (0.43, 1.07) at high vs 1.02 at low (P(dir) 0.90); temperature and wind do not separate.
-- In Minnesota the temperature interaction seen in the all-states panel (Figure S3) is absent — 1.29 (0.57, 2.89)
-  vs 1.56 (0.66, 3.68). The Minnesota story is water, not temperature.
+  The Minnesota story is water, not temperature.
 
 ## Table 1. Case-crossover sample
 
@@ -270,8 +278,10 @@ tbl("TableS7b_interaction_robust", font_size = 9)
 ```
 
 - Minnesota's precipitation interaction and the all-states temperature interaction hold under all three lag
-  bases, all three modifier definitions, and all four bird windows (21–28, 15–28, 14–28, 8–28 d). This table is
-  what makes the post hoc disclosure a clause rather than a paragraph.
+  bases, all three modifier definitions, and all four bird windows (21–28, 15–28, 14–28, 8–28 d), and each
+  survives dropping the other water term.
+- The one specification that returns nothing is weather 0–7 d with birds 7–28 d: the second week of weather
+  carries the effect. This table is what makes the post hoc disclosure a clause rather than a paragraph.
 
 # Build status
 

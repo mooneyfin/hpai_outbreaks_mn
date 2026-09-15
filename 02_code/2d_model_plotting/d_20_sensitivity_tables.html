@@ -1879,7 +1879,8 @@ NOTES &lt;- c(
     &quot;Ratio of the meteorological effect at high versus low prior waterfowl, under alternative specifications.&quot;,
     &quot;Lag basis: the smooth ns(2) used in the exploratory fit, an unsmoothed strata basis with a break at day 8, and ns(3).&quot;,
     &quot;Modifier: waterfowl dichotomised at the stratum median, at the outer tertiles, or entered continuously.&quot;,
-    &quot;Bird window: the lag range over which waterfowl abundance is averaged to form the modifier.&quot;,
+    &quot;Bird window: the lag range over which waterfowl abundance is averaged to form the modifier; the 0-7 day variant restricts the weather term to the first week.&quot;,
+    &quot;Drop-one rows refit the model without the other water term. A dash marks a window the variant does not estimate.&quot;,
     &quot;The reported model (Table S7a) uses the strata basis, the continuous modifier and the 15-28 day window.&quot;))
 
 emit &lt;- function(dt, name, sig = TRUE, null_at = 1, pattern = NULL, ...) {
@@ -10257,11 +10258,18 @@ All northern Mississippi Flyway states
 <pre class="r"><code># two sources: c_47 (lag basis and modifier form, at the primary window) and the c_50 refits over
 # alternative bird windows. Both report the high/low ratio in the two weather bins.
 ir &lt;- setDT(readRDS(paste0(objects_folder, &quot;si_interaction_robustness.RDS&quot;)))[, .(Check, Panel, Kind, Exposure, Window, ratio)]
-WINF &lt;- c(`21-28 d` = &quot;si_interaction_primary_w21-28.RDS&quot;, `15-28 d [reported]` = &quot;si_interaction_primary.RDS&quot;,
-          `14-28 d` = &quot;si_interaction_primary_w14-28.RDS&quot;, `8-28 d` = &quot;si_interaction_primary_w8-28.RDS&quot;)
+WINF &lt;- c(`Bird window: 21-28 d` = &quot;si_interaction_primary_w21-28.RDS&quot;,
+          `Bird window: 15-28 d [reported]` = &quot;si_interaction_primary.RDS&quot;,
+          `Bird window: 14-28 d` = &quot;si_interaction_primary_w14-28.RDS&quot;,
+          `Bird window: 8-28 d` = &quot;si_interaction_primary_w8-28.RDS&quot;,
+          `Weather 0-7 d only, birds 7-28 d` = &quot;si_interaction_primary_met0-7_bird7-28.RDS&quot;,
+          # the two water terms carry opposite signs; each is refitted without the other to show
+          # that is not the pair splitting shared variance
+          `Runoff dropped from the model` = &quot;si_interaction_primary_norunoff.RDS&quot;,
+          `Precipitation dropped from the model` = &quot;si_interaction_primary_noprecip.RDS&quot;)
 iw &lt;- rbindlist(lapply(names(WINF), function(n) {
   x &lt;- setDT(readRDS(paste0(objects_folder, WINF[[n]])))
-  x[Panel %in% c(&quot;Minnesota&quot;, &quot;Pooled&quot;), .(Check = paste(&quot;Bird window:&quot;, n), Panel, Kind, Exposure, Window, ratio = Ratio)]
+  x[Panel %in% c(&quot;Minnesota&quot;, &quot;Pooled&quot;), .(Check = n, Panel, Kind, Exposure, Window, ratio = Ratio)]
 }))
 ir &lt;- rbind(ir, iw)[, `:=`(Kind = norm_model(Kind), Panel = norm_panel(Panel))]
 CHECKS &lt;- unique(ir$Check)
@@ -10443,7 +10451,7 @@ Split: Continuous (no split)
 </tr>
 <tr>
 <td style="text-align:left;padding-left: 4em;" indentlevel="1">
-Bird window: 85
+85
 </td>
 <td style="text-align:right;">
 0.67 (0.32, 1.39)
@@ -10460,7 +10468,7 @@ Bird window: 85
 </tr>
 <tr>
 <td style="text-align:left;padding-left: 4em;" indentlevel="1">
-Bird window: 175
+175
 </td>
 <td style="text-align:right;">
 –
@@ -10592,7 +10600,7 @@ Split: Continuous (no split)
 </tr>
 <tr>
 <td style="text-align:left;padding-left: 4em;" indentlevel="1">
-Bird window: 85
+85
 </td>
 <td style="text-align:right;">
 0.74 (0.48, 1.15)
@@ -10609,7 +10617,7 @@ Bird window: 85
 </tr>
 <tr>
 <td style="text-align:left;padding-left: 4em;" indentlevel="1">
-Bird window: 175
+175
 </td>
 <td style="text-align:right;">
 –
@@ -10741,7 +10749,7 @@ Split: Continuous (no split)
 </tr>
 <tr>
 <td style="text-align:left;padding-left: 4em;" indentlevel="1">
-Bird window: 85
+85
 </td>
 <td style="text-align:right;">
 0.83 (0.56, 1.26)
@@ -10758,7 +10766,7 @@ Bird window: 85
 </tr>
 <tr>
 <td style="text-align:left;padding-left: 4em;" indentlevel="1">
-Bird window: 175
+175
 </td>
 <td style="text-align:right;">
 –
@@ -10890,7 +10898,7 @@ Split: Continuous (no split)
 </tr>
 <tr>
 <td style="text-align:left;padding-left: 4em;" indentlevel="1">
-Bird window: 85
+85
 </td>
 <td style="text-align:right;">
 1.13 (0.83, 1.56)
@@ -10907,7 +10915,7 @@ Bird window: 85
 </tr>
 <tr>
 <td style="text-align:left;padding-left: 4em;" indentlevel="1">
-Bird window: 175
+175
 </td>
 <td style="text-align:right;">
 –
@@ -11039,7 +11047,7 @@ Split: Continuous (no split)
 </tr>
 <tr>
 <td style="text-align:left;padding-left: 4em;" indentlevel="1">
-Bird window: 85
+85
 </td>
 <td style="text-align:right;">
 1.17 (0.76, 1.80)
@@ -11056,7 +11064,7 @@ Bird window: 85
 </tr>
 <tr>
 <td style="text-align:left;padding-left: 4em;" indentlevel="1">
-Bird window: 175
+175
 </td>
 <td style="text-align:right;">
 –
@@ -11201,7 +11209,7 @@ Split: Continuous (no split)
 </tr>
 <tr>
 <td style="text-align:left;padding-left: 4em;" indentlevel="1">
-Bird window: 85
+85
 </td>
 <td style="text-align:right;">
 1.18 (0.62, 2.24)
@@ -11218,7 +11226,7 @@ Bird window: 85
 </tr>
 <tr>
 <td style="text-align:left;padding-left: 4em;" indentlevel="1">
-Bird window: 175
+175
 </td>
 <td style="text-align:right;">
 –
@@ -11350,7 +11358,7 @@ Split: Continuous (no split)
 </tr>
 <tr>
 <td style="text-align:left;padding-left: 4em;" indentlevel="1">
-Bird window: 85
+85
 </td>
 <td style="text-align:right;">
 0.71 (0.34, 1.44)
@@ -11367,7 +11375,7 @@ Bird window: 85
 </tr>
 <tr>
 <td style="text-align:left;padding-left: 4em;" indentlevel="1">
-Bird window: 175
+175
 </td>
 <td style="text-align:right;">
 –
@@ -11499,7 +11507,7 @@ Split: Continuous (no split)
 </tr>
 <tr>
 <td style="text-align:left;padding-left: 4em;" indentlevel="1">
-Bird window: 85
+85
 </td>
 <td style="text-align:right;">
 0.86 (0.48, 1.56)
@@ -11516,7 +11524,7 @@ Bird window: 85
 </tr>
 <tr>
 <td style="text-align:left;padding-left: 4em;" indentlevel="1">
-Bird window: 175
+175
 </td>
 <td style="text-align:right;">
 –
@@ -11648,7 +11656,7 @@ Split: Continuous (no split)
 </tr>
 <tr>
 <td style="text-align:left;padding-left: 4em;" indentlevel="1">
-Bird window: 85
+85
 </td>
 <td style="text-align:right;">
 0.96 (0.63, 1.47)
@@ -11665,7 +11673,7 @@ Bird window: 85
 </tr>
 <tr>
 <td style="text-align:left;padding-left: 4em;" indentlevel="1">
-Bird window: 175
+175
 </td>
 <td style="text-align:right;">
 –
@@ -11797,7 +11805,7 @@ Split: Continuous (no split)
 </tr>
 <tr>
 <td style="text-align:left;padding-left: 4em;" indentlevel="1">
-Bird window: 85
+85
 </td>
 <td style="text-align:right;">
 1.13 (0.60, 2.10)
@@ -11814,7 +11822,7 @@ Bird window: 85
 </tr>
 <tr>
 <td style="text-align:left;padding-left: 4em;" indentlevel="1">
-Bird window: 175
+175
 </td>
 <td style="text-align:right;">
 –

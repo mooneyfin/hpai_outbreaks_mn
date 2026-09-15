@@ -54,7 +54,7 @@ one_block <- function(kind, keep_xlab, wins) {
     geom_errorbar(aes(xmin = low, xmax = high), width = 0, linewidth = 0.55,
                   orientation = "y", position = position_dodge(width = 0.6, reverse = TRUE)) +
     geom_point(size = 2.2, position = position_dodge(width = 0.6, reverse = TRUE)) +
-    facet_grid(Window ~ Panel) +
+    facet_grid(Panel ~ Window) +
     scale_colour_manual(values = COL) + scale_shape_manual(values = SHP) +
     # log axis so a halving and a doubling are the same distance; coord_cartesian clips
     # rather than deleting any estimate whose interval runs past the edge
@@ -82,12 +82,12 @@ dat <- dat_all[Panel == "Minnesota"]
 # single-panel figure: legend title above the keys, or the second key runs off the right edge
 f4 <- one_block("90-day shock", TRUE, WINS) +
   labs(colour = "Minnesota, 90-day shocks", shape = "Minnesota, 90-day shocks") +
-  guides(colour = guide_legend(title.position = "top"), shape = guide_legend(title.position = "top")) +
-  facet_grid(Window ~ .)
-ggsave_spark(file.path(figures_main_folder, "figure4_interaction.png"), f4, width = 8, height = 11)
+  guides(colour = guide_legend(title.position = "left"), shape = guide_legend(title.position = "left")) +
+  facet_grid(. ~ Window)
+ggsave_spark(file.path(figures_main_folder, "figure4_interaction.png"), f4, width = 12, height = 4.8)
 dat <- dat_all
 fS3 <- one_block("Absolute conditions", FALSE, WINS) / one_block("90-day shock", TRUE, WINS)
-ggsave_spark(file.path(figures_main_folder, "figureS3_interaction_all_panels.png"), fS3, width = 12, height = 18)
+ggsave_spark(file.path(figures_main_folder, "figureS3_interaction_all_panels.png"), fS3, width = 12, height = 13)
 fwrite(dat_all, paste0(objects_folder, "figure4_interaction.csv"))
 cat("wrote figure4_interaction.png (Minnesota, shock) and figureS3_interaction_all_panels.png\n")
 print(dcast(dat_all[Kind == "90-day shock" & Window == "Lag 0-14 days" & Exposure %in% c("Temperature", "Precipitation", "Runoff")],
