@@ -1,0 +1,244 @@
+---
+title: "Supplement tables"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: hide
+    theme: flatly
+---
+
+```{r setup, message = FALSE, warning = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+project.folder <- paste0(here::here(), "/")
+source(paste0(project.folder, "create_folder_structure.R"))
+source(paste0(functions.folder, "script_initiate.R"))
+source(paste0(functions.folder, "table_helpers.R"))
+source(paste0(functions.folder, "inla_dlnm_helpers.R"))
+OUT  <- tables_supplement_folder
+WCOL <- names(INLA_LAG_WINDOWS)
+
+# exposures and panel names come from inla_dlnm_helpers.R - never redefined locally
+EXPO  <- unname(INLA_PRIMARY_LAB[c(INLA_PRIMARY_MET, INLA_BIRD_VAR)])
+# the 90-day shock is the primary parameterisation, so it comes first everywhere
+KIND  <- c(`90-day shock` = "shock", `Absolute conditions` = "level")
+FITKEY <- c(Minnesota = "Minnesota", `Other flyway` = "Other flyway", Pooled = "Pooled")
+PANEL_DISP <- unname(INLA_PANEL_LAB[names(FITKEY)])
+# "shock", not "anomaly"; "All northern Mississippi Flyway states", not "pooled". Older model
+# objects still carry the old words, so both columns are normalised on the way in.
+norm_model <- function(x) fifelse(x %in% c("90-day anomaly", "90-day rolling anomaly"), "90-day shock",
+                          fifelse(x == "Absolute", "Absolute conditions", x))
+pdir <- function(p) { p <- as.numeric(p); sprintf("%.2f", pmax(p, 1 - p)) }   # P(RR > 1), stored as text -> P(direction)
+
+CONTRAST <- paste("Rate ratios are per +0.5 SD of the exposure summed over the lag window.",
+                  "P(dir) is the posterior probability that the effect lies on the side of 1 shown by the point estimate.")
+TITLES <- c(
+  TableS3_primary_results      = "Table S3. Cumulative and lag-specific rate ratios, both parameterisations, by panel",
+  TableS4_referent_design      = "Table S4. Referent design, with a negative-control exposure, Minnesota and all states",
+  TableS5_lag_structure        = "Table S5. Sensitivity to the lag structure (Minnesota)",
+  TableS6_prior                = "Table S6. Sensitivity to the prior on the crossbasis coefficients (Minnesota)",
+  TableS7_season_interaction   = "Table S7. Exposure effects in spring versus outside spring (Minnesota)",
+  TableS8_crossvalidation      = "Table S8. Leave-one-stratum-out cross-validation, by panel",
+  TableS9_interaction         = "Table S9. Meteorological effect by waterfowl abundance two to four weeks earlier, by panel")
+NOTES <- c(
+  TableS3_primary_results = paste(
+    "Conditional Poisson case-crossover fitted in INLA with a free per-stratum intercept. The 90-day shock is the primary parameterisation; absolute conditions are the secondary.",
+    "Cumulative rate ratios are summed over each lag window; lag-specific rate ratios are read at the last day of the window.",
+    CONTRAST, "Bold indicates a 95% credible interval excluding 1."),
+  TableS4_referent_design = paste(
+    "The negative control is the 25-year climatological normal temperature for that cell and week.",
+    "It is pure season by construction and cannot cause a 2022 outbreak, so a design that removes season returns 1.00;",
+    "any departure from 1.00 is residual seasonal confounding. The unidirectional design has fewer cases and 4.0 referents per case,",
+    "so it is a different panel and its exposure estimates are not strictly comparable with the others.",
+    "Exposures are shown at lag 0-7 days, except Anseriformes at lag 22-28 days.", CONTRAST),
+  TableS5_lag_structure = paste(
+    "dWAIC is relative to the selected specification within each model; negative is better. Shown on the specification row because it belongs to the fit, not to an individual exposure.",
+    "A dash marks a lag window outside that specification's range. The same sensitivities for the other panels are in the repository object and agree in direction.", CONTRAST),
+  TableS6_prior = paste(
+    "The prior is chosen on the implied rate-ratio range, what the prior alone implies for a +0.5 SD contrast before seeing data, not on WAIC:",
+    "WAIC keeps improving as the prior tightens because shrinkage toward the null reduces effective complexity, which is not fit.", CONTRAST),
+  TableS7_season_interaction = paste(
+    "Spring versus outside spring rather than four seasons: winter and summer carry too few cases to support a crossbasis.",
+    "The crossbasis is masked to a season rather than the raw exposure multiplied by a season flag, since zeroing the input does not zero a spline basis.", CONTRAST),
+  TableS8_crossvalidation = paste(
+    "Each stratum is held out in turn, the model refitted on the remainder, and the held-out stratum scored by the log probability assigned to the day the outbreak actually occurred.",
+    "Score is the total log probability, higher is better. Gain vs chance compares against a model spreading probability evenly across each stratum's candidate days.",
+    "The paired difference and z compare the two parameterisations stratum by stratum.",
+    "This is not INLA's CPO, which drops one observation at a time and so is not a stratum hold-out in a conditional model."),
+  TableS9_interaction = paste(
+    "Post hoc analysis. The meteorological crossbasis (lag 0-14 days) is multiplied by the standardised Anseriformes abundance at lag 15-28 days, centred within stratum, so the",
+    "interaction is continuous and the two windows do not overlap; effects are shown at +1 SD (high) and -1 SD (low) of that modifier.",
+    "Lag bins are estimated independently (strata basis, break at day 8); the 0-14 day column is their cumulative, from the same posterior.",
+    "Ratio is high divided by low. Same prior as the primary model. Estimates and P(dir) come from 4,000 draws of the joint posterior."))
+emit <- function(dt, name, sig = TRUE, null_at = 1, pattern = NULL, ...) {
+  to_word(dt, name, OUT, sig = sig, null_at = null_at, pattern = pattern,
+          title = unname(TITLES[name]), note = unname(NOTES[name]), ...)
+  invisible(dt)
+}
+rr_show <- function(dt, ...) show_tbl(dt, sig = TRUE, null_at = 1, pattern = NULL, ...)
+```
+
+## S3. Primary results
+
+```{r s1}
+fits  <- readRDS(paste0(objects_folder, "primary_shock_level_fits.RDS"))
+SHORT <- c("0-7 d", "8-14 d", "15-21 d", "22-28 d")
+ENDA  <- paste0("Lag ", c(7, 14, 21, 28), " days")
+CN    <- c(paste0("cum_", SHORT), paste0("ls_", SHORT), paste0("pd_", SHORT))
+b <- build_sections(names(KIND), EXPO, PANEL_DISP, function(mn, ex, pn) {
+  ff <- fits[[paste(FITKEY[[match(pn, PANEL_DISP)]], KIND[[mn]], sep = "|")]]
+  cu <- ff$cumulative[Predictor == ex]; ls <- ff$lagspecific[Predictor == ex]
+  pr <- as.data.table(ff$prob)[Predictor == ex]
+  if (!nrow(cu)) return(NULL)
+  c(unlist(cu[, ..WCOL], use.names = FALSE), unlist(ls[, ..ENDA], use.names = FALSE),
+    pdir(unlist(pr[, ..WCOL], use.names = FALSE)))
+}, CN)
+s1 <- b$dt
+S1LAB <- c(" ", rep(SHORT, 3))
+SPAN <- c(" " = 1, "Cumulative rate ratio" = 4, "Lag-specific rate ratio" = 4, "P(dir), cumulative" = 4)
+emit(s1, "TableS3_primary_results", font_size = 7, max_width = 9.4, span = SPAN,
+     indent_rows = b$g2, indent2 = b$g3, bold_rows = b$g1, rule_after = b$g1[2] - 1, col_labels = S1LAB)
+rr_show(s1, font_size = 10, span = SPAN, indent_rows = b$g2, indent2 = b$g3, bold_rows = b$g1, col_labels = S1LAB)
+```
+
+## S4. Referent design
+
+```{r s2}
+nc  <- setDT(readRDS(paste0(objects_folder, "si_negative_control.RDS")))       # c_02, by panel
+uni <- setDT(readRDS(paste0(objects_folder, "si_unidirectional_row.RDS")))     # c_03, by panel
+des <- setDT(readRDS(paste0(objects_folder, "si_design_ladder.RDS")))          # c_04, by panel
+uni[, Model := norm_model(Model)]
+kp <- c("Panel", "Model", "Design", grep(paste0("^(", paste(EXPO, collapse = "|"), ")"), names(des), value = TRUE))
+desl <- melt(des[, ..kp], id.vars = c("Panel", "Model", "Design"), variable.name = "Exposure", value.name = "est")
+desl[, Exposure := sub(" 0-7 d$| 22-28 d$", "", Exposure)]
+unil <- melt(uni, id.vars = c("Panel", "Model", "Design", "Exposure"),
+             measure.vars = "Lag 0-7 days", value.name = "est")[, variable := NULL][]
+unil[Exposure == "Anseriformes", est := uni[Exposure == "Anseriformes"][["Lag 22-28 days"]]]
+AD <- rbind(unil, desl, fill = TRUE)
+ORD <- c("Unidirectional, -7 to -28 d", "Symmetric bidirectional, +/-14 to 28 d",
+         "Time-stratified, two-month strata", "One-month strata, 7-day post exclusion")
+nc[, Design := fifelse(grepl("^Time-stratified, one-month", Design), ORD[4], Design)]
+W <- dcast(AD[Design %in% ORD], Panel + Model + Design ~ Exposure, value.var = "est")
+PKEY <- c(Minnesota = "Minnesota", Pooled = "Pooled")
+VC <- c("Refs/case", "Negative control", EXPO)
+b2 <- build_sections(names(KIND), unname(INLA_PANEL_LAB[names(PKEY)]), ORD, function(mn, pn, dg) {
+  pk <- PKEY[[match(pn, unname(INLA_PANEL_LAB[names(PKEY)]))]]
+  r <- W[Panel == pk & Model == mn & Design == dg]; n <- nc[Panel == pk & Design == dg]
+  if (!nrow(r) || !nrow(n)) return(NULL)
+  c(n$`Referents per case`[1], n$`Negative control RR`[1], unlist(r[1, ..EXPO], use.names = FALSE))
+}, VC)
+SPAN2 <- c(" " = 1, "Design" = 2, "Rate ratio by exposure" = length(EXPO))
+emit(b2$dt, "TableS4_referent_design", font_size = 7, max_width = 9.6, span = SPAN2,
+     indent_rows = b2$g2, indent2 = b2$g3, bold_rows = b2$g1, rule_after = b2$g1[2] - 1)
+rr_show(b2$dt, font_size = 10, span = SPAN2, indent_rows = b2$g2, indent2 = b2$g3, bold_rows = b2$g1)
+```
+
+## S5 and S6. Lag structure and prior (Minnesota)
+
+```{r s3-prep}
+spec <- setDT(readRDS(paste0(objects_folder, "si_specification_full.RDS")))[Panel == "Minnesota"]
+spec[, Model := norm_model(Model)]
+WC4 <- names(INLA_LAG_WINDOWS)
+```
+
+```{r s3}
+LAGSPECS <- unique(spec[Block == "Lag structure"]$Specification)
+COLA <- c("dWAIC", WC4)
+ba <- build_sections(names(KIND), LAGSPECS, EXPO,
+  function(mn, sp, ex) {
+    r <- spec[Model == mn & Block == "Lag structure" & Specification == sp & Exposure == ex]
+    if (!nrow(r)) return(NULL)
+    c("", vapply(WC4, function(k) { v <- r[[k]][1]; if (is.na(v)) "–" else v }, character(1)))
+  }, COLA,
+  item_vals = function(mn, sp) {
+    r <- spec[Model == mn & Block == "Lag structure" & Specification == sp]
+    if (!nrow(r)) return(NULL)
+    c(r$dWAIC[1], rep("", length(WC4)))
+  })
+SPAN_A <- c(" " = 1, " " = 1, "Cumulative rate ratio" = length(WC4))
+emit(ba$dt, "TableS5_lag_structure", font_size = 8, max_width = 8.6, span = SPAN_A,
+     indent_rows = ba$g2, indent2 = ba$g3, bold_rows = ba$g1, rule_after = ba$g1[2] - 1)
+rr_show(ba$dt, font_size = 10, span = SPAN_A, indent_rows = ba$g2, indent2 = ba$g3, bold_rows = ba$g1)
+```
+
+```{r s4}
+PSPECS <- unique(spec[Block == "Prior"]$Specification)
+COLB <- c("dWAIC", "Prior-implied RR range", WC4)
+bb <- build_sections(names(KIND), PSPECS, EXPO,
+  function(mn, sp, ex) {
+    r <- spec[Model == mn & Block == "Prior" & Specification == sp & Exposure == ex]
+    if (!nrow(r)) return(NULL)
+    c("", "", vapply(WC4, function(k) { v <- r[[k]][1]; if (is.na(v)) "–" else v }, character(1)))
+  }, COLB,
+  item_vals = function(mn, sp) {
+    r <- spec[Model == mn & Block == "Prior" & Specification == sp]
+    if (!nrow(r)) return(NULL)
+    c(r$dWAIC[1], r$`Prior-implied OR range`[1], rep("", length(WC4)))
+  })
+SPAN_B <- c(" " = 1, " " = 2, "Cumulative rate ratio" = length(WC4))
+emit(bb$dt, "TableS6_prior", font_size = 8, max_width = 9.0, span = SPAN_B,
+     indent_rows = bb$g2, indent2 = bb$g3, bold_rows = bb$g1, rule_after = bb$g1[2] - 1)
+rr_show(bb$dt, font_size = 10, span = SPAN_B, indent_rows = bb$g2, indent2 = bb$g3, bold_rows = bb$g1)
+```
+
+## S7. Season interaction (Minnesota)
+
+```{r s5}
+si <- setDT(readRDS(paste0(objects_folder, "si_season_s1layout.RDS")))[Panel == "Minnesota"]
+si[, Model := norm_model(Model)]
+b7 <- build_sections(names(KIND), EXPO, c("Spring", "Outside spring"), function(mn, ex, sn) {
+  r <- si[Model == mn & Exposure == ex & Season == sn]
+  if (!nrow(r)) return(NULL)
+  unlist(r[1, ..WCOL], use.names = FALSE)
+}, WCOL)
+SPAN7 <- c(" " = 1, "Cumulative rate ratio" = length(WCOL))
+emit(b7$dt, "TableS7_season_interaction", font_size = 8, max_width = 8.0, span = SPAN7,
+     indent_rows = b7$g2, indent2 = b7$g3, bold_rows = b7$g1, rule_after = b7$g1[2] - 1)
+rr_show(b7$dt, font_size = 10, span = SPAN7, indent_rows = b7$g2, indent2 = b7$g3, bold_rows = b7$g1)
+```
+
+## S8. Cross-validation
+
+```{r s6}
+cv <- setDT(readRDS(paste0(objects_folder, "si_cv_primary.RDS")))
+cv[, `:=`(Model = norm_model(Model), Panel = norm_panel(Panel))]
+setnames(cv, "Anomaly - absolute, per stratum", "Shock - absolute, per stratum", skip_absent = TRUE)
+KC <- setdiff(names(cv), c("Panel", "Model"))
+rows <- list(); lv <- integer(0)
+for (pn in PANEL_DISP) {
+  rows[[length(rows) + 1L]] <- as.list(c(setNames(pn, " "), setNames(rep("", length(KC)), KC)))
+  lv <- c(lv, 1L)
+  for (mn in names(KIND)) {
+    r <- cv[Panel == pn & Model == mn]
+    if (!nrow(r)) next
+    rows[[length(rows) + 1L]] <- as.list(c(setNames(mn, " "),
+      setNames(as.character(unlist(r[1, ..KC], use.names = FALSE)), KC)))
+    lv <- c(lv, 2L)
+  }
+}
+s6 <- rbindlist(rows, fill = TRUE)
+emit(s6, "TableS8_crossvalidation", sig = FALSE, font_size = 9, max_width = 7.6,
+     indent_rows = which(lv == 2L), bold_rows = which(lv == 1L), rule_after = which(lv == 1L)[-1] - 1)
+show_tbl(s6, font_size = 11, indent_rows = which(lv == 2L), bold_rows = which(lv == 1L))
+```
+
+## S9. The interaction
+
+```{r s7a}
+ip <- setDT(readRDS(paste0(objects_folder, "si_interaction_primary.RDS")))          # c_07, bird window 15-28 d
+ip[, `:=`(Kind = norm_model(Kind), Panel = norm_panel(Panel))]
+WIN2 <- c("0-7 days", "8-14 days", "0-14 days")
+CN7  <- as.vector(outer(c("hi", "lo", "rt", "pd"), c("a", "b", "c"), paste0))
+b8 <- build_sections(names(KIND), setdiff(EXPO, "Anseriformes"), PANEL_DISP, function(mn, ex, pn) {
+  r <- ip[Kind == mn & Exposure == ex & Panel == pn]
+  if (!nrow(r)) return(NULL)
+  unlist(lapply(WIN2, function(w) { x <- r[Window == w][1]
+    c(x$`High waterfowl`, x$`Low waterfowl`, x$Ratio, sprintf("%.2f", x$`P(dir) ratio`)) }), use.names = FALSE)
+}, CN7)
+S7LAB <- c(" ", rep(c("High", "Low", "High / low", "P(dir)"), 3))
+SPAN8 <- c(" " = 1, "Lag 0-7 days" = 4, "Lag 8-14 days" = 4, "Lag 0-14 days, cumulative" = 4)
+emit(b8$dt, "TableS9_interaction", font_size = 6, max_width = 9.6, span = SPAN8, col_labels = S7LAB,
+     indent_rows = b8$g2, indent2 = b8$g3, bold_rows = b8$g1, rule_after = b8$g1[2] - 1)
+rr_show(b8$dt, font_size = 10, span = SPAN8, col_labels = S7LAB, indent_rows = b8$g2, indent2 = b8$g3, bold_rows = b8$g1)
+```
+

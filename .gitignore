@@ -131,3 +131,6 @@ Supporting Information*.docx
 
 # python bytecode
 __pycache__/
+
+# data the live pipeline no longer reads; kept on disk, never versioned
+01_data/archive/

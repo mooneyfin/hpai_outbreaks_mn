@@ -23,7 +23,7 @@ from matplotlib_map_utils import scale_bar
 
 base_folder = Path(__file__).resolve().parents[2]
 objects_folder = base_folder / "03_output" / "3b_model_output" / "dataframes"
-figures_folder = base_folder / "05_figures" / "main"
+figures_folder = base_folder / "05_figures" / "intermediate"   # composed into Figure 1 by d_03
 env_data = base_folder / "01_data" / "1a_exposure_data" / "meteorological_data"
 spatial_data = base_folder / "01_data" / "1c_supportive_datasets" / "spatial_data"
 
@@ -132,7 +132,7 @@ leg.set_zorder(10)
 
 ax.set_axis_off()
 fig.tight_layout()
-fig.savefig(figures_folder / "figure2_case_zone_map.png", dpi=300,
+fig.savefig(figures_folder / "case_zone_map.png", dpi=300,
             bbox_inches="tight", facecolor="white")
-print(f"wrote figure2_case_zone_map.png | {len(case_zones)} case cells "
+print(f"wrote intermediate/case_zone_map.png | {len(case_zones)} case cells "
       f"({n_mn} MN, {n_other} other flyway)")

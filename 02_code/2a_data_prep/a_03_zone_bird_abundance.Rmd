@@ -1,0 +1,135 @@
+---
+title: "Per-zone weekly bird abundance (multi-state, 7-state flyway)"
+author: "Fintan Mooney"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r initiate}
+rm(list = ls())
+# 0a.Declare root directory, folder location and load essential stuff
+project.folder = paste0(print(here::here()), '/')
+source(paste0(project.folder, 'create_folder_structure.R'))
+source(paste0(functions.folder, 'script_initiate.R'))
+
+# 0b.lubridate owns the date accessors under the project's conflicted setup.
+conflict_prefer("year",  "lubridate", quiet = TRUE)
+conflict_prefer("month", "lubridate", quiet = TRUE)
+
+# 0c.Study region: the 7 flyway states with eBird abundance extracted. SD is
+#    excluded throughout the multi-state pipeline (no bird data). These codes index
+#    the spillover/ERA5 inputs and the fishnet `state` field alike.
+study_states_abbr <- c("IA", "IL", "IN", "MI", "MN", "OH", "WI")
+```
+
+This is the multi-state analogue of the Minnesota `a_04_feedlot_bird_abundance.Rmd`.
+The MN file extracts eBird relative-abundance rasters at feedlot points to build
+per-zone bird abundance for control cells. For the multi-state pipeline we instead reuse
+the **already-extracted** premises-level panel
+(`study_spillover_events_casecrossover_2022_abundance_060326.csv`, the same input
+`c_03`/`c_04` use): each outbreak premises carries its full weekly eBird series. Here
+we spatially place each premises in its fishnet zone and collapse to a
+**per-zone × ISO-week** bird-abundance table that the multi-state `a_04` consumes.
+
+The study region is the **7 Mississippi/Central-flyway states** with eBird abundance
+extracted: IA, IL, IN, MI, MN, OH, WI. (South Dakota has been removed from the
+multi-state pipeline entirely — it had no eBird extraction.) Because the time-stratified
+case-crossover compares a case zone
+against control *days/weeks in the same zone*, bird abundance is only ever needed for
+zones that hold an outbreak — which is exactly what a premises→zone join produces.
+
+# 1. Load the premises-level weekly bird panel
+
+```{r load-bird}
+bird_raw <- fread(paste0(bird_abundance_data,
+                         "study_spillover_events_casecrossover_2022_abundance_060326.csv"))
+
+# 1a.Restrict to the 7 study states (drops SD if it ever appears) and keep ALL link
+#    types. The independence split — independent (IND+INR) vs. all events (incl.
+#    cross-farm CSLT and unsequenced NOSEQ) — is applied downstream in a_08, so bird
+#    abundance must be built for *every* event zone, not just the independent ones.
+keep_ids <- bird_raw[is_case_week == 1 & state %in% study_states_abbr, unique(outbreak_id)]
+bird     <- bird_raw[outbreak_id %in% keep_ids]
+bird[, week_start := as.Date(week_start)]
+
+cat("Bird panel: ", length(keep_ids), " outbreaks (all links) across ",
+    uniqueN(bird$state), " states; ", nrow(bird), " premises-week rows\n", sep = "")
+print(bird[is_case_week == 1, .N, by = .(state, link)][order(state, link)])
+```
+
+# 2. Map each premises to its 7-state fishnet zone
+
+```{r premises-zone}
+# 2a.Multi-state fishnet (7 states; SD already removed). GEE writes EPSG:5070
+#    coordinates but mislabels the CRS as WGS84, so we *set* (not transform) it.
+fishnet <- st_read(paste0(env_data, "hpai_multistate_era5/fishnet_7state.geojson"),
+                   quiet = TRUE)
+fishnet <- fishnet[!st_is_empty(fishnet), ]
+fishnet <- st_set_crs(fishnet, 5070)
+
+# 2b.One point per premises → containing zone (st_within). Locations are identical
+#    to the placeholder spillover CSV (verified), so the zone a premises lands in
+#    here is the same case zone a_04 builds from date_confirmed.
+prem <- unique(bird[, .(outbreak_id, state, lon, lat)])
+prem_sf <- st_transform(st_as_sf(prem, coords = c("lon", "lat"), crs = 4326), 5070)
+prem[, zone_id := fishnet$zone_id[as.integer(st_within(prem_sf, fishnet))]]
+
+n_unmapped <- prem[is.na(zone_id), .N]
+if (n_unmapped > 0) {
+  # Premises on a cell boundary or just outside the fishnet — snap to nearest cell.
+  miss <- which(is.na(prem$zone_id))
+  nn   <- st_nearest_feature(prem_sf[miss, ], fishnet)
+  prem[miss, zone_id := fishnet$zone_id[nn]]
+  message(n_unmapped, " premises fell outside a cell; snapped via nearest-feature.")
+}
+
+cat("Premises mapped to a zone, by state:\n")
+print(prem[, .(n_premises = .N, mapped = sum(!is.na(zone_id))), by = state][order(-n_premises)])
+```
+
+# 3. Collapse premises-weeks to per-zone × ISO-week abundance
+
+```{r zone-week}
+# 3a.Attach the zone to every premises-week row.
+bird <- merge(bird, prem[, .(outbreak_id, zone_id)], by = "outbreak_id", all.x = TRUE)
+
+# 3b.Derive the three aggregates the MN pipeline uses. anseri_abd/total_abd come
+#    pre-summed in the panel; predators = the non-anseriform remainder (the raptor/
+#    pelican detections: rethaw, grhowl, baleag, amwpel). Defining it as
+#    total - anseri sidesteps the buwtea grouping ambiguity in the MN code.
+bird[, predators := total_abd - anseri_abd]
+
+# 3c.Average across any premises sharing a zone (10 km cells rarely hold >1), per
+#    ISO-week. Keep week_start (Monday anchor) for the weekly→daily interpolation
+#    a_04 does, and the case-window flags for diagnostics.
+zone_week_bird <- bird[
+  , .(total_bird_abundance = mean(total_abd,  na.rm = TRUE),
+      anseriformes         = mean(anseri_abd, na.rm = TRUE),
+      predators            = mean(predators,  na.rm = TRUE),
+      n_premises           = uniqueN(outbreak_id)),
+  by = .(zone_id, state, iso_year, iso_week, week_start)
+]
+
+# mean() over an all-NA week returns NaN — normalise to NA for clean downstream joins.
+for (v in c("total_bird_abundance", "anseriformes", "predators")) {
+  set(zone_week_bird, which(is.nan(zone_week_bird[[v]])), v, NA_real_)
+}
+setorder(zone_week_bird, zone_id, week_start)
+
+cat("\nPer-zone weekly bird table: ", nrow(zone_week_bird), " zone-week rows across ",
+    uniqueN(zone_week_bird$zone_id), " zones\n", sep = "")
+```
+
+# 4. Export
+
+```{r export}
+# Consumed by a_04_join_data.Rmd (joined by zone_id × ISO-week, then
+# interpolated weekly→daily for the daily panel; used natively for the weekly panel).
+fwrite(zone_week_bird,
+       paste0(bird_abundance_data, "multistate-zone-weekly-bird-abundance-061626.csv"))
+cat("Wrote multistate-zone-weekly-bird-abundance-061626.csv\n")
+```

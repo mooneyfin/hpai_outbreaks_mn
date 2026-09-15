@@ -33,14 +33,15 @@ output.folder <- paste0(project.folder, "03_output/")
     processed_data   <- eda.output.folder
 
 tables_folder  <- paste0(project.folder, "04_tables/")
-  tables_main_folder        <- paste0(tables_folder,  "main/")
-  tables_sensitivity_folder <- paste0(tables_folder,  "sensitivity/")
-  tables_archive_folder     <- paste0(tables_folder,  "archive/")
+  tables_main_folder         <- paste0(tables_folder,  "main/")          # Table 1
+  tables_supplement_folder   <- paste0(tables_folder,  "supplement/")    # Tables S2-S9
+  tables_specs_folder        <- paste0(tables_folder,  "table_specs/")   # display specs the brief renders from
+  tables_archive_folder      <- paste0(tables_folder,  "archive/")
 figures_folder <- paste0(project.folder, "05_figures/")
-  figures_main_folder        <- paste0(figures_folder, "main/")
-  figures_sensitivity_folder <- paste0(figures_folder, "sensitivity/")
-  figures_eda_folder         <- paste0(figures_folder, "eda/")
-  figures_archive_folder     <- paste0(figures_folder, "archive/")
+  figures_main_folder         <- paste0(figures_folder, "main/")          # Figures 1-4
+  figures_supplement_folder   <- paste0(figures_folder, "supplement/")    # Figures S1-S4
+  figures_intermediate_folder <- paste0(figures_folder, "intermediate/")  # map and curve that compose Figure 1
+  figures_archive_folder      <- paste0(figures_folder, "archive/")
 lit.folder     <- paste0(project.folder, "06_literature/")
 drafts.folder  <- paste0(project.folder, "07_drafts/")
 

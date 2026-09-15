@@ -1,0 +1,204 @@
+---
+title: "Descriptive tables"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: hide
+    theme: flatly
+---
+
+```{r setup, message = FALSE, warning = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+project.folder <- paste0(here::here(), "/")
+source(paste0(project.folder, "create_folder_structure.R"))
+source(paste0(functions.folder, "script_initiate.R"))
+suppressMessages({library(flextable); library(officer); library(knitr); library(kableExtra)
+                  library(INLA); library(Matrix)})
+INLA::inla.setOption(num.threads = 2)
+set.seed(20260911); NBOOT <- 2000
+
+source(paste0(functions.folder, "table_helpers.R"))
+# the shared helper takes an output folder; everything here goes to the same place
+.tw <- to_word
+to_word <- function(dt, name, ...) .tw(dt, name, tables_main_folder, ...)
+```
+
+```{r data}
+panel <- setDT(readRDS(paste0(objects_folder, multistate_ts_daily_rds)))
+panel[, date := as.Date(date)]
+cc <- setDT(readRDS(paste0(objects_folder, "case_crossover_df_shock_post7.RDS")))
+if (anyDuplicated(names(cc))) cc <- cc[, which(!duplicated(names(cc))), with = FALSE]
+cases <- cc[outbreak_binary == 1]
+shock <- setDT(readRDS(paste0(objects_folder, "daily_shock_predictors.RDS")))
+shock[, date := as.Date(date)]
+clim <- rbindlist(lapply(
+  list.files(env_data, pattern = "flyway8_climatology_1997_2021_w", full.names = TRUE),
+  fread, colClasses = list(character = "zone_id")))
+STATE_ORD <- cases[, .N, by = state][order(-N)]$state
+```
+
+## Table 1. Case-crossover sample by state
+
+```{r table1}
+SEAS4 <- c("Winter", "Spring", "Summer", "Fall")
+# Describes the analytic sample itself - cases, the cells they sit in, and the referent
+# person-time each case is compared against. Land cover was dropped: it is a property of the
+# cell, and a case-crossover compares a cell against itself, so it can never enter the model.
+per_cell <- cases[, .(n = .N), by = .(state, zone_id)]
+samp <- cc[, .(events = sum(outbreak_binary), refs = sum(outbreak_binary == 0),
+               total = .N), by = state]
+samp[, per := sprintf("%.0f", refs / events)]   # a count of days, so no decimal
+cells <- per_cell[, .(c1 = .N, c2 = sum(n >= 2), c3 = sum(n >= 3)), by = state]
+sea <- dcast(cases[, .N, by = .(state, season)], state ~ season, value.var = "N", fill = 0)
+for (sn in SEAS4) if (!sn %in% names(sea)) set(sea, j = sn, value = 0L)
+sea[, tot := rowSums(.SD), .SDcols = SEAS4]
+for (sn in SEAS4) set(sea, j = paste0(sn, "_f"),
+                      value = sprintf("%d (%.0f%%)", sea[[sn]], 100 * sea[[sn]] / sea$tot))
+
+fmt_n <- function(x) formatC(x, big.mark = ",", format = "d")
+grab <- function(dt, v, f) setNames(f(dt[[v]][match(STATE_ORD, dt$state)]), STATE_ORD)
+blank <- setNames(rep("", length(STATE_ORD)), STATE_ORD)
+hdr <- function(lab) as.list(c(Variable = lab, blank))
+row <- function(lab, dt, v, f = fmt_n) as.list(c(Variable = lab, grab(dt, v, f)))
+
+# Section headers carry their own total rather than sitting empty above a row that repeats it:
+# "Case cells" IS the count of cells with at least one event, and "Cases" IS the event count.
+t1 <- rbindlist(list(
+  row("Cases", samp, "events"),
+    row("Winter", sea, "Winter_f", as.character),
+    row("Spring", sea, "Spring_f", as.character),
+    row("Summer", sea, "Summer_f", as.character),
+    row("Fall",   sea, "Fall_f",   as.character),
+  row("Case cells", cells, "c1"),
+    row("With 2 or more events", cells, "c2"),
+    row("With 3 or more events", cells, "c3"),
+  row("Referent cell-days", samp, "refs"),
+    row("Referents per case", samp, "per", as.character),
+  row("Total cell-days", samp, "total")), fill = TRUE)
+
+T1HDR  <- c(1, 6, 9, 11)                   # rows that head a block and carry its total
+T1BODY <- setdiff(seq_len(nrow(t1)), T1HDR)
+T1TITLE <- "Table S2. Case-crossover sample by state"
+T1NOTE  <- paste("Cells are 10 km grid squares. Referent cell-days are the other days in the same",
+                 "calendar month within the same cell, excluding the 7 days after detection.")
+.tw(t1, "TableS2_sample_by_state", tables_supplement_folder, indent_rows = T1BODY, bold_rows = T1HDR,
+        rule_after = c(5, 8, 10), title = T1TITLE, note = T1NOTE)
+show_tbl(t1, indent_rows = T1BODY, bold_rows = T1HDR, title = T1TITLE, note = T1NOTE)
+```
+
+## Table 1. Minnesota, by meteorological season (sample, conditions, shocks, deviations)
+
+```{r table2}
+SEASONS <- c("Winter", "Spring", "Summer", "Fall")
+COLS    <- c(SEASONS, "Year-round")
+# ERA5 gives Kelvin and metres. Levels need converting; DIFFERENCES do not for temperature
+# (a Kelvin difference is a Celsius difference), and the precipitation shock is a log ratio
+# because a_08 log1p-transforms it before differencing.
+nat <- function(x, v) {
+  if (v == "temperature")        x - 273.15
+  else if (v %in% c("precipitation", "runoff")) x * 1000
+  else if (v == "soil_moisture") x * 100      # m3/m3 -> % volumetric, so no 3-decimal cells
+  else                           x
+}
+# the 90-day shock: a difference in natural units, except precipitation and runoff, which a_08
+# log1p-transforms before differencing, so their shock is a log ratio -> reported as % change
+natd <- function(x, v) {
+  if (v %in% c("precipitation", "runoff")) (exp(x) - 1) * 100
+  else if (v == "soil_moisture") x * 100
+  else                           x
+}
+
+MET <- c(temperature = "Temperature (°C)", precipitation = "Precipitation (mm)",
+         soil_moisture = "Soil moisture (% vol)", wind_speed = "Wind speed (m/s)",
+         runoff = "Runoff (mm)")
+SHOCKU <- c(temperature = "°C", precipitation = "% vs 90-day baseline",
+            soil_moisture = "% vol", wind_speed = "m/s", runoff = "% vs 90-day baseline")
+BIRD <- c(anseriformes = "Anseriformes", predators = "Predators")
+
+season_table <- function(case_cells) {
+  d <- panel[zone_id %in% case_cells]
+  d <- merge(d, shock, by = c("zone_id", "date"), all.x = TRUE)
+  d[, week_idx := pmin(as.integer(strftime(date, "%j")) %/% 7L, 51L)]
+  d <- merge(d, clim[, c("zone_id", "week_idx", grep("_mean$", names(clim), value = TRUE)),
+                     with = FALSE], by = c("zone_id", "week_idx"), all.x = TRUE)
+  d[, season := factor(season, levels = SEASONS)]
+  d[, week_blk := strftime(date, "%Y-%V")]   # resampling unit for the interval
+  ev <- cases[zone_id %in% case_cells]
+
+  # one column per season, one value per cell, and the ROW LABEL says which statistic it is.
+  # levels get median (IQR); the 25-year comparison gets median (95% CrI), because a spread is
+  # not what that row is claiming - it is a difference from a normal, so it needs an interval on
+  # the estimate rather than a description of the scatter.
+  ms <- function(x, dp) sprintf(paste0("%.", dp, "f (%.", dp, "f, %.", dp, "f)"),
+                                median(x, na.rm = TRUE), quantile(x, .25, na.rm = TRUE),
+                                quantile(x, .75, na.rm = TRUE))
+  # MEDIAN deviation from the 25-year normal, with a credible interval from INLA.
+  #
+  # AR1, NOT a random walk. RW1 is non-stationary: it absorbs the whole weather trajectory into
+  # the smooth and leaves the intercept pinned down by residual noise, giving a 0.17-wide
+  # interval on a quantity whose real uncertainty is ~5. AR1 is stationary - autocorrelated
+  # noise AROUND a mean - so the correlation properly inflates that mean's uncertainty.
+  #
+  # Fitted on DAY MEDIANS, so it matches the median (IQR) used everywhere else in the table
+  # rather than mixing a mean into a median column. Cells are collapsed to one median per day
+  # first: all cells sit under the same weather on a given day (cell means SD 0.38 vs day means
+  # 4.67), so they are near-replicates, and the day is the unit that actually carries the
+  # uncertainty. The AR1 intercept is then the central level of that daily-median series.
+  mci <- function(x, day, dp) {
+    keep <- !is.na(x) & !is.na(day); x <- x[keep]; day <- day[keep]
+    if (!length(x)) return("")
+    dm <- data.table(y = x, d = day)[, .(y = median(y, na.rm = TRUE)), by = d][order(d)]
+    if (nrow(dm) < 10) return(sprintf(paste0("%.", dp, "f"), median(x, na.rm = TRUE)))
+    dm[, t := .I]
+    f <- try(INLA::inla(y ~ 1 + f(t, model = "ar1"), family = "gaussian", data = dm,
+                        control.predictor = list(compute = FALSE)), silent = TRUE)
+    if (inherits(f, "try-error")) return("")
+    b <- f$summary.fixed["(Intercept)", c("mean", "0.025quant", "0.975quant")]
+    sprintf(paste0("%.", dp, "f (%.", dp, "f, %.", dp, "f)"), b[[1]], b[[2]], b[[3]])
+  }
+  # "Year-round" is every case-cell day, not the average of the four seasons
+  mkrow <- function(lab, f) as.list(c(Variable = lab,
+    setNames(vapply(COLS, function(s) f(if (s == "Year-round") d else d[season == s]),
+                    character(1)), COLS)))
+
+  # the analysis panel for these cells; a stratum takes the season of its case day, so referent
+  # counts by season are counts of referents matched to that season's cases
+  ccm <- cc[zone_id %in% case_cells]
+  ccm[, sseason := season[outbreak_binary == 1][1], by = stratum_id]
+  sub_cc <- function(s) if (s == "Year-round") ccm else ccm[sseason == s]
+  srow <- function(lab, f) as.list(c(Variable = lab, setNames(vapply(COLS, function(s) f(sub_cc(s)), character(1)), COLS)))
+  rows <- list(
+    srow("Spillover events",   function(x) as.character(sum(x$outbreak_binary))),
+    srow("Case cells",         function(x) as.character(uniqueN(x[outbreak_binary == 1]$zone_id))),
+    srow("Referent cell-days", function(x) formatC(sum(x$outbreak_binary == 0), big.mark = ",", format = "d")),
+    srow("Referents per case", function(x) sprintf("%.0f", sum(x$outbreak_binary == 0) / max(1, sum(x$outbreak_binary)))))
+  for (v in names(MET)) {
+    dp  <- if (v == "runoff") 2 else 1          # daily runoff is hundredths of a millimetre
+    dps <- if (v %in% c("precipitation", "runoff")) 0 else 1
+    rows <- c(rows, list(
+      mkrow(paste0(MET[[v]], ", median (IQR)"), function(ds) ms(nat(ds[[v]], v), dp)),
+      mkrow(sprintf("90-day shock (%s), median (IQR)", SHOCKU[[v]]),
+            function(ds) ms(natd(ds[[paste0(v, "_shock")]], v), dps)),
+      mkrow("vs 25-yr normal, median (95% CrI)",
+            function(ds) mci(nat(ds[[v]], v) - nat(ds[[paste0(v, "_mean")]], v), ds$date, dp))))
+  }
+  for (v in names(BIRD))
+    rows <- c(rows, list(mkrow(paste0(BIRD[[v]], ", median (IQR)"), function(ds) ms(ds[[v]], 1))))
+  rbindlist(rows, fill = TRUE)
+}
+
+t2 <- season_table(unique(cases[state == "Minnesota"]$zone_id))
+lab2 <- t2$Variable
+IND  <- which(grepl("^90-day shock|^vs 25-yr|^Case cells|^Referent", lab2))   # sit under their heading
+BOLD <- setdiff(seq_along(lab2), IND)
+RULE <- which(grepl("^vs 25-yr", lab2))
+T2TITLE <- "Table 1. Minnesota spillover sample and conditions, by meteorological season"
+T2NOTE  <- paste("Case-crossover sample: 85 spillover events in 73 cells; a stratum takes the season of its case day.",
+                 "Conditions are summarised over all cell-days in those 73 cells. The 90-day shock is the mean of the last 7 days minus the mean of the preceding 90;",
+                 "for precipitation and runoff it is a log ratio, shown as percent change. Deviations are from the 1997-2021 weekly normal for that cell,",
+                 "reported as the median across cells with a 95% credible interval from an INLA AR(1) model over day. CrI = credible interval; IQR = interquartile range.")
+to_word(t2, "Table1_minnesota_by_season", indent_rows = IND, bold_rows = BOLD, rule_after = RULE, sig = TRUE,
+        title = T2TITLE, note = T2NOTE, font_size = 8, max_width = 9.4)
+show_tbl(t2, indent_rows = IND, bold_rows = BOLD, sig = TRUE, title = T2TITLE, note = T2NOTE)
+```

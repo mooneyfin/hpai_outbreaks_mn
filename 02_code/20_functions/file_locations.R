@@ -1,7 +1,6 @@
 #1.Raw data filenames
 spillover_data_file = "hpai-outbreaks-clean-placeholder-032124.csv"
 fishnet_gpkg        = "fishnet_10km_timeseries.gpkg"
-land_cover_gpkg     = "fishnet_landcover.gpkg"
 
 #1b.Multi-state flyway bird-abundance case-crossover panel (eBird joined)
 study_abundance_casecrossover_file =
