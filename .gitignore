@@ -133,4 +133,3 @@ Supporting Information*.docx
 __pycache__/
 
 # data the live pipeline no longer reads; kept on disk, never versioned
-01_data/archive/

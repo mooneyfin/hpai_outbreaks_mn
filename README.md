@@ -42,7 +42,7 @@ Large intermediates (raw GEE exports, panels, fitted models, `03_output/**/*.RDS
 
 1c_supportive_datasets: 10 km fishnet grid geometry, Minnesota feedlot point shapefile (MPCA), state boundaries.
 
-`01_data/archive/` (not versioned) holds inputs the revised analysis no longer reads: the Minnesota-only ERA5-Land and climatology exports, the Minnesota-only eBird aggregates, the NLCD land-cover rasters, and the legacy Minnesota spatial layers. Land cover was dropped from the analysis because the case-crossover design conditions out everything time-invariant about a cell.
+`1a_exposure_data/bird_abundance_data/original_pull/` (not versioned) keeps the first eBird pull for Minnesota: feedlot-level weekly species abundance and the outbreak-level weekly estimates. Its schema differs from the zone-level file the pipeline reads, so it is kept for provenance only. The Minnesota-only ERA5-Land exports, the NLCD land-cover rasters and the legacy Minnesota spatial layers were deleted; land cover was dropped from the analysis because the case-crossover design conditions out everything time-invariant about a cell.
 
 ## 2. Code
 
