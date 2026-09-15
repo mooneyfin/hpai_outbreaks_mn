@@ -1,4 +1,4 @@
-############ FIGURE 4 — THE LAG DISTRIBUTION IS NOT IDENTIFIED ############
+############ FIGURE 3 — WATERFOWL LAG-RESPONSE ############
 # Both bird terms, both lag windows, cumulative within disjoint weekly windows.
 #
 # The point of the figure is the contradiction. Same 3,870 rows, same 167 strata, same design,

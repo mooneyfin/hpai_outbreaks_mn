@@ -7,11 +7,11 @@ Daily case-crossover analysis of HPAI H5N1 spillover into poultry premises acros
 
 The unit of analysis is a **cell-day** on a 10 km grid. For each spillover event the case is that cell on the confirmed detection date; referents are the other days of the same calendar month in the same cell, excluding the seven days after detection (**time-stratified, one-month strata, 7-day post-event exclusion**; about 23 referent cell-days per case). Because each cell is its own control, everything time-invariant about a cell — poultry density, land cover, terrain, biosecurity — is conditioned out. The referent design is checked with a negative-control exposure (the 25-year climatological normal temperature, which cannot cause a 2022 outbreak): it returns 2.99 under the unidirectional design of the original submission and 1.13 under this one (Table S2).
 
-**Six exposures enter every model**: temperature, precipitation, soil moisture, wind speed, runoff and Anseriformes abundance, over a 0–28 day lag. Meteorological terms take a natural-spline exposure–response (2 df) and Anseriformes is linear; the lag basis is a natural spline (2 df); crossbasis coefficients carry `N(0, 0.25²)` priors. Two parameterisations are reported side by side throughout — **absolute conditions** and the **90-day shock** (mean of the last 7 days minus the mean of the preceding 90). The exposure set is defined once, in `02_code/20_functions/inla_dlnm_helpers.R` (`INLA_PRIMARY_*`), and read from there by every model.
+**Six exposures enter every model**: temperature, precipitation, soil moisture, wind speed, runoff and Anseriformes abundance, over a 0–28 day lag. Meteorological terms take a natural-spline exposure–response (2 df) and Anseriformes is linear; the lag basis is a natural spline (2 df); crossbasis coefficients carry `N(0, 0.5²)` priors, chosen on the implied rate-ratio range for a +0.5 SD contrast (Table S6). The **90-day shock** (mean of the last 7 days minus the mean of the preceding 90) is the primary parameterisation; **absolute conditions** are the secondary and sit in the supplement. The exposure set is defined once, in `02_code/20_functions/inla_dlnm_helpers.R` (`INLA_PRIMARY_*`), and read from there by every model.
 
-Panel: **175 spillover cases in 161 cells** — Minnesota 85 in 73 (the primary population), the other six flyway states 90, and the two pooled. ERA5-Land runs from 1 August 2021 so every 2022 case has a full 90-day baseline.
+Panel: **175 spillover cases in 161 cells** — Minnesota 85 in 73 (the primary population), the other six northern Mississippi Flyway states 90, and all seven states together. ERA5-Land runs from 1 August 2021 so every 2022 case has a full 90-day baseline.
 
-The main finding is a rising waterfowl effect at lag 21–28 days, and — in a post hoc interaction analysis (`c_50`, Figure 4, Tables S7a–b) — a meteorological effect at lag 8–14 days that appears only in the wake of high waterfowl abundance.
+The primary analysis is Minnesota under the 90-day shock; the other flyway states, all states together, and absolute conditions are reported in the supplement. The main finding is a rising waterfowl effect through lag 28 days, and — in a post hoc interaction analysis (`c_50`, Figure 4, Table S9) — precipitation and runoff shocks in the fortnight before detection that act only in the wake of high waterfowl abundance two to four weeks earlier.
 
 > **Known gap.** The grid geometry (`fishnet_8state.geojson`) spans eight states, including South Dakota, because the covering grid was generated over an eight-state area of interest. No ERA5-Land export was ever produced for South Dakota, so it carries no exposure data and never enters the analysis panel. South Dakota recorded HPAI events in 2022, so the flyway comparison omits a state with events for want of exposure data rather than by design. Closing this would mean re-running `a_00_era5_land_gee_multistate.js` for South Dakota and rebuilding the panel; the Minnesota primary analysis is unaffected.
 
@@ -26,7 +26,7 @@ R packages are pinned with `renv`; the Python side (map, land-cover extraction) 
 02_code/2a_data_prep/a_06_build_symmetric_panels.R   # referent designs
 02_code/2a_data_prep/a_07_build_shock_panel.R        # 90-day shocks; the analysis panel
 02_code/2c_models/c_17_primary_shock_models.R        # primary fits, both parameterisations, three panels
-02_code/2c_models/c_{30,33,36,37,47,50,52}_*.R       # sensitivities and the interaction
+02_code/2c_models/c_{30,33,36,37,50,52}_*.R          # sensitivities and the interaction
 02_code/2d_model_plotting/d_{13,02,15,08,17,23,24}_* # figures   (d_02 is Python)
 02_code/2d_model_plotting/d_{18,20}_*.Rmd            # tables -> 04_tables/main/*.docx + table_specs/
 quarto render 02_code/2d_model_plotting/d_22_manuscript_brief.qmd   # every exhibit, inline, with a read of each
@@ -36,7 +36,7 @@ Large intermediates (raw GEE exports, panels, fitted models, `03_output/**/*.RDS
 
 ## 1. Data
 
-1a_exposure_data: daily ERA5-Land meteorological variables for the seven flyway states (1 August 2021 – 31 December 2022) extracted via Google Earth Engine; weekly 1997–2021 ERA5-Land climatology for the same grid (used descriptively in Table 2); weekly eBird Status & Trends abundance estimates aggregated to grid cells.
+1a_exposure_data: daily ERA5-Land meteorological variables for the seven flyway states (1 August 2021 – 31 December 2022) extracted via Google Earth Engine; weekly 1997–2021 ERA5-Land climatology for the same grid (used descriptively in Table 1); weekly eBird Status & Trends abundance estimates aggregated to grid cells.
 
 1b_outcome_data: HPAI spillover events, 2022 (confidential — request from USDA APHIS).
 
@@ -58,23 +58,25 @@ a_07_build_shock_panel.R: 90-day baselines and shocks; writes the analysis panel
 
 ### 2b. Data exploration
 
-Sensitivities kept runnable but not reported in the supplement: c_19 (weekly exposure resolution), c_34 (post-event exclusion length), and the interaction exploration that preceded the pre-stated `c_50` (c_46 median split, c_48 runoff, c_49 temperature thresholds). `e_02_forest_paperfigure_style.py` with `paper_plot_style.py` is a deliberate style comparison for Figure 2.
+b_01_ebird_mixture_analysis.Rmd: eBird species mixture via weighted quantile sum regression (R. Kowalski); the source of Table S1.
+
+Sensitivities kept runnable but not tabulated in the supplement: c_19 (weekly exposure resolution), c_34 (post-event exclusion length), c_47 (the interaction under alternative lag bases and modifier forms) and c_53 (the interaction under alternative bird windows, a weather-first-week-only window, and with each water term dropped). c_53 rebuilds each variant from `c_50` by text substitution, so there is one copy of the interaction model.
 
 ### 2c. Models
 
-c_17_primary_shock_models.R: the primary fits — absolute conditions and 90-day shock, Minnesota / other flyway / pooled (Figure 2, Table S1).
+c_17_primary_shock_models.R: the primary fits — 90-day shock and absolute conditions, Minnesota / other flyway states / all states (Figure 2, Figure S2, Table S3).
 
-c_30_negative_control.R, c_33_s2_s7_inputs.R, c_52_design_ladder.R: referent design ladder with the negative control (Table S2) and the season interaction (Table S5).
+c_30_negative_control.R, c_33_s2_s7_inputs.R, c_52_design_ladder.R: referent design ladder with the negative control (Table S4) and the season interaction (Table S7), Minnesota and all states.
 
-c_36_specification_full.R: lag structure and prior sensitivities, all panels (Tables S3, S4).
+c_36_specification_full.R: lag structure and prior sensitivities, all panels (Tables S5, S6 show Minnesota).
 
-c_37_loo_primary.R: leave-one-stratum-out cross-validation (Table S6).
+c_37_loo_primary.R: leave-one-stratum-out cross-validation (Table S8).
 
-c_50_interaction_primary.R: meteorological effect modified by Anseriformes abundance at lag 21–28 d — one pre-stated specification (strata lag basis, continuous modifier, primary prior, posterior sampling). Figure 4, Table S7a. c_47_interaction_robustness.R: the same under alternative lag bases and modifier definitions (Table S7b).
+c_50_interaction_primary.R: meteorological shock over lag 0–14 d modified by Anseriformes abundance over lag 15–28 d — one pre-stated specification (strata lag basis, continuous modifier, the primary's prior, seeded posterior sampling). Figure 4, Figure S3, Table S9.
 
 ### 2d. Model plotting
 
-d_13 → d_02 (Python) → d_15: epidemic curve, case-cell map, and their composite (Figure 1). d_08: sample cascade (Figure S1); also writes the case-cell lookup the map draws from. d_23: Figure 2. d_17: Figure 3. d_24: Figure 4 (three versions). d_18 and d_20: main and supplement tables, each written to Word and to a display spec that d_22 renders from, so the two cannot drift. d_22_manuscript_brief.qmd: every exhibit in submission order with a short read of each.
+d_13 → d_02 (Python) → d_15: epidemic curve, case-cell map, and their composite (Figure 1). d_08: sample cascade (Figure S1); also writes the case-cell lookup the map draws from. d_23: Figure 2 and Figure S2. d_17: Figure 3 and Figure S4 (waterfowl lag–response). d_24: Figure 4 and Figure S3. d_18: Table 1 (Minnesota sample and conditions by season) and Table S2 (sample by state). d_20: Tables S3–S9. Every table is written to Word and to a display spec that d_22 renders from, so the two cannot drift. d_22_manuscript_brief.qmd: every exhibit in submission order with a short read of each.
 
 `02_code/20_functions/table_helpers.R` is the shared HTML/Word table renderer; `inla_dlnm_helpers.R` holds the model helpers and the canonical exposure set.
 

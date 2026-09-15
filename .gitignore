@@ -128,3 +128,6 @@ Supporting Information*.docx
 
 # working notes, never pushed
 07_drafts/REVISION_BUILD_PLAN.md
+
+# python bytecode
+__pycache__/
