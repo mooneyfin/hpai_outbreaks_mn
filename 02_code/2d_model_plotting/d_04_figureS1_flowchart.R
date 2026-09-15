@@ -38,6 +38,14 @@ count_flagged <- function(s, ids) {
 }
 panel[, nf := vapply(outbreak_id, count_flagged, integer(1), ids = scr$cross_farm_ids)]
 n_flagged <- sum(panel$nf)
+# how the 42 were flagged: CSLT is lateral (farm-to-farm) transfer by sequence and epidemiological
+# investigation, NOSEQ has no sequence so independence can't be established. same table a_05 reads
+link_tbl <- unique(fread(paste0(bird_abundance_data,
+  "study_spillover_events_casecrossover_2022_abundance_060326.csv"))[
+    is_case_week == 1 & outbreak_id %in% scr$cross_farm_ids, .(outbreak_id, link)])
+n_lateral <- link_tbl[link == "CSLT", .N]
+n_noseq   <- link_tbl[link == "NOSEQ", .N]
+stopifnot(n_lateral + n_noseq == n_flagged)
 panel[, oc := pmax(outbreak_count - nf, 0L)]
 n_elig_events   <- sum(panel$oc)
 n_elig_celldays <- sum(panel$oc > 0)
@@ -72,7 +80,7 @@ tot_cells  <- uniqueN(cc$zone_id)
 
 # 2a. Layout. Trunk boxes run down the centre; the branch splits at y = 0.50 and rejoins at the
 #     bottom. Exclusions hang off to the right of whatever they exclude from.
-TX1 <- 0.22; TX2 <- 0.78; TXM <- (TX1 + TX2) / 2           # trunk box left / right / middle
+TX1 <- 0.25; TX2 <- 0.75; TXM <- (TX1 + TX2) / 2           # trunk box left / right / middle; leaves room on the right for the exclusion
 LX1 <- 0.02; LX2 <- 0.47; LXM <- (LX1 + LX2) / 2           # left branch
 RX1 <- 0.53; RX2 <- 0.98; RXM <- (RX1 + RX2) / 2           # right branch
 HB  <- 0.093
@@ -86,7 +94,7 @@ trunk <- data.table(
             n_raw_events, n_raw_celldays, n_raw_cells),
     sprintf("Eligible spillover events\n%d events → %d case cell-days in %d cells",
             n_elig_events, n_elig_celldays, n_elig_cells),
-    sprintf("Pooled analytic sample\n%d cases  |  %s referent cell-days  |  %d strata in %d cells",
+    sprintf("All northern Mississippi Flyway states, analytic sample\n%d cases  |  %s referent cell-days  |  %d strata in %d cells",
             tot_cases, fmt(tot_refs), tot_strata, tot_cells)))
 
 branch <- data.table(
@@ -106,13 +114,18 @@ branch <- data.table(
             C("other", "per"))))
 
 # 2b. Exclusion boxes, hanging right off the trunk / branches
+# the trunk exclusion has to stay inside x = 1 or ggplot drops the rectangle and leaves the text floating
+EX1 <- TX2 + 0.02; EX2 <- 0.99
 excl <- data.table(
-  x = c(TXM + 0.30, LXM + 0.135, RXM + 0.135), y = c(0.733, 0.348, 0.348),
-  xmin = c(TXM + 0.06, LXM + 0.03, RXM + 0.03),
-  xmax = c(TXM + 0.54, LXM + 0.24, RXM + 0.24),
-  h = c(0.068, 0.060, 0.060),
+  x = c((EX1 + EX2) / 2, LXM + 0.135, RXM + 0.135), y = c(0.733, 0.348, 0.348),
+  xmin = c(EX1, LXM + 0.03, RXM + 0.03),
+  xmax = c(EX2, LXM + 0.24, RXM + 0.24),
+  h = c(0.125, 0.060, 0.060),
   label = c(
-    sprintf("Excluded: farm-to-farm transmission\nflagged by sequence and epidemiological\ninvestigation  (− %d events)", n_flagged),
+    sprintf(paste0("Excluded: not independent\nintroductions  (− %d events)\n",
+                   "%d farm-to-farm transmission,\nby sequence and\nepidemiological investigation\n",
+                   "%d unsequenced, independence\nnot established"),
+            n_flagged, n_lateral, n_noseq),
     sprintf("Excluded: no 90-day baseline\n(− %d cases)", lost("mn")),
     sprintf("Excluded: no 90-day baseline\n(− %d cases)", lost("other"))))
 
@@ -134,7 +147,7 @@ plain <- rbind(
   data.table(x = LXM, xend = RXM, y = JOIN,  yend = JOIN))
 join <- data.table(x = TXM, xend = TXM, y = JOIN, yend = trunk$y[4] + HB/2)
 # short stubs from the trunk / branches into each exclusion box
-stub <- data.table(x = c(TXM, LXM, RXM), xend = c(TXM + 0.06, LXM + 0.03, RXM + 0.03),
+stub <- data.table(x = c(TXM, LXM, RXM), xend = c(EX1, LXM + 0.03, RXM + 0.03),
                    y = c(0.733, 0.348, 0.348), yend = c(0.733, 0.348, 0.348))
 
 allbox <- rbind(trunk[, .(x, xmin, xmax, y, h, label)],
