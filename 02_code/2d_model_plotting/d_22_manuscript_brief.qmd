@@ -30,7 +30,7 @@ SPECS <- file.path(tables_folder, "table_specs")
 # specs to_word() stashed when it wrote the Word files, so what is reviewed below is what gets
 # submitted. If an exhibit is missing, re-knit the document that makes it, not this one.
 missing <- character(0)
-fig <- function(f) {
+fig <- function(f, w = "100%") {
   p <- file.path(figures_main_folder, f)
   if (!file.exists(p)) { missing <<- c(missing, f)
     return(asis_output(sprintf("\n> **Not yet built:** `%s`\n", f))) }
@@ -45,14 +45,18 @@ tbl <- function(name, font_size = 12) {
 ```
 
 ::: {.callout-note}
-Panel: **175 spillover cases in 161 cells**, seven northern Mississippi Flyway states, 2022. Minnesota 85
-cases in 73 cells. Two primary parameterisations everywhere: **absolute conditions** and the **90-day
-shock** (departure from the preceding 90 days). Six exposures throughout: temperature, precipitation,
-soil moisture, wind speed, runoff, Anseriformes. Rate ratios are per +0.5 SD; P(dir) is the posterior
-probability of direction, reported continuously and never thresholded.
+**Primary analysis: Minnesota, 90-day shocks.** 85 spillover cases in 73 cells, 2022; time-stratified
+case-crossover (one-month strata, 7-day post-event exclusion, ~23 referent cell-days per case); conditional
+Poisson in INLA. Six exposures throughout: temperature, precipitation, soil moisture, wind speed, runoff,
+Anseriformes, lag 0–28 d, ns(2) exposure–response and lag bases, N(0, 0.25²) priors. Rate ratios are per
++0.5 SD; P(dir) is the posterior probability of direction, reported continuously and never thresholded.
 
-Source documents — figures: `d_02` → `d_15` (F1), `d_23` (F2), `d_17` (F3), `d_24` (F4), `d_08` (S1).
-Tables: `d_18` (T1, T2), `d_20` (S1–S7b). Re-knit the source, then this.
+**Secondary, in the supplement:** absolute conditions as the parameterisation; the other six northern
+Mississippi Flyway states (90 cases) and all seven states together (175 cases — one model on all strata, not a
+pooling of estimates).
+
+Source documents — figures: `d_02` → `d_15` (F1), `d_23` (F2, S2), `d_17` (F3, S4), `d_24` (F4, S3),
+`d_08` (S1). Tables: `d_18` (T1, T2), `d_20` (S1–S7b). Re-knit the source, then this.
 :::
 
 # Main text
@@ -65,73 +69,54 @@ fig("figure2_study_setting.png")
 
 - 161 case cells across the seven states; Minnesota's cluster sits in the west-central part of the state.
 - Spillovers peak in weeks 13–18 (April–May) with a smaller wave in weeks 35–46 (September–November).
-- Anseriformes abundance leads the spring wave by roughly two to three weeks in both panels. That lead is the
-  lag structure the models keep finding.
+- Anseriformes abundance leads the spring wave by roughly two to three weeks. That lead is the lag structure the
+  models keep finding.
 
-## Figure 2. Cumulative rate ratios, both primary models
+## Figure 2. Cumulative rate ratios — Minnesota, 90-day shocks
 
 ```{r f2}
 fig("figure2_primary_forest.png")
 ```
 
-- **Waterfowl rises with lag in every panel and both parameterisations.** Minnesota, 90-day shock, lag 22–28 d:
-  2.42 (1.54, 3.78). Pooled: 1.47 (1.20, 1.80).
-- **Soil moisture shock is protective in the pooled panel** — 0.81 (0.70, 0.94) at 0–7 d, 0.88 (0.80, 0.96) at
-  8–14 d. Minnesota is the same direction but wider (0.84 (0.68, 1.03)), so this is a pooled result.
-- Wind speed shock at 0–7 d, pooled, newly excludes 1 (1.18 (1.03, 1.35)). It did not before the panel grew;
-  treat as provisional.
-- Temperature, precipitation and runoff are null as main effects in every panel. Runoff is in for consistency
-  with the interaction model, not for its estimate.
-- The other-flyway waterfowl estimate attenuated to 1.21 (0.98, 1.48) when the eight early-season cases
-  (8 Feb–11 Mar) were recovered by the 2021 warm-up: those cases precede the migration wave.
+- **Waterfowl rises with lag:** 1.25 (1.05, 1.48) at 8–14 d, 1.74 (1.37, 2.20) at 15–21 d, **2.42 (1.54, 3.78)
+  at 22–28 d**. P(dir) = 1.00 from 8–14 d on.
+- Every meteorological shock is null as a main effect in Minnesota. Soil moisture is the closest: 0.84
+  (0.68, 1.03) at 0–7 d, 0.88 (0.77, 1.01) at 8–14 d — same direction as the all-states result (Figure S2),
+  wider.
+- Temperature 1.32 (0.88, 1.99) at 0–7 d, precipitation 0.90 (0.73, 1.10), wind 1.05 (0.87, 1.27), runoff 1.06
+  (0.82, 1.37). Runoff is in for consistency with the interaction model, not for its estimate.
 
-## Figure 3. Waterfowl cumulative curves, both lag windows
+## Figure 3. Waterfowl lag–response — Minnesota, 90-day shock model
 
 ```{r f3}
-fig("figure4_bird_cumulative_curves.png")
+fig("figure3_bird_lag_response.png")
 ```
 
-- Top row (0–28 d model): Minnesota crosses 1 only from about lag 24 — 2.32 (1.21, 4.42) at 24, 4.12
-  (2.03, 8.37) at 28. Bottom row (0–56 d model): never crosses 1 from lag 7 onward (1.83 (1.39, 2.42)).
-- The two windows agree on **that** waterfowl matters and disagree on **when** it starts, which is why both are
-  shown rather than the tidier one.
-- Predatory birds are flat throughout: the signal is waterfowl-specific.
+- The **per-day** contribution of Anseriformes abundance, lag 0–28 d. It sits below 1 in the first week, crosses
+  1 around lag 5 and climbs steadily to about 1.13 per +0.5 SD by lag 28, with the interval clear of 1 from
+  roughly lag 8. The near-straight line is the ns(2) lag basis the primary model uses.
+- This replaces the cumulative-from-lag-0 curve. A cumulative curve's starting point depends on where the fitted
+  lag range starts, so the 0–28 and 0–56 d fits looked as if they disagreed about *when* the effect began; that
+  was an artefact of the summary, not a finding. Figure S4 shows the same curve for all panels and the 0–56 d fit.
+- Predatory birds sit on 1 throughout: the signal is waterfowl-specific.
 
-## Figure 4. Meteorology in the wake of waterfowl
+## Figure 4. Meteorology in the wake of waterfowl — Minnesota, 90-day shocks
 
-Three versions of the same estimates, so the choice can be made by eye. **Version 3 is the current
-reference** (`figure4_interaction.png`); the other two are the earlier cuts.
-
-### Version 3 — both windows plus the cumulative 0–14 d
-
-```{r f4v3}
+```{r f4}
 fig("figure4_interaction.png")
 ```
 
-### Version 2 — the two pre-stated windows, 0–7 and 8–14 d
-
-```{r f4v2}
-fig("figure4_interaction_v2_two_windows.png")
-```
-
-### Version 1 — the 8–14 d window alone
-
-```{r f4v1}
-fig("figure4_interaction_v1_8-14only.png")
-```
-
-- **Cumulative 0–14 d, pooled, 90-day shock: temperature 2.09 (1.17, 3.68) at high waterfowl vs 0.74
-  (0.42, 1.35) at low — ratio 2.77 (1.43, 5.45), P(dir) 0.999.** Other flyway states: ratio 7.95 (2.91, 22.43).
-  This is the summary that matches the hypothesis as stated ("the two weeks prior") and cannot be
-  window-picked.
-- Decomposed: nothing separates at 0–7 d (pooled temperature ratio 1.12 (0.70, 1.79)); the split is in
-  8–14 d (1.64 (1.12, 2.44) vs 0.66 (0.45, 0.98), ratio 2.48 (1.51, 3.99)).
-- Minnesota precipitation shock is protective at high waterfowl — 0.53 (0.32, 0.87) over 0–14 d — and null at
-  low (1.19).
-- Runoff in Minnesota points the same way (1.58 (0.88, 2.81) at high waterfowl over 0–14 d) but does not clear 1.
-- Under absolute conditions nothing clears 1 in any window: this is about *changes* in conditions, not levels.
-- This explains the null main effects. Averaged over cell-days with and without prior waterfowl, the weather
-  effect washes out.
+- Post hoc interaction: the meteorological shock over lag **0–14 d** (weeks 1–2), modified by Anseriformes
+  abundance over lag **15–28 d** (weeks 3–4), continuous, non-overlapping windows. Effects at +1 SD (high) and
+  −1 SD (low) of the modifier.
+- **Precipitation shock is protective only where waterfowl were abundant:** cumulative 0–14 d, 0.48 (0.29, 0.79)
+  at high waterfowl vs 1.33 (0.80, 2.15) at low; ratio 0.37 (0.16, 0.81), P(dir) 0.99. The split sits in the
+  8–14 d bin; nothing separates at 0–7 d.
+- **Runoff shock points the other way, suggestively:** 1.70 (0.97, 3.04) at high waterfowl vs 0.91 (0.52, 1.60);
+  ratio 1.86 (0.81, 4.42), P(dir) 0.93.
+- Soil moisture 0.68 (0.43, 1.07) at high vs 1.02 at low (P(dir) 0.90); temperature and wind do not separate.
+- In Minnesota the temperature interaction seen in the all-states panel (Figure S3) is absent — 1.29 (0.57, 2.89)
+  vs 1.56 (0.66, 3.68). The Minnesota story is water, not temperature.
 
 ## Table 1. Case-crossover sample
 
@@ -169,29 +154,67 @@ fig("figure1_consort_flowchart.png")
 - 176 eligible events → 175 case cell-days in 161 cells. The 2021 ERA5 warm-up removed the 90-day-baseline
   exclusion that previously cost eight cases.
 
+## Figure S2. Cumulative rate ratios — both parameterisations, all panels
+
+```{r fs2}
+fig("figureS2_primary_forest_all_panels.png")
+```
+
+- Waterfowl rises with lag in every panel and both parameterisations. All seven states, 90-day shock, lag
+  22–28 d: 1.47 (1.20, 1.80); other flyway states 1.21 (0.98, 1.48).
+- **Soil moisture shock is protective across all seven states** — 0.81 (0.70, 0.94) at 0–7 d, 0.88 (0.80, 0.96)
+  at 8–14 d — where Minnesota alone has the same direction with a wider interval.
+- Wind speed shock at 0–7 d, all states, 1.18 (1.03, 1.35). It did not exclude 1 before the panel grew; provisional.
+- The other-flyway waterfowl estimate attenuated when the eight early-season cases (8 Feb–11 Mar) were recovered
+  by the 2021 warm-up: those cases precede the migration wave.
+- Under absolute conditions the meteorological terms are null everywhere; waterfowl holds.
+
+## Figure S3. The interaction — both parameterisations, all panels
+
+```{r fs3}
+fig("figureS3_interaction_all_panels.png")
+```
+
+- **All seven states, 90-day shock, cumulative 0–14 d: a warm temperature shock raises spillover only where
+  waterfowl were abundant** — 2.36 (1.33, 4.19) at high vs 0.57 (0.31, 1.03) at low; ratio 4.12 (2.05, 8.23),
+  P(dir) 1.00. The other flyway states carry that result; Minnesota does not (Figure 4).
+- Minnesota's precipitation interaction does not replicate in the other states (1.00 vs 0.89 at 8–14 d).
+- Under absolute conditions nothing clears 1 in any panel or window: the interaction is about *changes* in
+  conditions, not levels.
+
+## Figure S4. Waterfowl lag–response — all panels, both lag ranges
+
+```{r fs4}
+fig("figureS4_bird_lag_response_all_panels.png")
+```
+
+- The per-day curve rises through lag 28 in every panel under the 0–28 d fit. The 0–56 d fit shows whether it
+  keeps rising: it does not turn over in Minnesota.
+- Predatory birds are flat in every panel.
+
 ## Table S1. Primary results, cumulative, lag-specific and P(direction)
 
 ```{r ts1}
 tbl("TableS1_primary_results", font_size = 9)
 ```
 
-- The numbers behind Figure 2, plus the per-day (lag-specific) contribution and P(dir) per window.
-- Waterfowl P(dir) = 1.00 from lag 8–14 d onward in every panel.
+- The numbers behind Figures 2 and S2 — both parameterisations, three panels, plus the per-day (lag-specific)
+  contribution and P(dir) per window. 90-day shock first, as the primary.
 
 ## Table S2. Referent design and negative control
 
 ```{r ts2}
-tbl("TableS2_referent_design", font_size = 10)
+tbl("TableS2_referent_design", font_size = 9)
 ```
 
-- The negative control (25-year normal temperature — cannot cause a 2022 outbreak) reads **2.99 (2.26, 3.95)**
-  under the unidirectional design the original submission used, 1.24 (1.08, 1.43) with two-month strata, and
-  1.13 (0.90, 1.42) under the selected one-month + 7-day design.
-- Temperature tracks it: 2.60 (1.79, 3.76) unidirectional → 1.13 (0.89, 1.44) selected. What looked like a
-  temperature effect was season.
-- Justifies the time-stratified design. A design check, not a headline.
+- The negative control (25-year normal temperature — cannot cause a 2022 outbreak) reads **2.82 (1.91, 4.15)**
+  in Minnesota under the unidirectional design of the original submission, and **0.86 (0.63, 1.17)** under the
+  selected one-month + 7-day design. All states: 2.99 → 1.13.
+- Temperature tracks it: Minnesota 90-day shock 2.31 (1.52, 3.50) unidirectional → 1.18 (0.89, 1.56) selected.
+  What looked like a temperature effect was season.
+- A design check that justifies the time-stratified design; not a headline.
 
-## Table S3. Lag structure
+## Table S3. Lag structure (Minnesota)
 
 ```{r ts3}
 tbl("TableS3_lag_structure", font_size = 10)
@@ -200,7 +223,7 @@ tbl("TableS3_lag_structure", font_size = 10)
 - ΔWAIC sits on the specification row. The selected 0–28 d, ns(2) basis is the reference; every exposure is shown
   at all four windows so nothing is picked.
 
-## Table S4. Prior on the crossbasis coefficients
+## Table S4. Prior on the crossbasis coefficients (Minnesota)
 
 ```{r ts4}
 tbl("TableS4_prior", font_size = 10)
@@ -209,14 +232,15 @@ tbl("TableS4_prior", font_size = 10)
 - The prior is chosen on the implied rate-ratio range for a +0.5 SD contrast, not on WAIC — WAIC always prefers
   a tighter prior because shrinkage reduces effective complexity.
 
-## Table S5. Spring versus outside spring
+## Table S5. Spring versus outside spring (Minnesota)
 
 ```{r ts5}
 tbl("TableS5_season_interaction", font_size = 10)
 ```
 
-- Waterfowl holds in both seasons; the meteorological terms do not separate by season. Residual seasonal
-  confounding is not what the primary results are made of.
+- Waterfowl holds in spring — 1.63 (1.23, 2.15) at 15–21 d, 2.24 (1.32, 3.80) at 22–28 d — and the
+  meteorological terms do not separate by season. Residual seasonal confounding is not what the primary results
+  are made of.
 
 ## Table S6. Leave-one-stratum-out cross-validation
 
@@ -227,7 +251,7 @@ tbl("TableS6_crossvalidation", font_size = 11)
 - Minnesota, absolute conditions: +3.7 log-likelihood over an even spread across the stratum's days; the 90-day
   shock is below chance (−13.0, z = −2.04). Other panels sit below chance for both.
 - Read as: these models identify associations; they do not predict *which day*. A doubling on one term moves
-  little probability across ~23 candidate days.
+  little probability across ~23 candidate days. Worth stating plainly given the shock is the primary.
 
 ## Table S7a. The interaction, by panel
 
@@ -235,9 +259,9 @@ tbl("TableS6_crossvalidation", font_size = 11)
 tbl("TableS7a_interaction", font_size = 9)
 ```
 
-- The numbers behind Figure 4, both windows, with P(dir).
-- One pre-stated specification: strata lag basis (independent 0–7 and 8–14 d bins), continuous modifier, primary
-  prior, posterior sampling. Post hoc; say so in one clause.
+- The numbers behind Figures 4 and S3, all three windows, with P(dir).
+- One pre-stated specification: strata lag basis (independent 0–7 and 8–14 d bins), continuous modifier over
+  lag 15–28 d, primary prior, posterior sampling. Post hoc; say so in one clause.
 
 ## Table S7b. The interaction under alternative specifications
 
@@ -245,8 +269,9 @@ tbl("TableS7a_interaction", font_size = 9)
 tbl("TableS7b_interaction_robust", font_size = 9)
 ```
 
-- The pooled temperature × waterfowl ratio at 8–14 d holds under all three lag bases and all three modifier
-  definitions. This table is what makes the post hoc disclosure a clause rather than a paragraph.
+- Minnesota's precipitation interaction and the all-states temperature interaction hold under all three lag
+  bases, all three modifier definitions, and all four bird windows (21–28, 15–28, 14–28, 8–28 d). This table is
+  what makes the post hoc disclosure a clause rather than a paragraph.
 
 # Build status
 
@@ -254,6 +279,6 @@ tbl("TableS7b_interaction_robust", font_size = 9)
 #| results: asis
 if (length(missing)) cat("**Missing exhibits** — re-knit the document that produces each:\n\n",
                          paste0("- `", missing, "`", collapse = "\n"), "\n") else
-  cat("**All exhibits present.** 4 main figures, 2 main tables, 1 supplement figure, 8 supplement tables.\n")
+  cat("**All exhibits present.** 4 main figures, 2 main tables, 4 supplement figures, 8 supplement tables.\n")
 cat("\nBuilt ", format(Sys.time(), "%Y-%m-%d %H:%M"), ".\n", sep = "")
 ```

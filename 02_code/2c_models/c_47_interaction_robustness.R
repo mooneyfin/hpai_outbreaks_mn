@@ -1,5 +1,5 @@
 ############ IS THE BIRD x METEOROLOGY INTERACTION REAL? TWO CHECKS ############
-# c_46 found the meteorological effect only appears where waterfowl were abundant three weeks
+# c_46/c_50 found the meteorological effect only appears where waterfowl were abundant two to four weeks
 # earlier. Before anyone believes it, two things have to be ruled out.
 #
 # CHECK A - THE LAG BASIS MIGHT BE MANUFACTURING IT.
@@ -23,9 +23,9 @@ suppressMessages({library(INLA); library(Matrix)})
 INLA::inla.setOption(num.threads = 4)
 source(paste0(functions.folder, 'inla_dlnm_helpers.R'))
 
-PREC <- 4; MAXLAG <- 14
+PREC <- INLA_PREC_PRIMARY; MAXLAG <- 14   # same prior as the primary
 WINDOW <- list(`0-7 days` = 0:7, `8-14 days` = 8:14)
-BIRDLAG <- 21:28
+BIRDLAG <- 15:28   # the primary modifier window (c_50)
 # exposures come from INLA_PRIMARY_* in inla_dlnm_helpers.R - never redefined locally
 VARS <- INLA_PRIMARY_MET
 LAB  <- INLA_PRIMARY_LAB

@@ -14,14 +14,15 @@ src <- readLines(paste0(project.folder, 'create_folder_structure.R'))
 eval(parse(text = paste(src[!grepl("^\\s*rm\\(list", src)], collapse = "\n")))
 source(paste0(functions.folder, 'script_initiate.R'))
 suppressMessages({library(viridisLite); library(patchwork)})
+source(paste0(functions.folder, 'inla_dlnm_helpers.R'))   # exposure set and panel labels
 
-PANEL_ORD <- c("Minnesota", "Other flyway states", "Pooled")
-FITKEY    <- c(Minnesota = "Minnesota", `Other flyway states` = "Other flyway", Pooled = "Pooled")
+PANEL_ORD <- INLA_PANEL_ORD
+FITKEY    <- setNames(c("Minnesota", "Other flyway", "Pooled"), INLA_PANEL_ORD)
 # exposures come from INLA_PRIMARY_* in inla_dlnm_helpers.R - never redefined locally
-source(paste0(functions.folder, "inla_dlnm_helpers.R"))
 EXPO_ORD  <- unname(INLA_PRIMARY_LAB[c(INLA_PRIMARY_MET, INLA_BIRD_VAR)])
 MODELS    <- c(level = "a. Absolute conditions",
                shock = "b. 90-day shocks (departure from the preceding 90 days)")
+# the single-panel main figure gets a plain title in place of the panel legend
 OK  <- setNames(viridisLite::viridis(3, begin = 0.05, end = 0.78), PANEL_ORD)
 SHP <- setNames(c(16, 17, 15), PANEL_ORD)
 lab_num <- scales::label_number(drop0trailing = TRUE)
@@ -77,7 +78,9 @@ one_panel <- function(mk, keep_xlab) {
     scale_x_continuous(trans = "log", breaks = c(0.5, 1, 2, 3), labels = lab_num) +
     coord_cartesian(xlim = c(0.5, 4.2)) +
     labs(x = if (keep_xlab) "Rate ratio per +0.5 standard deviation increase in exposure" else NULL,
-         y = NULL, colour = MODELS[[mk]], shape = MODELS[[mk]]) +
+         y = NULL,
+         colour = if (uniqueN(dat$panel) == 1) "Minnesota, 90-day shocks" else MODELS[[mk]],
+         shape  = if (uniqueN(dat$panel) == 1) "Minnesota, 90-day shocks" else MODELS[[mk]]) +
     guides(colour = guide_legend(title.position = "left"),
            shape  = guide_legend(title.position = "left")) +
     theme_classic(base_family = "Avenir") +
@@ -92,13 +95,16 @@ one_panel <- function(mk, keep_xlab) {
           panel.border = element_rect(fill = NA, colour = "grey20", linewidth = 0.4))
 }
 
-fig <- one_panel("level", FALSE) / one_panel("shock", TRUE) +
-  plot_layout(heights = c(1, 1))
-ggsave_spark(file.path(figures_main_folder, "figure2_primary_forest.png"),
-             fig, width = 13, height = 9)
-saveRDS(dat, paste0(objects_folder, "figure2_primary_forest.RDS"))
-# csv as well, so the python style experiment in 2b_data_exploration has a real source to read
-fwrite(dat, paste0(objects_folder, "figure2_primary_forest.csv"))
-cat("wrote figure2_primary_forest.png\n")
-print(dcast(dat[variable == "Anseriformes"], model + panel ~ window,
-            value.var = "RR"))
+# Figure 2 (main text): Minnesota, 90-day shock - the primary model on its own.
+# Figure S2: the full grid, both parameterisations, all three panels, for the supplement.
+dat_all <- copy(dat)
+dat <- dat_all[panel == "Minnesota" & model == MODELS[["shock"]]]
+f2 <- one_panel("shock", TRUE)
+ggsave_spark(file.path(figures_main_folder, "figure2_primary_forest.png"), f2, width = 13, height = 4.6)
+dat <- dat_all
+fS2 <- one_panel("level", FALSE) / one_panel("shock", TRUE) + plot_layout(heights = c(1, 1))
+ggsave_spark(file.path(figures_main_folder, "figureS2_primary_forest_all_panels.png"), fS2, width = 13, height = 9)
+saveRDS(dat_all, paste0(objects_folder, "figure2_primary_forest.RDS"))
+fwrite(dat_all, paste0(objects_folder, "figure2_primary_forest.csv"))
+cat("wrote figure2_primary_forest.png (Minnesota, shock) and figureS2_primary_forest_all_panels.png\n")
+print(dcast(dat_all[variable == "Anseriformes"], model + panel ~ window, value.var = "RR"))

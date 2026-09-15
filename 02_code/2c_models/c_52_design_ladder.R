@@ -65,14 +65,18 @@ fit_design <- function(d, vars, mn) {
   as.list(setNames(vals, lab))
 }
 
-out <- rbindlist(lapply(names(DESIGNS), function(dn) {
-  d <- if (is.na(DESIGNS[[dn]])) D else attach_shocks(DESIGNS[[dn]])
+# Minnesota is the primary population, so the ladder is fitted on it and on all seven states.
+# The alternative-design panels are attached once and filtered per panel.
+PANELS <- c("Minnesota", "Pooled")
+PAN <- lapply(DESIGNS, function(f) if (is.na(f)) D else attach_shocks(f))
+out <- rbindlist(lapply(PANELS, function(pn) rbindlist(lapply(names(DESIGNS), function(dn) {
+  d <- PAN[[dn]]; if (pn == "Minnesota") d <- d[state == "Minnesota"]
   refs <- sprintf("%.1f", sum(d$outbreak_binary == 0) / sum(d$outbreak_binary))
-  cat(sprintf("%-42s cases %3d | %s refs/case\n", dn, sum(d$outbreak_binary), refs)); flush.console()
+  cat(sprintf("%-10s %-42s cases %3d | %s refs/case\n", pn, dn, sum(d$outbreak_binary), refs)); flush.console()
   rbindlist(lapply(names(MODELS), function(mn)
-    cbind(data.table(Model = mn, Design = dn, Cases = sum(d$outbreak_binary),
+    cbind(data.table(Panel = pn, Model = mn, Design = dn, Cases = sum(d$outbreak_binary),
                      `Referents per case` = refs),
           as.data.table(fit_design(d, MODELS[[mn]], mn)))))
-}), fill = TRUE)
+}), fill = TRUE)), fill = TRUE)
 saveRDS(out, paste0(objects_folder, "si_design_ladder.RDS"))
 cat("\nwrote si_design_ladder.RDS |", nrow(out), "rows\n"); print(out[, 1:5])

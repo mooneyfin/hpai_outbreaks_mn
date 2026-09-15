@@ -65,12 +65,15 @@ cat(sprintf("unidirectional panel after attaching shocks: %d cases, %d strata, %
             sum(uni$outbreak_binary), uniqueN(uni$stratum_id),
             sum(uni$outbreak_binary == 0) / sum(uni$outbreak_binary)))
 
-uni_row <- rbindlist(lapply(names(MODELS), function(mn) {
-  r <- fit_it(uni, MODELS[[mn]])
+# Minnesota is the primary population; every S-table row is fitted on it and on all states
+PANELS <- c("Minnesota", "Pooled")
+panel_of <- function(d, pn) if (pn == "Minnesota") d[state == "Minnesota"] else d
+uni_row <- rbindlist(lapply(PANELS, function(pn) rbindlist(lapply(names(MODELS), function(mn) {
+  r <- fit_it(panel_of(uni, pn), MODELS[[mn]])
   rbindlist(lapply(r$mv, function(v)
-    cbind(data.table(Model = mn, Design = "Unidirectional, -7 to -28 d",
+    cbind(data.table(Panel = pn, Model = mn, Design = "Unidirectional, -7 to -28 d",
                      Exposure = unname(LAB[sub("_shock$", "", v)])), as.data.table(win_row(r, v)))))
-}))
+}))))
 saveRDS(uni_row, paste0(objects_folder, "si_unidirectional_row.RDS"))
 
 # ---- 2. S7 season interaction, S1 layout ----
@@ -83,15 +86,15 @@ cat(sprintf("spring strata %d, outside %d\n",
             uniqueN(D[spring_stratum == TRUE]$stratum_id),
             uniqueN(D[spring_stratum == FALSE]$stratum_id)))
 
-s7 <- rbindlist(lapply(names(MODELS), function(mn)
+s7 <- rbindlist(lapply(PANELS, function(pn) rbindlist(lapply(names(MODELS), function(mn)
   rbindlist(lapply(c(Spring = TRUE, `Outside spring` = FALSE), function(sp) {
-    d <- D[spring_stratum == sp]
+    d <- panel_of(D, pn)[spring_stratum == sp]
     r <- fit_it(d, MODELS[[mn]])
     rbindlist(lapply(r$mv, function(v)
-      cbind(data.table(Model = mn, Season = if (sp) "Spring" else "Outside spring",
+      cbind(data.table(Panel = pn, Model = mn, Season = if (sp) "Spring" else "Outside spring",
                        Exposure = unname(LAB[sub("_shock$", "", v)]),
                        Cases = sum(d$outbreak_binary)), as.data.table(win_row(r, v)))))
-  }), idcol = NULL)))
+  }), idcol = NULL)))))
 saveRDS(s7, paste0(objects_folder, "si_season_s1layout.RDS"))
 cat("\n=== S7 (spring vs outside), 90-day anomaly, key terms ===\n")
 print(s7[Model == "90-day shock" & Exposure %in% c("Soil moisture", "Anseriformes")])

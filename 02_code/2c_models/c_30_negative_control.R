@@ -40,9 +40,13 @@ DESIGNS <- list(
   `Time-stratified, two-month strata`            = "case_crossover_df_timestrat_bimonth_nowo.RDS",
   `Time-stratified, one-month + 7-day post exclusion`   = "case_crossover_df_timestrat_month_post7.RDS")
 
-one <- function(f, lab) {
+# Minnesota is the primary population, so the negative control is run on it as well as on all
+# seven states. The panel is applied before z-scoring so the contrast is panel-specific.
+PANELS <- c("Minnesota", "Pooled")
+one <- function(f, lab, panel) {
   d <- setDT(readRDS(paste0(objects_folder, f)))
   if (anyDuplicated(names(d))) d <- d[, which(!duplicated(names(d))), with = FALSE]
+  if (panel == "Minnesota") d <- d[state == "Minnesota"]
   d[, date := as.Date(date)]
   d[, week_idx := pmin(as.integer(strftime(date, "%j")) %/% 7L, 51L)]
   d <- merge(d, clim, by = c("zone_id", "week_idx"), all.x = TRUE)
@@ -58,7 +62,7 @@ one <- function(f, lab) {
   fit <- clogit(outbreak_binary ~ nc_z + strata(stratum_id), data = d)
   b <- coef(fit)[["nc_z"]]; se <- sqrt(diag(vcov(fit)))[["nc_z"]]
   # reported per +0.5 SD, matching every other contrast in the paper
-  data.table(Design = lab,
+  data.table(Panel = panel, Design = lab,
              Cases = sum(d$outbreak_binary),
              `Referents per case` = sprintf("%.1f", sum(d$outbreak_binary == 0) / sum(d$outbreak_binary)),
              `Stratum span (days)` = sprintf("%.1f", span),
@@ -68,12 +72,12 @@ one <- function(f, lab) {
              p = sprintf("%.3g", 2 * pnorm(-abs(b / se))))
 }
 
-out <- rbindlist(lapply(names(DESIGNS), function(nm) {
-  r <- one(DESIGNS[[nm]], nm)
-  cat(sprintf("  %-44s n=%3d  span %5s d  NC %s\n", nm, r$Cases,
+out <- rbindlist(lapply(PANELS, function(pn) rbindlist(lapply(names(DESIGNS), function(nm) {
+  r <- one(DESIGNS[[nm]], nm, pn)
+  cat(sprintf("  %-10s %-44s n=%3d  span %5s d  NC %s\n", pn, nm, r$Cases,
               r$`Stratum span (days)`, r$`Negative control RR`))
   r
-}))
+}))))
 
 saveRDS(out, paste0(objects_folder, "si_negative_control.RDS"))
 cat("\n=== negative control: 25-year climatological normal temperature, per +0.5 SD ===\n")

@@ -15,7 +15,9 @@
 #                drags the other; that is not a shape we want imposed on a windowed hypothesis.
 #   modifier     continuous, not dichotomised. A median or tertile split discards information
 #                and invents a cut point. The continuous product term is the actual interaction.
-#   bird window  lag 21-28 d, pre-stated ("three weeks before").
+#   bird window  lag 15-28 d (weeks 3-4), weather lag 0-14 d (weeks 1-2): the two windows do
+#                not overlap, so a day's weather is never also part of the bird term that
+#                modifies it. 21-28, 14-28 and 8-28 d are reported as sensitivities (Table S7b).
 #   met windows  0-7 d and 8-14 d, pre-stated ("the two weeks prior").
 #   prior        INLA_PREC_PRIMARY, the same prior as the paper's primary model. The exploratory
 #                scripts used prec = 4, which was an inconsistency, not a decision.
@@ -40,7 +42,7 @@ MAXLAG  <- 14
 # coefficients, so 0-14 is just w_a + w_b read off the same posterior - the interval comes from
 # the joint draws, which is why it is computed here rather than multiplied by hand
 WINDOW  <- list(`0-7 days` = 0:7, `8-14 days` = 8:14, `0-14 days` = 0:14)
-BIRDLAG <- 21:28
+BIRDLAG <- 15:28
 ARGLAG  <- list(fun = "strata", breaks = 8)
 # exposures come from INLA_PRIMARY_* in inla_dlnm_helpers.R - never redefined locally
 VARS    <- INLA_PRIMARY_MET
@@ -83,6 +85,7 @@ fit_panel <- function(d, panel, kind) {
   fit <- suppressWarnings(fit_cc_inla_dlnm(obj, fixed_prec = PREC))
 
   # draw the joint posterior once per panel and reuse it for every contrast
+  set.seed(20220101)   # seeded so reruns reproduce the reported digits
   samp <- INLA::inla.posterior.sample(NSAMP, fit, selection = list(), verbose = FALSE)
   nm_all <- rownames(samp[[1]]$latent)
   getdraws <- function(cols) {
