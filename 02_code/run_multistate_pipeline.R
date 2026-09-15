@@ -1,5 +1,5 @@
 # Run the full multi-state analysis end to end: data prep (a_04 -> a_01 -> a_02 -> a_03)
-# then the gridded case-crossover models (c_05). Each Rmd is executed in its OWN Rscript
+# (a_06/a_07 build the referent panels from there). Each Rmd is executed in its OWN Rscript
 # subprocess, because each script begins with rm(list = ls()) — sourcing them in a single
 # session would wipe this runner's own loop state. Run from the project root:
 #   Rscript 02_code/run_multistate_pipeline.R
@@ -8,9 +8,7 @@ files <- c(
   "02_code/2a_data_prep/a_04_zone_bird_abundance_multistate.Rmd",
   "02_code/2a_data_prep/a_01_join_data_multistate.Rmd",
   "02_code/2a_data_prep/a_02_create_timeseries_df_multistate.Rmd",
-  "02_code/2a_data_prep/a_03_create_casecrossover_df_multistate.Rmd",
-  "02_code/2c_models/c_05_casecrossover_multistate_daily.Rmd",
-  "02_code/2c_models/c_06_casecrossover_multistate_weekly.Rmd"
+  "02_code/2a_data_prep/a_03_create_casecrossover_df_multistate.Rmd"
 )
 
 run_one <- function(f) {

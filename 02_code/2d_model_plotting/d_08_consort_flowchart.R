@@ -173,3 +173,12 @@ ggsave(file.path(figures_main_folder, "figure1_consort_flowchart.pdf"),
 cat(sprintf("%d events -> minus %d flagged -> %d eligible -> MN %d / other %d cases\n",
             n_raw_events, n_flagged, n_elig_events, C("mn", "cases"), C("other", "cases")))
 cat("wrote figure1_consort_flowchart.png/.pdf\n")
+
+# 5. The case-cell lookup the map (d_02) draws from. It used to be a hand-made file with no
+#    producer; it is exactly the eligible case cells, so it is written here from the same panel
+#    the flowchart counts. 161 rows: zone_id, state, layer.
+el <- setDT(readRDS(paste0(objects_folder, "case_crossover_df_timestrat_month_post7.RDS")))
+if (anyDuplicated(names(el))) el <- el[, which(!duplicated(names(el))), with = FALSE]
+ml <- unique(el[outbreak_binary == 1, .(zone_id, state)])[, layer := "case"]
+fwrite(ml, paste0(objects_folder, "map_layers_flyway.csv"))
+cat(sprintf("wrote map_layers_flyway.csv (%d case cells)\n", nrow(ml)))

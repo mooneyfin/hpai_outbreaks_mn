@@ -20,6 +20,16 @@ INLA_PRIMARY_LAB   <- c(temperature = "Temperature", precipitation = "Precipitat
 INLA_PRIMARY_LAB   <- c(INLA_PRIMARY_LAB,
                         setNames(unname(INLA_PRIMARY_LAB[INLA_PRIMARY_MET]), INLA_PRIMARY_SHOCK))
 
+# Panel display names. The model objects key panels as Minnesota / Other flyway / Pooled; the
+# paper says "All northern Mississippi Flyway states" for the third, because it is ONE model fit
+# on all 175 strata, not a pooling of estimates. Map on the way out, never rename the keys.
+INLA_PANEL_LAB <- c(Minnesota = "Minnesota",
+                    `Other flyway` = "Other northern Mississippi Flyway states",
+                    `Other flyway states` = "Other northern Mississippi Flyway states",
+                    Pooled = "All northern Mississippi Flyway states")
+norm_panel <- function(x) { y <- unname(INLA_PANEL_LAB[x]); ifelse(is.na(y), x, y) }
+INLA_PANEL_ORD <- unname(INLA_PANEL_LAB[c("Minnesota", "Other flyway", "Pooled")])
+
 # the wider pool a_0x builds; not the modelling set
 INLA_MET_VARS    <- c("runoff", "soil_moisture", "temperature",
                       "precipitation", "wind_speed", "snow_cover")

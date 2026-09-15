@@ -3,13 +3,15 @@ F. M. Mooney, R. Kowalski, C. Gennings, J. L. Warren, K. A. Lehman, N. DeFelice,
 
 ## Project description
 
-Daily case-crossover analysis of HPAI H5N1 spillover into Minnesota poultry premises in 2022, fitted as a **Bayesian distributed lag model in INLA**. The likelihood is a conditional Poisson with a free intercept per matched set, which reproduces conditional logistic regression while allowing penalised smooths and informative priors.
+Daily case-crossover analysis of HPAI H5N1 spillover into poultry premises across the northern Mississippi Flyway in 2022, fitted as a **Bayesian distributed lag model in INLA**. The likelihood is a conditional Poisson with a free intercept per matched set, which reproduces conditional logistic regression while allowing penalised smooths and informative priors.
 
-The unit of analysis is a **cell-day** on a 10 km grid. For each spillover event the case is that cell on the confirmed outbreak date, and referents are the same cell on days −28 to −14 and +14 to +28. Because each cell is its own control, all time-invariant characteristics — poultry density, land cover, terrain, biosecurity — are conditioned out. The **symmetric bidirectional referent window** is a deliberate change from the previous time-stratified design: with referents on both sides of the case a linear seasonal trend cancels exactly, whereas a one-sided design confounds seasonal drift with exposure.
+The unit of analysis is a **cell-day** on a 10 km grid. For each spillover event the case is that cell on the confirmed detection date; referents are the other days of the same calendar month in the same cell, excluding the seven days after detection (**time-stratified, one-month strata, 7-day post-event exclusion**; about 23 referent cell-days per case). Because each cell is its own control, everything time-invariant about a cell — poultry density, land cover, terrain, biosecurity — is conditioned out. The referent design is checked with a negative-control exposure (the 25-year climatological normal temperature, which cannot cause a 2022 outbreak): it returns 2.99 under the unidirectional design of the original submission and 1.13 under this one (Table S2).
 
-Exposures enter over a 0–28 day lag window on a natural spline lag basis with `N(0, 0.25²)` priors. Meteorological terms are linear on the exposure scale except temperature, modelled as a threshold at 10 °C; weekly waterfowl abundance enters as a random-walk smooth over weekly lag knots and is additionally fitted alone over 0–56 days, since migration operates on a longer timescale than weather.
+**Six exposures enter every model**: temperature, precipitation, soil moisture, wind speed, runoff and Anseriformes abundance, over a 0–28 day lag. Meteorological terms take a natural-spline exposure–response (2 df) and Anseriformes is linear; the lag basis is a natural spline (2 df); crossbasis coefficients carry `N(0, 0.25²)` priors. Two parameterisations are reported side by side throughout — **absolute conditions** and the **90-day shock** (mean of the last 7 days minus the mean of the preceding 90). The exposure set is defined once, in `02_code/20_functions/inla_dlnm_helpers.R` (`INLA_PRIMARY_*`), and read from there by every model.
 
-Analyses run on a common Mississippi Flyway grid covering **seven states with exposure data** — Minnesota, Wisconsin, Iowa, Michigan, Indiana, Illinois and Ohio. Minnesota is the primary population (n = 85 events in 73 cells); the remaining flyway states (n = 90) and the pooled population (n = 175) provide external context. Minnesota and the flyway therefore share one grid, one bird aggregation, and one runoff definition.
+Panel: **175 spillover cases in 161 cells** — Minnesota 85 in 73 (the primary population), the other six flyway states 90, and the two pooled. ERA5-Land runs from 1 August 2021 so every 2022 case has a full 90-day baseline.
+
+The main finding is a rising waterfowl effect at lag 21–28 days, and — in a post hoc interaction analysis (`c_50`, Figure 4, Tables S7a–b) — a meteorological effect at lag 8–14 days that appears only in the wake of high waterfowl abundance.
 
 > **Known gap.** The grid geometry (`fishnet_8state.geojson`) spans eight states, including South Dakota, because the covering grid was generated over an eight-state area of interest. No ERA5-Land export was ever produced for South Dakota, so it carries no exposure data and never enters the analysis panel. South Dakota recorded HPAI events in 2022, so the flyway comparison omits a state with events for want of exposure data rather than by design. Closing this would mean re-running `a_00_era5_land_gee_multistate.js` for South Dakota and rebuilding the panel; the Minnesota primary analysis is unaffected.
 
@@ -17,79 +19,68 @@ Analyses run on a common Mississippi Flyway grid covering **seven states with ex
 
 ## Reproducing the analysis
 
+R packages are pinned with `renv`; the Python side (map, land-cover extraction) uses the conda environment in `environment.yml` (`conda env create -f environment.yml`). Every script sources `create_folder_structure.R` and `02_code/20_functions/script_initiate.R`.
+
 ```
-create_folder_structure.R                    # folders
-02_code/2a_data_prep/a_0*_*_multistate.*     # build the 8-state daily panel
-02_code/2a_data_prep/a_06_build_symmetric_panels.R   # case-crossover panels
-02_code/2c_models/c_11_casecrossover_inla_dlnm.Rmd   # primary fit + SI tables S2, S3, S5
-02_code/2c_models/c_13_si_extra.Rmd                  # SI tables S4, S7
-02_code/2c_models/c_14_crossvalidation.Rmd           # held-out-stratum cross-validation
-02_code/2d_model_plotting/d_0[05678]_*               # tables and figures
+02_code/run_multistate_pipeline.R                   # a_04 -> a_01 -> a_02 -> a_03: the daily panel
+02_code/2a_data_prep/a_06_build_symmetric_panels.R   # referent designs
+02_code/2a_data_prep/a_07_build_shock_panel.R        # 90-day shocks; the analysis panel
+02_code/2c_models/c_17_primary_shock_models.R        # primary fits, both parameterisations, three panels
+02_code/2c_models/c_{30,33,36,37,47,50,52}_*.R       # sensitivities and the interaction
+02_code/2d_model_plotting/d_{13,02,15,08,17,23,24}_* # figures   (d_02 is Python)
+02_code/2d_model_plotting/d_{18,20}_*.Rmd            # tables -> 04_tables/main/*.docx + table_specs/
+quarto render 02_code/2d_model_plotting/d_22_manuscript_brief.qmd   # every exhibit, inline, with a read of each
 ```
 
-Large intermediates (raw GEE exports, panels, processed rasters) are **not versioned** — see `.gitignore`. Every one is rebuilt by the numbered scripts above from the raw inputs.
+Large intermediates (raw GEE exports, panels, fitted models, `03_output/**/*.RDS`) are **not versioned** — see `.gitignore`. Every one is rebuilt by the numbered scripts above from the raw inputs.
 
 ## 1. Data
 
-1a_exposure_data: daily ERA5-Land meteorological variables for Minnesota (Nov 15 2021 – Dec 31 2022) extracted via Google Earth Engine; weekly 1997–2021 ERA5-Land for climate-anomaly baselines; weekly eBird Status & Trends abundance estimates at outbreak farms and feedlots.
+1a_exposure_data: daily ERA5-Land meteorological variables for the seven flyway states (1 August 2021 – 31 December 2022) extracted via Google Earth Engine; weekly 1997–2021 ERA5-Land climatology for the same grid (used descriptively in Table 2); weekly eBird Status & Trends abundance estimates aggregated to grid cells.
 
-1b_outcome_data: HPAI spillover events for Minnesota in 2022 (confidential — request from USDA APHIS).
+1b_outcome_data: HPAI spillover events, 2022 (confidential — request from USDA APHIS).
 
-1c_supportive_datasets: 10 km fishnet grid geometry, Minnesota feedlot point shapefile (MPCA), NLCD land-cover classification.
+1c_supportive_datasets: 10 km fishnet grid geometry, Minnesota feedlot point shapefile (MPCA).
 
 ## 2. Code
 
 ### 2a. Data prep
 
-a_00_era5_land_gee_multistate.js: Google Earth Engine script to extract daily zone-level ERA5-Land for Nov 15 2021 – Dec 31 2022 across the 8-state Mississippi Flyway grid (10 km fishnet, EPSG:5070). Produces the daily panel used by all current models.
+a_00_era5_land_gee_multistate.js: Google Earth Engine script extracting daily zone-level ERA5-Land across the 8-state flyway grid (10 km fishnet, EPSG:5070).
 
-a_00_era5_land_gee_mn8_climatology.js: GEE script for the Minnesota subset of the same grid – weekly 1997–2021 and 2012–2021 climatologies plus the 2022 weekly panel, i.e. the denominator and numerator of the climate-anomaly z-scores.
+a_00_era5_land_gee_mn8_climatology.js: GEE script for the weekly 1997–2021 climatology on the same grid.
 
-Superseded (removed, recoverable from git history at commit 1921f09): a_00_era5_land_gee.js and a_00_era5_land_rgee.R, the original 13-band Minnesota-only extraction on the legacy 3,334-cell fishnet. Replaced because they lacked snow_cover and defined runoff as surface + sub-surface, which did not match the flyway panel.
+a_04_zone_bird_abundance_multistate.Rmd → a_01_join_data_multistate.Rmd → a_02_create_timeseries_df_multistate.Rmd → a_03_create_casecrossover_df_multistate.Rmd: eBird aggregation, the daily zone × date panel, event independence screening, and the case-crossover scaffold. Driven in order by `run_multistate_pipeline.R`.
 
-a_01_join_data.Rmd: joins spillover events, daily ERA5-Land, linearly-interpolated daily eBird, feedlots, and NLCD land cover into the daily zone × date panel.
+a_06_build_symmetric_panels.R: the referent designs compared in Table S2 (symmetric bidirectional, two-month strata, one-month strata with and without post-event exclusion).
 
-a_02_create_timeseries_df.Rmd: pairwise event distance × day-gap flagging at 200 m / 500 m / 1 km × 28 d; writes daily panel + sample-size cascade.
-
-a_03_create_casecrossover_df.Rmd: builds the time-stratified case-crossover dataframe (zone × year × month × day-of-week), attaches lag 0–28 d exposures, exports spatial and lag-window sensitivity variants.
-
-a_04_feedlot_bird_abundance.Rmd: feedlot-level eBird species abundance extraction (Rishi Kowalski).
-
-a_05_independent_case_confirmation.R: case independence checks against raw farm-level outbreak data.
+a_07_build_shock_panel.R: 90-day baselines and shocks; writes the analysis panel `case_crossover_df_shock_post7.RDS`.
 
 ### 2b. Data exploration
 
-b_00_climate_anomaly_setup.Rmd: 10/15/20/25-year weekly climatology baselines and z-scores for the climate-anomaly sensitivity model.
+Sensitivities kept runnable but not reported in the supplement: c_19 (weekly exposure resolution), c_34 (post-event exclusion length), and the interaction exploration that preceded the pre-stated `c_50` (c_46 median split, c_48 runoff, c_49 temperature thresholds). `e_02_forest_paperfigure_style.py` with `paper_plot_style.py` is a deliberate style comparison for Figure 2.
 
-b_01_ebird_mixture_analysis.Rmd: eBird species mixture analysis via weighted quantile sum (WQS) regression.
+### 2c. Models
 
-b_02_casecrossover_validation.Rmd: leave-one-case-out cross-validation.
+c_17_primary_shock_models.R: the primary fits — absolute conditions and 90-day shock, Minnesota / other flyway / pooled (Figure 2, Table S1).
 
-b_03_climate_anomaly_tests.Rmd, b_04_relative_humidity_tests.Rmd, b_05_season_model_tests.Rmd: exploratory model variants.
+c_30_negative_control.R, c_33_s2_s7_inputs.R, c_52_design_ladder.R: referent design ladder with the negative control (Table S2) and the season interaction (Table S5).
 
-### 2c. Models (main analyses)
+c_36_specification_full.R: lag structure and prior sensitivities, all panels (Tables S3, S4).
 
-c_00_casecrossover_daily.Rmd: daily DLNM case-crossover, lag 0–28 d, conditional logistic regression on zone-day strata.
+c_37_loo_primary.R: leave-one-stratum-out cross-validation (Table S6).
 
-c_01_casecrossover_weekly.Rmd: weekly DLNM case-crossover (primary analysis), lag 0–4 weeks, conditional logistic regression on 1:4 unidirectional case-control strata.
-
-c_02_survival_cox_ag_weekly.Rmd: Andersen–Gill recurrent-event Cox survival model at weekly resolution.
-
-### 2b. Sensitivity analyses (in `02_code/2b_data_exploration/sensitivity_analyses/`)
-
-Numbered s_NN_*.Rmd scripts covering: lag-window robustness, bird order, LASSO selection, spatial restriction, climate anomalies, crossbasis sweep, daily Cox AG, univariate screen, log-knot lag basis, migration season, Bayesian inference, multi-window timing/power, profile-likelihood bootstrap, control-window variants, daily-vs-weekly comparison, new ERA5-variable swap, poultry-density × runoff interaction (daily and weekly), spring-strata subset.
+c_50_interaction_primary.R: meteorological effect modified by Anseriformes abundance at lag 21–28 d — one pre-stated specification (strata lag basis, continuous modifier, primary prior, posterior sampling). Figure 4, Table S7a. c_47_interaction_robustness.R: the same under alternative lag bases and modifier definitions (Table S7b).
 
 ### 2d. Model plotting
 
-d_00_table_1.Rmd: descriptive Table 1.
+d_13 → d_02 (Python) → d_15: epidemic curve, case-cell map, and their composite (Figure 1). d_08: sample cascade (Figure S1); also writes the case-cell lookup the map draws from. d_23: Figure 2. d_17: Figure 3. d_24: Figure 4 (three versions). d_18 and d_20: main and supplement tables, each written to Word and to a display spec that d_22 renders from, so the two cannot drift. d_22_manuscript_brief.qmd: every exhibit in submission order with a short read of each.
 
-d_01_map_casecrossover_df.Rmd: case and control zone maps.
+`02_code/20_functions/table_helpers.R` is the shared HTML/Word table renderer; `inla_dlnm_helpers.R` holds the model helpers and the canonical exposure set.
 
-d_02_case_zone_map.ipynb: case zone publication map (Python).
+### Archive
 
-d_03_negative_zone_map.R: negative control zone map.
-
-d_04_consort_flowchart.R: CONSORT-style sample-size cascade.
+`02_code/Archive/` holds, by original folder, everything superseded during the revision: the Minnesota-only prep lineage, the unidirectional and symmetric-referent models (c_00–c_16), the climatological-anomaly and time-series threads (c_22, c_38–c_45), and the exploratory notebooks. Kept for provenance; nothing in the manuscript depends on them.
 
 ### 20. Functions
 
