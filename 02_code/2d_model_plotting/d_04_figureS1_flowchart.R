@@ -86,7 +86,7 @@ RX1 <- 0.53; RX2 <- 0.98; RXM <- (RX1 + RX2) / 2           # right branch
 HB  <- 0.093
 
 trunk <- data.table(
-  x = TXM, xmin = TX1, xmax = TX2, y = c(0.950, 0.805, 0.655, 0.070), h = HB,
+  x = TXM, xmin = TX1, xmax = TX2, y = c(0.950, 0.805, 0.655, 0.110), h = HB,
   label = c(
     sprintf("Daily 10 km grid, %d northern Mississippi Flyway states\n%s to %s\n%s grid cells, %s cell-days",
             n_states, date_from, date_to, fmt(n_gridcells), fmt(n_celldays)),
@@ -101,7 +101,7 @@ branch <- data.table(
   x    = c(LXM, RXM, LXM, RXM),
   xmin = c(LX1, RX1, LX1, RX1),
   xmax = c(LX2, RX2, LX2, RX2),
-  y    = c(0.455, 0.455, 0.240, 0.240), h = HB,
+  y    = c(0.455, 0.455, 0.290, 0.290), h = HB,
   label = c(
     sprintf("Minnesota\n%d events → %d case cell-days in %d cells",
             E("mn", "events"), P("mn", "cases"), P("mn", "cells")),
@@ -115,31 +115,28 @@ branch <- data.table(
 
 # 2b. Exclusion boxes, hanging right off the trunk / branches
 # the trunk exclusion has to stay inside x = 1 or ggplot drops the rectangle and leaves the text floating
+# only one exclusion box now: since the 2021 ERA5 warm-up nobody loses their 90-day baseline, and a
+# "− 0 cases" box is noise. the guard below keeps that honest if the panel ever changes
+stopifnot(lost("mn") == 0, lost("other") == 0)
 EX1 <- TX2 + 0.02; EX2 <- 0.99
 excl <- data.table(
-  x = c((EX1 + EX2) / 2, LXM + 0.135, RXM + 0.135), y = c(0.733, 0.348, 0.348),
-  xmin = c(EX1, LXM + 0.03, RXM + 0.03),
-  xmax = c(EX2, LXM + 0.24, RXM + 0.24),
-  h = c(0.125, 0.060, 0.060),
-  label = c(
-    sprintf(paste0("Excluded: not independent\nintroductions  (− %d events)\n",
-                   "%d farm-to-farm transmission,\nby sequence and\nepidemiological investigation\n",
-                   "%d unsequenced, independence\nnot established"),
-            n_flagged, n_lateral, n_noseq),
-    sprintf("Excluded: no 90-day baseline\n(− %d cases)", lost("mn")),
-    sprintf("Excluded: no 90-day baseline\n(− %d cases)", lost("other"))))
+  x = (EX1 + EX2) / 2, y = 0.733, xmin = EX1, xmax = EX2, h = 0.150,
+  label = sprintf(paste0("Excluded: not independent\nintroductions  (− %d events)\n",
+                         "%d farm-to-farm transmission,\nby sequence and\nepidemiological investigation\n",
+                         "%d unsequenced, independence\nnot established"),
+                  n_flagged, n_lateral, n_noseq))
 
 # 2c. Arrows. Down the trunk, out to the split, and back together at the bottom.
-SPLIT <- 0.545; JOIN <- 0.145
+SPLIT <- 0.545; JOIN <- 0.200
 seg <- rbind(
   data.table(x = TXM, xend = TXM, y = trunk$y[1] - HB/2, yend = trunk$y[2] + HB/2),
   data.table(x = TXM, xend = TXM, y = trunk$y[2] - HB/2, yend = trunk$y[3] + HB/2),
   data.table(x = LXM, xend = LXM, y = SPLIT, yend = 0.455 + HB/2),
   data.table(x = RXM, xend = RXM, y = SPLIT, yend = 0.455 + HB/2),
-  data.table(x = LXM, xend = LXM, y = 0.455 - HB/2, yend = 0.240 + HB/2),
-  data.table(x = RXM, xend = RXM, y = 0.455 - HB/2, yend = 0.240 + HB/2),
-  data.table(x = LXM, xend = LXM, y = 0.240 - HB/2, yend = JOIN),
-  data.table(x = RXM, xend = RXM, y = 0.240 - HB/2, yend = JOIN))
+  data.table(x = LXM, xend = LXM, y = 0.455 - HB/2, yend = 0.290 + HB/2),
+  data.table(x = RXM, xend = RXM, y = 0.455 - HB/2, yend = 0.290 + HB/2),
+  data.table(x = LXM, xend = LXM, y = 0.290 - HB/2, yend = JOIN),
+  data.table(x = RXM, xend = RXM, y = 0.290 - HB/2, yend = JOIN))
 # the split and the rejoin are plain connectors, no arrowheads
 plain <- rbind(
   data.table(x = TXM, xend = TXM, y = trunk$y[3] - HB/2, yend = SPLIT),
@@ -147,8 +144,7 @@ plain <- rbind(
   data.table(x = LXM, xend = RXM, y = JOIN,  yend = JOIN))
 join <- data.table(x = TXM, xend = TXM, y = JOIN, yend = trunk$y[4] + HB/2)
 # short stubs from the trunk / branches into each exclusion box
-stub <- data.table(x = c(TXM, LXM, RXM), xend = c(EX1, LXM + 0.03, RXM + 0.03),
-                   y = c(0.733, 0.348, 0.348), yend = c(0.733, 0.348, 0.348))
+stub <- data.table(x = TXM, xend = EX1, y = 0.733, yend = 0.733)
 
 allbox <- rbind(trunk[, .(x, xmin, xmax, y, h, label)],
                 branch[, .(x, xmin, xmax, y, h, label)])
@@ -179,9 +175,9 @@ fp <- ggplot() +
 
 # 4a. Export. PDF through cairo_pdf, since the default pdf() device can't embed Avenir.
 ggsave_spark(file.path(figures_supplement_folder, "figureS1_flowchart.png"),
-             fp, width = 10.5, height = 8)
+             fp, width = 10.5, height = 7.2)
 ggsave(file.path(figures_supplement_folder, "figureS1_flowchart.pdf"),
-       fp, width = 10.5, height = 8, bg = "white", device = grDevices::cairo_pdf)
+       fp, width = 10.5, height = 7.2, bg = "white", device = grDevices::cairo_pdf)
 
 cat(sprintf("%d events -> minus %d flagged -> %d eligible -> MN %d / other %d cases\n",
             n_raw_events, n_flagged, n_elig_events, C("mn", "cases"), C("other", "cases")))

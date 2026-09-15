@@ -153,8 +153,8 @@ fig("figureS1_flowchart.png")
 
 - 218 confirmed detections → 42 removed as not independent introductions: 39 farm-to-farm (lateral)
   transmission by sequence and epidemiological investigation, 3 unsequenced → 176 eligible events →
-  175 case cell-days in 161 cells. The 2021 ERA5 warm-up removed the 90-day-baseline exclusion that previously
-  cost eight cases.
+  175 case cell-days in 161 cells. No case lacks a 90-day baseline since the 2021 ERA5 warm-up, so there is
+  no second exclusion step.
 
 ## Figure S2. Cumulative rate ratios — both parameterisations, all panels
 
